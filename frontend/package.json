@@ -1,0 +1,10 @@
+{
+  "name": "deskoverlay-frontend",
+  "version": "0.3.0",
+  "private": true,
+  "description": "DeskOverlay 桌面工作台前端 (Tauri WebView2 承载层)",
+  "scripts": {
+    "dev": "node serve.js",
+    "start": "node serve.js"
+  }
+}

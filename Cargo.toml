@@ -1,0 +1,10 @@
+[workspace]
+resolver = "2"
+members = ["src-tauri"]
+
+# 发布期优化：减小体积、剥离符号
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true
+panic = "abort"

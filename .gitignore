@@ -1,0 +1,24 @@
+# Rust 构建产物
+/target/
+**/*.rs.bk
+
+# Node
+node_modules/
+frontend/node_modules/
+
+# 日志
+check.log
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+Thumbs.db
+.DS_Store
+
+# WorkBuddy 工作记忆（私有，不入库）
+.workbuddy/

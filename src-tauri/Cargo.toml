@@ -1,0 +1,26 @@
+[package]
+name = "deskoverlay"
+version = "0.3.0"
+description = "DeskOverlay — Windows 桌面工作台 (Tauri + WebView2 承载层)"
+authors = ["DeskOverlay"]
+edition = "2021"
+rust-version = "1.77"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sysinfo = "0.32"
+# windows-core 作为直接依赖，便于使用其导出的 `w!` 宽字符串宏
+# （windows::core 系 windows_core 的别名，但 macro 经该别名导入不稳定）。
+windows-core = "0.61"
+
+# Win32 API（桌面注入 / 选择性穿透）。windows-rs 0.61 —— 版本必须与 Tauri 依赖的
+# windows 主版本一致，否则会出现两个 windows crate 共存、HWND 等类型跨版本不匹配。
+windows = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_UI_WindowsAndMessaging",
+] }

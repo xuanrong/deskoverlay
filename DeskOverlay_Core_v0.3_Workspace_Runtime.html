@@ -1,0 +1,577 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>DeskOverlay Core v0.3</title>
+
+<style>
+*{box-sizing:border-box}
+
+body{
+ margin:0;
+ overflow:hidden;
+ background:#080c12;
+ color:#e8edf2;
+ font-family:"Microsoft YaHei",Arial;
+}
+
+#toolbar{
+ position:fixed;
+ top:20px;
+ right:20px;
+ z-index:9999;
+ display:flex;
+ gap:10px;
+}
+
+button{
+ background:#238636;
+ border:0;
+ color:white;
+ padding:10px 15px;
+ border-radius:10px;
+ cursor:pointer;
+}
+
+button.secondary{
+ background:#30363d;
+}
+
+
+#workspace{
+ width:100vw;
+ height:100vh;
+ position:relative;
+}
+
+
+.panel{
+
+ position:absolute;
+
+ min-width:220px;
+ min-height:120px;
+
+ background:
+ rgba(22,27,34,.78);
+
+ border:
+ 1px solid rgba(255,255,255,.12);
+
+ border-radius:18px;
+
+ padding:18px;
+
+ backdrop-filter:blur(20px);
+
+ resize:both;
+
+ overflow:auto;
+
+ box-shadow:
+ 0 20px 50px rgba(0,0,0,.35);
+
+}
+
+
+.header{
+
+ display:flex;
+
+ justify-content:space-between;
+
+ cursor:move;
+
+ font-weight:bold;
+
+ margin-bottom:15px;
+
+ user-select:none;
+
+}
+
+
+.close{
+
+ cursor:pointer;
+
+ color:#ff7b72;
+
+}
+
+
+.locked .header{
+
+ cursor:default;
+
+}
+
+
+.item{
+
+ padding:10px 0;
+
+ border-bottom:
+ 1px solid rgba(255,255,255,.08);
+
+}
+
+
+.done{
+
+ text-decoration:line-through;
+
+ opacity:.5;
+
+}
+
+
+input,textarea{
+
+ width:100%;
+
+ background:#0d1117;
+
+ color:white;
+
+ border:1px solid #30363d;
+
+ border-radius:8px;
+
+ padding:8px;
+
+}
+
+.menu{
+
+position:fixed;
+
+left:50%;
+
+top:50%;
+
+transform:translate(-50%,-50%);
+
+background:#161b22;
+
+padding:30px;
+
+border-radius:20px;
+
+display:none;
+
+z-index:10000;
+
+}
+
+
+.menu div{
+
+padding:12px;
+
+cursor:pointer;
+
+}
+
+.menu div:hover{
+
+background:#30363d;
+
+}
+
+</style>
+
+</head>
+
+
+<body>
+
+
+<div id="toolbar">
+
+<button onclick="openAdd()">＋ 添加模块</button>
+
+<button class="secondary" onclick="toggleLock()" id="lockBtn">
+🔓 编辑模式
+</button>
+
+<button class="secondary" onclick="saveWorkspace()">
+保存布局
+</button>
+
+</div>
+
+
+<div id="workspace"></div>
+
+
+<div class="menu" id="moduleMenu">
+
+<h3>添加模块</h3>
+
+<div onclick="createPanel('todo')">✅ 今日待办</div>
+
+<div onclick="createPanel('note')">📝 快速速记</div>
+
+<div onclick="createPanel('reminder')">⏰ 提醒中心</div>
+
+<div onclick="createPanel('project')">💻 项目状态</div>
+
+<div onclick="createPanel('timer')">🍅 专注计时</div>
+
+</div>
+
+
+
+<script>
+
+
+let locked=false;
+
+
+let panels={};
+
+
+
+let defaultData=[
+
+{
+id:"todo",
+type:"todo",
+title:"今日待办",
+x:80,y:80,w:350,h:280
+},
+
+{
+id:"project",
+type:"project",
+title:"项目状态",
+x:500,y:80,w:350,h:240
+},
+
+{
+id:"reminder",
+type:"reminder",
+title:"提醒中心",
+x:900,y:80,w:300,h:240
+}
+
+];
+
+
+function openAdd(){
+
+document.getElementById("moduleMenu").style.display="block";
+
+}
+
+
+function closeMenu(){
+
+document.getElementById("moduleMenu").style.display="none";
+
+}
+
+
+
+function toggleLock(){
+
+locked=!locked;
+
+document.getElementById("lockBtn").innerHTML=
+locked?"🔒 工作模式":"🔓 编辑模式";
+
+
+document.querySelectorAll(".panel")
+.forEach(p=>{
+
+p.classList.toggle("locked",locked);
+
+});
+
+}
+
+
+
+function createPanel(type,data={}){
+
+
+let id=data.id||type+"_"+Date.now();
+
+
+let panel=document.createElement("div");
+
+panel.className="panel";
+
+
+panel.id=id;
+
+
+panel.style.left=(data.x||200)+"px";
+
+panel.style.top=(data.y||200)+"px";
+
+panel.style.width=(data.w||320)+"px";
+
+panel.style.height=(data.h||220)+"px";
+
+
+
+panel.innerHTML=`
+
+<div class="header">
+
+<span>${title(type)}</span>
+
+<span class="close">×</span>
+
+</div>
+
+<div class="content">
+
+${content(type)}
+
+</div>
+
+`;
+
+
+
+document.getElementById("workspace")
+.appendChild(panel);
+
+
+
+panels[id]=panel;
+
+
+
+bindPanel(panel);
+
+
+
+}
+
+
+
+function title(type){
+
+return {
+
+todo:"✅ 今日待办",
+
+note:"📝 快速速记",
+
+reminder:"⏰ 提醒中心",
+
+project:"💻 项目状态",
+
+timer:"🍅 专注计时"
+
+}[type];
+
+}
+
+
+
+function content(type){
+
+
+if(type==="todo")
+
+return `
+
+<input placeholder="添加任务">
+
+<div class="item">□ 修复登录Bug</div>
+
+<div class="item">□ 完成接口测试</div>
+
+`;
+
+
+
+if(type==="note")
+
+return `
+
+<textarea style="height:150px"
+
+placeholder="记录代码思路..."></textarea>
+
+`;
+
+
+
+if(type==="reminder")
+
+return `
+
+<div class="item">💧 喝水 11:30</div>
+
+<div class="item">📅 会议 14:00</div>
+
+<div class="item">🏢 打卡 18:30</div>
+
+`;
+
+
+
+if(type==="project")
+
+return `
+
+<div class="item">Git main ✓</div>
+
+<div class="item">Build Success</div>
+
+<div class="item">Server Running</div>
+
+`;
+
+
+
+if(type==="timer")
+
+return `
+
+<h2 id="timer">25:00</h2>
+
+<button onclick="alert('开始专注')">
+
+开始
+
+</button>
+
+`;
+
+}
+
+
+
+function bindPanel(panel){
+
+
+let header=panel.querySelector(".header");
+
+
+let close=panel.querySelector(".close");
+
+
+close.onclick=()=>{
+
+panel.remove();
+
+};
+
+
+
+let dragging=false;
+
+let ox,oy;
+
+
+header.onmousedown=e=>{
+
+if(locked)return;
+
+dragging=true;
+
+ox=e.clientX-panel.offsetLeft;
+
+oy=e.clientY-panel.offsetTop;
+
+};
+
+
+
+document.onmousemove=e=>{
+
+if(!dragging)return;
+
+
+panel.style.left=e.clientX-ox+"px";
+
+panel.style.top=e.clientY-oy+"px";
+
+
+};
+
+
+
+document.onmouseup=()=>{
+
+dragging=false;
+
+};
+
+
+}
+
+
+
+
+function saveWorkspace(){
+
+
+let data=[];
+
+
+document.querySelectorAll(".panel")
+.forEach(p=>{
+
+data.push({
+
+id:p.id,
+
+x:p.offsetLeft,
+
+y:p.offsetTop,
+
+w:p.offsetWidth,
+
+h:p.offsetHeight
+
+});
+
+});
+
+
+localStorage.setItem(
+
+"DeskOverlayWorkspace",
+
+JSON.stringify(data)
+
+);
+
+
+alert("布局已保存");
+
+}
+
+
+
+function load(){
+
+let data=
+
+JSON.parse(localStorage.getItem(
+"DeskOverlayWorkspace"
+));
+
+
+(data||defaultData)
+.forEach(x=>createPanel(x.type||x.id,x));
+
+
+}
+
+
+load();
+
+
+</script>
+
+</body>
+</html>
