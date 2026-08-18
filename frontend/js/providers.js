@@ -2,6 +2,7 @@
 // 数据流向: Provider → Event Bus(provider-emit) → Panel Renderer(按 config_hash 路由)。
 // 浏览器内系统指标用真实感随机游走模拟；Tauri 后端接入真实 sysinfo 后只需替换 emit 源。
 import { Bus } from "./bus.js";
+import { ICON_GLOBE } from "./icons.js";
 
 const timers = new Map();
 
@@ -67,10 +68,10 @@ function startClock() {
 
 // ---- 天气 Provider (模拟，含 5 日预报) ----
 const WX = [
-  { city: "上海", now: 21, cond: "多云", icon: "⛅", forecast: [
-    { d: "周一", t: "21°", i: "⛅" }, { d: "周二", t: "19°", i: "🌧" },
-    { d: "周三", t: "23°", i: "☀" }, { d: "周四", t: "20°", i: "⛅" },
-    { d: "周五", t: "18°", i: "🌧" } ] },
+  { city: "上海", now: 21, cond: "多云", icon: ICON_GLOBE, forecast: [
+    { d: "周一", t: "21°", i: ICON_GLOBE }, { d: "周二", t: "19°", i: ICON_GLOBE },
+    { d: "周三", t: "23°", i: ICON_GLOBE }, { d: "周四", t: "20°", i: ICON_GLOBE },
+    { d: "周五", t: "18°", i: ICON_GLOBE } ] },
 ];
 function startWeather() {
   const w = WX[0];
@@ -80,9 +81,14 @@ function startWeather() {
 
 const REGISTRY = { system: startSystem, clock: startClock, weather: startWeather };
 
+// Tauri 运行态：system 由 Rust sys_bridge 提供真实数据，前端跳过模拟，避免双源冲突。
+const SKIP_IN_TAURI = new Set(["system"]);
+const isTauri = typeof window !== "undefined" && window.__TAURI__;
+
 export const Providers = {
   start(hash) {
     if (timers.has(hash)) return;
+    if (isTauri && SKIP_IN_TAURI.has(hash)) return;
     const fn = REGISTRY[hash];
     if (fn) fn();
   },

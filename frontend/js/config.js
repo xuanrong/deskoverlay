@@ -1,65 +1,29 @@
-// 工作台配置 — 对齐文档 §7「配置与数据模型」。
-// panels 由数据描述(可拖拽/缩放/折叠/显隐均由配置驱动)，便于后续按反馈快速调整。
-// desktop 配置预留 hide_native_icons / monitor_strategy / self_heal 等字段(由 Rust 注入层消费)。
+// 模块定义 — 侧边导航 + 固定模块布局（无拖拽、无工作模式）。
+// 每个模块对应导航栏一项与主区域一个固定视图。
+// icon 为线性 SVG（stroke currentColor），导航/指令条统一渲染。
+import { ICON_HOME, ICON_ACTIVITY, ICON_MUSIC, ICON_NOTES, ICON_WATER, ICON_CALENDAR, ICON_BUILDING, ICON_CLOCK } from "./icons.js";
 
-export const DESKTOP_CONFIG = {
-  desktop: {
-    hide_native_icons: true,
-    monitor_strategy: "virtual",
-    self_heal: true,
-  },
-  // 默认面板布局(首次启动 / 重置时使用)
-  panels: [
-    { id: "dashboard", type: "dashboard", title: "今日概览", pro: true,
-      x: 40, y: 40, w: 300, h: 230, z: 10 },
-    { id: "system", type: "system", title: "系统监控", provider: "system",
-      x: 40, y: 300, w: 300, h: 268, z: 10 },
-    { id: "tasks", type: "tasks", title: "开发者任务",
-      x: 372, y: 40, w: 340, h: 528, z: 11 },
-    { id: "weather", type: "weather", title: "天气", provider: "weather",
-      x: 744, y: 40, w: 280, h: 200, z: 10 },
-    { id: "calendar", type: "calendar", title: "日历", provider: "clock",
-      x: 744, y: 268, w: 280, h: 300, z: 10 },
-    { id: "projects", type: "projects", title: "项目监控",
-      x: 1056, y: 40, w: 300, h: 220, z: 10 },
-    { id: "notes", type: "notes", title: "速记",
-      x: 1056, y: 288, w: 300, h: 280, z: 10 },
-  ],
-};
+export const MODULES = [
+  { id: "dashboard", title: "今日概览", icon: ICON_HOME },
+  { id: "system", title: "系统健康", icon: ICON_ACTIVITY },
+  { id: "music", title: "音乐", icon: ICON_MUSIC },
+  { id: "notes", title: "速记", icon: ICON_NOTES },
+];
 
-// 工作模式 — 上下文感知显隐(对齐文档 §5.2 / v2.0 工作模式)。
-// visible: 该模式下显示的面板 id；其余面板自动隐藏。
-export const MODES = {
-  coding: {
-    label: "Coding Mode",
-    desc: "专注开发",
-    dot: "var(--green)",
-    visible: ["dashboard", "system", "tasks", "projects", "notes"],
-  },
-  meeting: {
-    label: "Meeting Mode",
-    desc: "会议与记录",
-    dot: "var(--blue)",
-    visible: ["dashboard", "calendar", "notes", "weather"],
-  },
-  focus: {
-    label: "Focus Mode",
-    desc: "仅留当前任务",
-    dot: "var(--purple)",
-    visible: ["dashboard", "tasks"],
-  },
-  afterwork: {
-    label: "After Work Mode",
-    desc: "今日总结",
-    dot: "var(--gold-2)",
-    visible: ["dashboard", "tasks", "calendar", "weather"],
-  },
-};
-
-export const MODE_ORDER = ["coding", "meeting", "focus", "afterwork"];
-
-// 任务状态枚举(对齐 v2.0 开发者任务系统)
-export const TASK_STATUSES = ["coding", "testing", "review", "done"];
+// 待办状态枚举
+export const TASK_STATUSES = ["pending", "doing", "paused", "done"];
 export const STATUS_LABEL = {
-  coding: "Coding", testing: "Testing", review: "Review", done: "Done",
+  pending: "待开始", doing: "进行中", paused: "已暂停", done: "已完成",
 };
+
+// 优先级中文标签
+export const PRIORITY_LABEL = { P0: "紧急", P1: "高", P2: "中", P3: "低", P4: "较低" };
+
+// 默认提醒，可在时钟块配置弹窗中增删/启停/配置
+// type: "daily"（每日固定时刻触发） | "interval"（每 N 分钟滚动触发）
+// daily 用 time("HH:MM") + lastTriggeredDate（当日防重复）；interval 用 intervalMin + lastAt
+export const DEFAULT_REMINDERS = [
+  { id: "water", label: "喝水", icon: ICON_WATER, type: "interval", intervalMin: 90, enabled: true, lastAt: 0, time: "", lastTriggeredDate: "" },
+  { id: "plan", label: "每日计划", icon: ICON_CALENDAR, type: "daily", time: "09:30", enabled: false, lastTriggeredDate: "", intervalMin: 60, lastAt: 0 },
+  { id: "off", label: "下班打卡", icon: ICON_BUILDING, type: "daily", time: "18:00", enabled: false, lastTriggeredDate: "", intervalMin: 60, lastAt: 0 },
+];

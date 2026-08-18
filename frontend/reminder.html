@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>提醒</title>
+  <style>
+    html, body {
+      margin: 0; padding: 0;
+      width: 100%; height: 100%;
+      background: transparent;
+      overflow: hidden;
+      font-family: "Microsoft YaHei UI", "Segoe UI", sans-serif;
+      user-select: none;
+    }
+    #card {
+      position: absolute;
+      inset: 0;
+      margin: 8px;
+      display: flex; align-items: center; gap: 12px;
+      padding: 14px 18px;
+      border-radius: 14px;
+      background: rgba(14, 18, 26, 0.96);
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      backdrop-filter: blur(20px);
+      box-sizing: border-box;
+      opacity: 0;
+      transform: translateY(-8px);
+      transition: opacity 200ms ease, transform 200ms ease;
+    }
+    #card.show { opacity: 1; transform: translateY(0); }
+    #icon { font-size: 26px; flex: 0 0 auto; }
+    .rm-body { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1 1 auto; }
+    .rm-body b { font-size: 14px; color: #e6edf3; }
+    .rm-body span { font-size: 12.5px; color: #9aa7b4; line-height: 1.4; }
+    #ok {
+      background: #238636; border: 0; color: #fff;
+      padding: 7px 14px; border-radius: 8px; cursor: pointer;
+      font-size: 12px; font-family: inherit; flex: 0 0 auto;
+    }
+    #ok:hover { filter: brightness(1.12); }
+  </style>
+</head>
+<body>
+  <div id="card">
+    <span id="icon"></span>
+    <div class="rm-body">
+      <b id="title"></b>
+      <span id="msg"></span>
+    </div>
+    <button id="ok">知道了</button>
+  </div>
+  <script src="./js/reminder.js"></script>
+</body>
+</html>

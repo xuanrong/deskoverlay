@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "DeskOverlay 默认能力：前端可调用本应用自有命令与事件/窗口/Webview 默认权限。",
-  "windows": ["main"],
+  "windows": ["main", "reminder"],
   "permissions": [
     "core:default",
     "core:event:default",

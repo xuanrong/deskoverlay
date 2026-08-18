@@ -10,13 +10,33 @@
 //! 不实现点击穿透（用户已明确不需要）；窗口默认拦截点击，面板外点击由工作台处理。
 
 use std::ffi::c_void;
-use std::time::Duration;
 use windows::Win32::Foundation::*;
+use windows::Win32::Graphics::Gdi::{CreateRectRgn, SetWindowRgn};
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows_core::{w, BOOL, PCWSTR};
 
 const FALSE: BOOL = BOOL(0);
 const TRUE: BOOL = BOOL(1);
+
+// 手动声明 DwmSetWindowAttribute（绕过 windows-rs 包装，避免参数类型问题导致 E_INVALIDARG）。
+#[link(name = "dwmapi")]
+extern "system" {
+    fn DwmSetWindowAttribute(hwnd: *mut c_void, attribute: u32, pvattr: *const c_void, cbattr: u32) -> i32;
+}
+
+/// 设置窗口圆角偏好为直角：DWMWA_WINDOW_CORNER_PREFERENCE(33) = DWMWCP_DONOTROUND(1)。
+/// 返回 0 表示成功（S_OK）；Win10 不支持时返回错误码（窗口本就直角，可忽略）。
+fn set_rect_corners(hwnd: HWND) -> i32 {
+    let pref: u32 = 1; // DWMWCP_DONOTROUND
+    unsafe {
+        DwmSetWindowAttribute(
+            hwnd.0,
+            33, // DWMWA_WINDOW_CORNER_PREFERENCE
+            &pref as *const u32 as *const c_void,
+            std::mem::size_of::<u32>() as u32,
+        )
+    }
+}
 
 fn null_name() -> PCWSTR {
     PCWSTR(std::ptr::null::<u16>())
@@ -116,42 +136,84 @@ pub fn embed_in_desktop(hwnd: HWND) {
             return;
         }
 
-        // 样式：去 WS_POPUP、加 WS_CHILD
+        // 样式：去 WS_POPUP 与 WS_OVERLAPPEDWINDOW（顶层圆角来源），加 WS_CHILD
         let style = GetWindowLongPtrW(hwnd, GWL_STYLE);
-        SetWindowLongPtrW(hwnd, GWL_STYLE, style & !(WS_POPUP.0 as isize) | WS_CHILD.0 as isize);
+        SetWindowLongPtrW(
+            hwnd,
+            GWL_STYLE,
+            (style & !(WS_POPUP.0 as isize) & !(WS_OVERLAPPEDWINDOW.0 as isize))
+                | WS_CHILD.0 as isize
+                | WS_VISIBLE.0 as isize,
+        );
 
         // 扩展样式：WS_EX_TOOLWINDOW（脱离任务栏/Alt-Tab）。
-        // ⚠️ 不加 WS_EX_LAYERED：WS_CHILD + LAYERED 在桌面层级合成不可靠 → 不可见。
-        //    也不加 WS_EX_NOACTIVATE：工作台即桌面，点击激活无碍，且保证面板输入焦点正常。
         let ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
         SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex | WS_EX_TOOLWINDOW.0 as isize);
+
+        // 虚拟屏尺寸（子窗口覆盖范围）
+        let vw = GetSystemMetrics(SM_CXVIRTUALSCREEN);
+        let vh = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+
+        // 关键：在 SetParent 之前（窗口还是顶层时）先设置直角圆角偏好 + 矩形形状。
+        // DWM 合成层在窗口转为子窗口后可能缓存旧圆角，此时设置最可靠。
+        let corner0 = set_rect_corners(hwnd);
+        let mut rc0 = RECT::default();
+        let _ = GetWindowRect(hwnd, &mut rc0);
+        let rgn0 = CreateRectRgn(0, 0, rc0.right - rc0.left, rc0.bottom - rc0.top);
+        SetWindowRgn(hwnd, Some(rgn0), true);
+        let _ = SetWindowPos(
+            hwnd,
+            None,
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+        );
 
         match SetParent(hwnd, Some(target)) {
             Ok(old) => eprintln!("[deskoverlay] SetParent 成功，旧父句柄={:p}", old.0),
             Err(e) => eprintln!("[deskoverlay] SetParent 失败：{e}"),
         }
 
-        // 子窗口坐标相对父工作区 (0,0) + 虚拟屏宽高铺满；HWND_TOP 置于 DefView 之上盖住图标
-        let vw = GetSystemMetrics(SM_CXVIRTUALSCREEN);
-        let vh = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+        // 子窗口坐标相对父工作区；故意放大并偏移到屏幕外：
+        // DWM 圆角若残留在窗口四角，则落在屏幕外，屏幕内四角即为直角。
         let _ = SetWindowPos(
             hwnd,
             Some(HWND_TOP),
-            0,
-            0,
-            vw,
-            vh,
+            -2,
+            -2,
+            vw + 4,
+            vh + 4,
             SWP_NOACTIVATE | SWP_SHOWWINDOW,
         );
         // 触发重绘（SetParent 后 WebView2 可能需要刷新才渲染）
         let _ = ShowWindow(hwnd, SW_SHOW);
 
-        // 不隐藏 DefView：工作台以 HWND_TOP 置于 DefView 之上，直接盖住图标层。
-        // hide_native_icons();
-        // 暂不启用自愈看门狗：GetParent 与 SetParent 目标比较存在误判（疑似 GetParent
-        // 对该 WS_CHILD 返回 Err 或重定向父），每 2s 误触发重新挂回 → 窗口反复重置无法
-        // 稳定显示。Explorer 重启自愈后续以更可靠检测（IsWindow + 类名校验）重新实现。
-        // start_explorer_watcher(hwnd, target);
+        // 子窗口状态下再次设置直角 + 用窗口实际尺寸强制矩形区域。
+        let corner1 = set_rect_corners(hwnd);
+        let mut rc = RECT::default();
+        let _ = GetWindowRect(hwnd, &mut rc);
+        let rgn = CreateRectRgn(0, 0, rc.right - rc.left, rc.bottom - rc.top);
+        let rgn_res = SetWindowRgn(hwnd, Some(rgn), true);
+        let _ = SetWindowPos(
+            hwnd,
+            None,
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+        );
+        // 诊断：确认 WS_CHILD 生效 + SetWindowRgn 成功与否 + DWM 圆角偏好设置结果
+        let st_after = GetWindowLongPtrW(hwnd, GWL_STYLE);
+        eprintln!(
+            "[deskoverlay] 直角诊断：corner0={} corner1={} Rgn={} WS_CHILD={}",
+            corner0,
+            corner1,
+            rgn_res,
+            (st_after & WS_CHILD.0 as isize) != 0
+        );
 
         let mut rect = RECT::default();
         let _ = GetWindowRect(hwnd, &mut rect);
@@ -160,37 +222,6 @@ pub fn embed_in_desktop(hwnd: HWND) {
             rect.left, rect.top, rect.right, rect.bottom,
             rect.right - rect.left, rect.bottom - rect.top
         );
-    }
-}
-
-/// 隐藏 Explorer 桌面图标层（SHELLDLL_DefView）。当前未启用（改用 HWND_TOP 盖住）。
-#[allow(dead_code)]
-fn hide_native_icons() {
-    unsafe {
-        let mut def = HWND::default();
-        let _ = EnumWindows(
-            Some(find_defview_proc),
-            LPARAM((&mut def as *mut HWND) as isize),
-        );
-        if !def.is_invalid() {
-            let _ = ShowWindow(def, SW_HIDE);
-            eprintln!("[deskoverlay] 已隐藏原生图标层（SHELLDLL_DefView）");
-        } else {
-            eprintln!("[deskoverlay] 未找到 SHELLDLL_DefView（图标可能已隐藏）");
-        }
-    }
-}
-
-#[allow(dead_code)]
-extern "system" fn find_defview_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
-    unsafe {
-        let def = find_defview_recursive(hwnd);
-        if !def.is_invalid() {
-            let ptr = lparam.0 as *mut HWND;
-            *ptr = def;
-            return FALSE;
-        }
-        TRUE
     }
 }
 
@@ -204,7 +235,7 @@ pub fn start_explorer_watcher(hwnd: HWND, initial_target: HWND) {
         let hwnd = HWND(hwnd_raw as *mut c_void);
         let mut last_target = HWND(target_raw as *mut c_void);
         loop {
-            std::thread::sleep(Duration::from_secs(2));
+            std::thread::sleep(std::time::Duration::from_secs(2));
             unsafe {
                 if hwnd.is_invalid() {
                     break;

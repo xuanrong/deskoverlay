@@ -1,5 +1,7 @@
 // 快速指令条 — 对齐文档 §8.4 Spotlight 风格，目标响应 <300ms。
 // 支持: 切换工作模式 / 新增面板 / 添加任务 / 启动应用 / 搜索。
+import { ICON_CHECK } from "./icons.js";
+
 export const CommandBar = {
   init({ barEl, inputEl, resultsEl, commands, onClose }) {
     this.barEl = barEl;
@@ -63,7 +65,7 @@ export const CommandBar = {
     const extra = [];
     if (taskMatch) {
       extra.push({
-        icon: "✅", title: `添加任务：${taskMatch}`,
+        icon: ICON_CHECK, title: `添加任务：${taskMatch}`,
         sub: "回车创建到开发者任务面板", keywords: "task add 任务",
         run: () => this.commands.find((c) => c.id === "add-task")?.run(taskMatch),
       });

@@ -10,8 +10,29 @@
   <!-- 全屏覆盖背景：工作台的真实画布背景（不穿透，盖住桌面） -->
   <div id="desktop-backdrop"></div>
 
-  <!-- 工作台画布：承载所有面板；普通全屏窗口，面板外点击由窗口自身处理 -->
-  <div id="workspace" aria-label="DeskOverlay 工作台"></div>
+  <!-- 应用主体：侧边导航 + 主区域 -->
+  <div id="app">
+    <aside id="nav">
+      <div class="nav-brand">
+        <span class="nav-brand-icon"><svg viewBox="0 0 24 24" width="20" height="20"><path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z" fill="#d4af37"/></svg></span>
+        <span class="nav-brand-text">DeskOverlay</span>
+      </div>
+      <nav id="nav-list" aria-label="模块导航"></nav>
+      <div class="nav-foot">
+        <button class="nav-btn nav-quit" id="nav-quit" title="退出应用"><svg viewBox="0 0 24 24"><path d="M12 3v9"/><path d="M6.3 6.3a8 8 0 1 0 11.4 0"/></svg><span>退出</span></button>
+      </div>
+    </aside>
+    <main id="main" aria-label="模块内容">
+      <div class="main-clock" id="main-clock">
+        <div class="mc-left">
+          <div class="mc-time" id="mc-time">--:--:--</div>
+          <div class="mc-date" id="mc-date"></div>
+        </div>
+        <div class="mc-reminders" id="mc-reminders"></div>
+      </div>
+      <div id="view-container"></div>
+    </main>
+  </div>
 
   <!-- 快速指令条 (Spotlight 风格) -->
   <div id="command-bar" class="command-bar" hidden>
@@ -25,30 +46,17 @@
     <ul id="cb-results" class="cb-results"></ul>
   </div>
 
-  <!-- 模式指示徽标 -->
-  <div id="mode-badge" class="mode-badge" title="当前工作模式"></div>
-
-  <!-- 右下角工具簇 -->
-  <div id="dock" class="dock">
-    <button class="dock-btn" id="dock-cmd" title="快速指令 (Ctrl/Cmd+Space)">⌘</button>
-    <button class="dock-btn" id="dock-add" title="新增面板">＋</button>
-    <button class="dock-btn" id="dock-reset" title="重置布局">⟳</button>
-    <button class="dock-btn" id="dock-help" title="快捷键">?</button>
-  </div>
-
   <!-- 帮助层 -->
   <div id="help-overlay" class="help-overlay" hidden>
     <div class="help-card">
       <h2>DeskOverlay 工作台</h2>
-      <p class="help-sub">桌面即工作台 · 全屏覆盖，面板外点击由工作台处理</p>
+      <p class="help-sub">侧边导航切换模块 · 全屏固定布局</p>
       <ul class="help-list">
         <li><kbd>Ctrl</kbd>/<kbd>Cmd</kbd> + <kbd>Space</kbd> — 唤起快速指令条</li>
-        <li><kbd>Esc</kbd> — 关闭指令条 / 帮助层；无任何覆盖层时退出应用</li>
-        <li>拖动面板<strong>标题栏</strong>移动；拖到边缘自动吸附</li>
-        <li>面板右下角拖拽<strong>缩放</strong>；标题栏 <strong>－</strong> 折叠为标题栏</li>
-        <li>标题栏 <strong>🔒</strong> 锁定（禁止拖动/缩放）；<strong>✕</strong> 关闭</li>
+        <li>点击左侧导航栏图标切换模块</li>
+        <li><kbd>Esc</kbd> — 关闭指令条 / 帮助层；无覆盖层时退出应用</li>
       </ul>
-      <p class="help-foot">数据本地持久化于浏览器 · 刷新后自动恢复布局</p>
+      <p class="help-foot">数据本地持久化 · 刷新后自动恢复</p>
       <button id="help-close" class="btn-primary">知道了</button>
     </div>
   </div>

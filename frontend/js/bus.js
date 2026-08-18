@@ -39,10 +39,13 @@ export async function invoke(command, args = {}) {
   return Promise.resolve();
 }
 
-// 将 Rust 经 Tauri 事件系统推送的 provider-emit 桥接进 Bus，
-// 使前端面板渲染器（panels.js）无需区分运行环境即可消费真实数据。
+// 将 Rust 经 Tauri 事件系统推送的 provider-emit / im-notify 桥接进 Bus，
+// 使前端渲染器与 IM 角标无需区分运行环境即可消费真实数据。
 if (TAURI && TAURI.event && typeof TAURI.event.listen === "function") {
   TAURI.event
     .listen("provider-emit", (e) => Bus.emit("provider-emit", e.payload))
     .catch((err) => console.warn("[bridge] provider-emit 监听失败：", err));
+  TAURI.event
+    .listen("im-notify", (e) => Bus.emit("im-notify", e.payload))
+    .catch((err) => console.warn("[bridge] im-notify 监听失败：", err));
 }

@@ -23,6 +23,20 @@
         "shadow": false,
         "visible": false,
         "alwaysOnTop": false
+      },
+      {
+        "label": "reminder",
+        "title": "提醒",
+        "url": "reminder.html",
+        "width": 380,
+        "height": 150,
+        "decorations": false,
+        "transparent": true,
+        "resizable": false,
+        "shadow": false,
+        "visible": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true
       }
     ],
     "security": {

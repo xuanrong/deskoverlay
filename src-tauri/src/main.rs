@@ -1,23 +1,271 @@
 //! DeskOverlay 入口编排。
 //!
 //! 运行模式：嵌入 Explorer 桌面 WorkerW，使工作台成为「桌面本身」。
-//! - Win+D 回到工作台（桌面级窗口，不被最小化）；
-//! - 全屏覆盖虚拟屏，任务栏 z-order 高于 WorkerW → 任务栏自然可见；
-//! - 不实现点击穿透（用户已明确不需要），面板外点击由窗口处理；
-//! - Explorer 重启自愈（2s 轮询重新挂回）。
+//! - Win+D 回到工作台；任务栏 z-order 高于 WorkerW → 任务栏可见；
+//! - 不实现点击穿透；Explorer 重启自愈（后续用可靠检测重新实现）。
 //!
-//! setup 仅启动系统 Provider 数据桥（CPU + 内存 → provider-emit），
-//! 并注册前端可调用的命令：quit_app（退出应用，避免无边框下无法关闭）。
+//! 持久化：state.json 写入 app_data_dir（跨 WebView 重装不丢失）。
+//! 前端经 load_state / save_state 命令读写，不再用 localStorage。
 
 mod desktop_inject;
 mod sys_bridge;
 
-use tauri::Manager;
+use std::fs;
+use std::io::Read;
+use std::path::PathBuf;
+use tauri::{Emitter, Manager};
+use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CXSCREEN};
 
-/// 退出应用。无边框窗口无系统关闭按钮，需此命令供前端 Esc 调用。
+/// 退出应用。
 #[tauri::command]
 fn quit_app(app: tauri::AppHandle) {
     app.exit(0);
+}
+
+/// 前端调试日志 → 转发到终端（排查歌词等前端问题）。
+#[tauri::command]
+fn log_msg(msg: String) {
+    eprintln!("[deskoverlay:frontend] {}", msg);
+}
+
+/// 显示置顶提醒窗口（系统级：盖住浏览器等其他应用）。
+/// Rust 端负责定位到主屏右上角、置顶并显示，再向 reminder 窗口推送内容。
+#[tauri::command]
+fn show_reminder(app: tauri::AppHandle, icon: String, title: String, message: String) {
+    if let Some(win) = app.get_webview_window("reminder") {
+        // 主屏右上角（预留 24px 边距）
+        let size = win.outer_size().unwrap_or(tauri::PhysicalSize::new(380, 150));
+        let screen_w = unsafe { GetSystemMetrics(SM_CXSCREEN) };
+        let x = screen_w - size.width as i32 - 24;
+        let _ = win.set_position(tauri::PhysicalPosition::new(x, 16));
+        let _ = win.set_always_on_top(true);
+        let _ = win.show();
+        let _ = win.emit(
+            "show-reminder",
+            serde_json::json!({ "icon": icon, "title": title, "message": message }),
+        );
+    }
+}
+
+/// 隐藏置顶提醒窗口（reminder 页点"知道了"或 8s 超时后调用）。
+#[tauri::command]
+fn hide_reminder(app: tauri::AppHandle) {
+    if let Some(win) = app.get_webview_window("reminder") {
+        let _ = win.hide();
+    }
+}
+
+/// 构建请求：注入默认 UA + 可选自定义 headers。
+fn build_headers(req: ureq::Request, headers: &Option<serde_json::Value>) -> ureq::Request {
+    let mut r = req.set(
+        "User-Agent",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) DeskOverlay/0.3.0",
+    );
+    if let Some(h) = headers.as_ref().and_then(|v| v.as_object()) {
+        for (k, v) in h {
+            if let Some(s) = v.as_str() {
+                r = r.set(k, s);
+            }
+        }
+    }
+    r
+}
+
+/// HTTP GET 代理：绕过 WebView 跨域限制，供音乐音源插件请求第三方接口。
+/// headers 为可选 JSON 对象（键值均为字符串）。
+#[tauri::command]
+fn http_get(url: String, headers: Option<serde_json::Value>) -> Result<String, String> {
+    let u = url.trim();
+    if !(u.starts_with("http://") || u.starts_with("https://")) {
+        return Err("仅支持 http/https 地址".to_string());
+    }
+    let resp = build_headers(ureq::get(u), &headers)
+        .timeout(std::time::Duration::from_secs(15))
+        .call()
+        .map_err(|e| e.to_string())?;
+    let mut body = String::new();
+    resp.into_reader()
+        .take(5 * 1024 * 1024)
+        .read_to_string(&mut body)
+        .map_err(|e| e.to_string())?;
+    Ok(body)
+}
+
+/// HTTP POST 代理：同 http_get，支持发送请求体（JSON/表单字符串）。
+#[tauri::command]
+fn http_post(url: String, body: String, headers: Option<serde_json::Value>) -> Result<String, String> {
+    let u = url.trim();
+    if !(u.starts_with("http://") || u.starts_with("https://")) {
+        return Err("仅支持 http/https 地址".to_string());
+    }
+    let resp = build_headers(ureq::post(u), &headers)
+        .timeout(std::time::Duration::from_secs(15))
+        .send_string(&body)
+        .map_err(|e| e.to_string())?;
+    let mut out = String::new();
+    resp.into_reader()
+        .take(5 * 1024 * 1024)
+        .read_to_string(&mut out)
+        .map_err(|e| e.to_string())?;
+    Ok(out)
+}
+
+/// 读取 JSON 文件为 Value。
+fn read_json(file: &std::path::Path) -> Result<serde_json::Value, String> {
+    let data = fs::read_to_string(file).map_err(|e| e.to_string())?;
+    serde_json::from_str(&data).map_err(|e| e.to_string())
+}
+
+/// 读取持久化状态。
+/// state.json 存业务数据；musicSources（音源插件脚本，大字段）独立存 sources.json。
+/// 老数据迁移：state.json 中残留的 musicSources 会保留返回，下次保存自动分流到 sources.json。
+#[tauri::command]
+fn load_state(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let file = dir.join("state.json");
+    let mut state = if !file.exists() {
+        serde_json::json!({
+            "currentModule": "dashboard",
+            "tasks": [],
+            "notes": ""
+        })
+    } else {
+        read_json(&file)?
+    };
+    // 音源独立文件（存在则覆盖合并）
+    let sources_file = dir.join("sources.json");
+    if sources_file.exists() {
+        if let Ok(sv) = read_json(&sources_file) {
+            state["musicSources"] = sv;
+        }
+    }
+    Ok(state)
+}
+
+/// 写入持久化状态：musicSources 分流到 sources.json，其余写 state.json。
+#[tauri::command]
+fn save_state(app: tauri::AppHandle, state: serde_json::Value) -> Result<(), String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+
+    let mut state = state;
+    let sources = if let Some(obj) = state.as_object_mut() {
+        obj.remove("musicSources")
+    } else {
+        None
+    };
+
+    // 业务数据
+    let file = dir.join("state.json");
+    let data = serde_json::to_string_pretty(&state).map_err(|e| e.to_string())?;
+    fs::write(&file, data).map_err(|e| e.to_string())?;
+
+    // 音源脚本（大字段独立文件，避免每次全量重写）
+    let sources_file = dir.join("sources.json");
+    let sdata = serde_json::to_string_pretty(&sources.unwrap_or_else(|| serde_json::json!([])))
+        .map_err(|e| e.to_string())?;
+    fs::write(&sources_file, sdata).map_err(|e| e.to_string())
+}
+
+/// 桌面文件项。
+#[derive(serde::Serialize)]
+struct DesktopFile {
+    name: String,
+    ext: String,
+    is_dir: bool,
+}
+
+/// 用户桌面目录。
+fn desktop_dir() -> Result<PathBuf, String> {
+    let home = std::env::var("USERPROFILE").map_err(|_| "无法获取 USERPROFILE".to_string())?;
+    Ok(PathBuf::from(home).join("Desktop"))
+}
+
+/// 列出用户桌面目录的文件（按类型分类供前端整理展示）。
+#[tauri::command]
+fn list_desktop_files() -> Result<Vec<DesktopFile>, String> {
+    let desktop = desktop_dir()?;
+    if !desktop.exists() {
+        return Ok(vec![]);
+    }
+    let mut files = vec![];
+    for entry in fs::read_dir(&desktop).map_err(|e| e.to_string())? {
+        let Ok(entry) = entry else { continue };
+        let name = entry.file_name().to_string_lossy().to_string();
+        // 跳过隐藏文件与系统配置
+        if name.starts_with('.') || name.eq_ignore_ascii_case("desktop.ini") {
+            continue;
+        }
+        let path = entry.path();
+        let is_dir = path.is_dir();
+        let ext = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|s| s.to_lowercase())
+            .unwrap_or_default();
+        files.push(DesktopFile { name, ext, is_dir });
+    }
+    Ok(files)
+}
+
+/// 用默认程序打开文件。
+#[tauri::command]
+fn open_file(name: String) -> Result<(), String> {
+    let path = desktop_dir()?.join(&name);
+    std::process::Command::new("cmd")
+        .args(["/C", "start", "", &path.to_string_lossy()])
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// 在资源管理器中定位文件。
+#[tauri::command]
+fn reveal_file(name: String) -> Result<(), String> {
+    let path = desktop_dir()?.join(&name);
+    std::process::Command::new("explorer.exe")
+        .args(["/select,", &path.to_string_lossy()])
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// 删除文件到回收站（经 PowerShell VisualBasic API，保证进回收站可恢复）。
+#[tauri::command]
+fn delete_file(name: String) -> Result<(), String> {
+    let path = desktop_dir()?.join(&name);
+    if !path.exists() {
+        return Err("文件不存在".to_string());
+    }
+    let path_str = path.to_string_lossy().replace('\'', "''");
+    let method = if path.is_dir() { "DeleteDirectory" } else { "DeleteFile" };
+    let script = format!(
+        "Add-Type -AssemblyName Microsoft.VisualBasic; [Microsoft.VisualBasic.FileIO.FileSystem]::{}('{}','OnlyErrorDialogs','SendToRecycleBin')",
+        method, path_str
+    );
+    let status = std::process::Command::new("powershell")
+        .args(["-NoProfile", "-Command", &script])
+        .status()
+        .map_err(|e| e.to_string())?;
+    if !status.success() {
+        return Err("删除失败".to_string());
+    }
+    Ok(())
+}
+
+/// 重命名文件。
+#[tauri::command]
+fn rename_file(name: String, new_name: String) -> Result<(), String> {
+    let dir = desktop_dir()?;
+    let from = dir.join(&name);
+    let to = dir.join(&new_name);
+    if !from.exists() {
+        return Err("原文件不存在".to_string());
+    }
+    if to.exists() {
+        return Err("目标名称已存在".to_string());
+    }
+    fs::rename(&from, &to).map_err(|e| e.to_string())
 }
 
 fn main() {
@@ -35,7 +283,7 @@ fn main() {
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![quit_app])
+        .invoke_handler(tauri::generate_handler![quit_app, log_msg, show_reminder, hide_reminder, http_get, http_post, load_state, save_state, list_desktop_files, open_file, reveal_file, delete_file, rename_file])
         .run(tauri::generate_context!())
         .expect("DeskOverlay 运行失败");
 }
