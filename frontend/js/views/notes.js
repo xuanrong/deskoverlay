@@ -2,7 +2,7 @@
 import { state, saveState } from "../state.js";
 
 export function renderNotes(view) {
-  view.header.innerHTML = `<div class="view-title">速记</div><div class="view-sub">随手记录 · 自动保存</div>`;
+  view.header.style.display = "none";
   const body = view.body;
   body.innerHTML = `
     <textarea class="notes-area" id="n-area" placeholder="随手记录灵感、会议纪要…"></textarea>

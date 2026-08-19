@@ -11,7 +11,7 @@ const TILE_BG = {
 
 export function render2048(el) {
   el.innerHTML = `
-    <div class="t2048-wrap">
+    <div class="t2048-wrap" tabindex="0" id="t2048-wrap">
       <div class="t2048-head">
         <span class="t2048-title">2048</span>
         <span class="t2048-score">分数 <b id="t2048-score">0</b></span>
@@ -31,6 +31,7 @@ export function render2048(el) {
     </div>`;
 
   const boardEl = el.querySelector("#t2048-board");
+  const wrapEl = el.querySelector("#t2048-wrap");
   const scoreEl = el.querySelector("#t2048-score");
   const bestEl = el.querySelector("#t2048-best");
   const msgEl = el.querySelector("#t2048-msg");
@@ -124,18 +125,30 @@ export function render2048(el) {
     msgEl.textContent = ""; msgEl.classList.remove("ok");
     spawn(); spawn();
     render();
+    wrapEl.focus();
   });
 
   el.querySelectorAll(".t2048-pad .sdk-num").forEach((b) => {
-    b.addEventListener("click", () => { if (!over) move(b.dataset.dir); });
+    b.addEventListener("click", () => {
+      if (!over) move(b.dataset.dir);
+      wrapEl.focus();
+    });
   });
-  el.addEventListener("keydown", (e) => {
-    const map = { ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up", ArrowDown: "down" };
-    const dir = map[e.key];
+
+  // 键盘控制：方向键 + WASD，容器可聚焦，进入即生效
+  const KEY_MAP = {
+    ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up", ArrowDown: "down",
+    a: "left", d: "right", w: "up", s: "down",
+    A: "left", D: "right", W: "up", S: "down",
+  };
+  wrapEl.addEventListener("keydown", (e) => {
+    const dir = KEY_MAP[e.key];
     if (dir) { e.preventDefault(); if (!over) move(dir); }
   });
+  wrapEl.addEventListener("click", () => wrapEl.focus());
 
   grid = Array(16).fill(0);
   spawn(); spawn();
   render();
+  wrapEl.focus();
 }

@@ -66,9 +66,6 @@ fn last_input_idle_ms() -> Option<u64> {
     Some(idle as u64)
 }
 
-/// 拉伸/起身图标（线性 SVG，currentColor），用于提醒弹卡。
-const STRETCH_ICON: &str = r#"<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="4.5" r="2"/><path d="M12 7.5v4"/><path d="M8.5 9.5 12 7.5l3.5 2"/><path d="M12 11.5 8.5 16"/><path d="M12 11.5 15.5 15"/></svg>"#;
-
 /// 启动久坐监控线程（在 app setup 阶段调用一次）。
 ///
 /// 每秒采样空闲时长：空闲 < 重置阈值则累加 1s（视为连续使用）；否则视为离开/休息，
@@ -109,7 +106,7 @@ pub fn start_sedentary_monitor(app: AppHandle, state: SedentaryState) {
                     "你已连续使用电脑约 {} 分钟，起身活动一下、远眺放松吧。",
                     interval_min
                 );
-                crate::present_reminder(&app, STRETCH_ICON, "久坐提醒", &msg);
+                crate::present_reminder(&app, "", "久坐提醒", &msg);
             }
         }
     });

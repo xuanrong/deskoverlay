@@ -11,9 +11,27 @@ const GAMES = [
   { id: "minesweeper", title: "扫雷", desc: "9×9 十雷，左键翻开右键标旗", render: renderMinesweeper },
 ];
 
+let cachedContent = null; // 保存游戏 DOM，切换视图时不丢失进度
+
 export function renderRelax(view) {
-  view.header.innerHTML = `<div class="view-title">休息一下</div><div class="view-sub">小游戏 · 放松片刻再继续</div>`;
+  view.header.style.display = "none";
   const body = view.body;
+
+  // 有缓存时直接恢复，避免游戏进度丢失
+  if (cachedContent) {
+    body.innerHTML = "";
+    body.appendChild(cachedContent);
+    const active = cachedContent.querySelector(".relax-game.active");
+    // 恢复后可聚焦的游戏容器（如 2048 支持键盘）
+    const gameFocus = cachedContent.querySelector("[tabindex='0']");
+    if (active && active.dataset.id === "g2048" && gameFocus) gameFocus.focus();
+    view.onDestroy(() => {
+      cachedContent = body.querySelector(".relax-view");
+      cachedContent.remove();
+    });
+    return;
+  }
+
   body.innerHTML = `
     <div class="relax-view">
       <div class="relax-side" id="relax-side"></div>
@@ -42,6 +60,12 @@ export function renderRelax(view) {
     mainEl.innerHTML = "";
     current.render(mainEl);
   }
+
+  // 切换视图时保存 DOM，避免重新创建导致游戏进度丢失
+  view.onDestroy(() => {
+    cachedContent = body.querySelector(".relax-view");
+    cachedContent.remove();
+  });
 
   renderSide();
   renderMain();

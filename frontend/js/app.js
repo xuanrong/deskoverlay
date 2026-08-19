@@ -14,14 +14,27 @@ import { ICON_CHECK, ICON_EXTERNAL } from "./icons.js";
 
 // -------------------- 视图包装 --------------------
 class View {
-  constructor(root) {
+  constructor(root, moduleId) {
     root.innerHTML = `<div class="view"><div class="view-header"></div><div class="view-body"></div></div>`;
+    this.moduleId = moduleId;
     this.header = root.querySelector(".view-header");
     this.body = root.querySelector(".view-body");
     this._destroyers = [];
   }
   onDestroy(fn) { this._destroyers.push(fn); }
+  // 记录当前滚动位置到导航状态（切换/重启后恢复）
+  saveScroll() {
+    if (!state.navState) state.navState = {};
+    if (!state.navState[this.moduleId]) state.navState[this.moduleId] = {};
+    state.navState[this.moduleId].scrollTop = this.body.scrollTop || 0;
+  }
+  // 恢复上次滚动位置（视图内容渲染完成后调用）
+  restoreScroll() {
+    const st = state.navState?.[this.moduleId]?.scrollTop;
+    if (typeof st === "number" && st > 0) this.body.scrollTop = st;
+  }
   destroy() {
+    this.saveScroll();
     this._destroyers.forEach((f) => { try { f(); } catch (e) {} });
     this._destroyers = [];
   }
@@ -51,8 +64,10 @@ function switchModule(id) {
     el.classList.toggle("active", el.dataset.module === id);
   });
   if (currentView) currentView.destroy();
-  currentView = new View(viewContainer);
+  currentView = new View(viewContainer, id);
   VIEW_RENDERERS[id](currentView);
+  // 内容渲染完成后恢复该模块上次的滚动位置（异步渲染的视图也能生效）
+  requestAnimationFrame(() => currentView?.restoreScroll());
 }
 
 // -------------------- 快速指令条 --------------------
@@ -175,12 +190,6 @@ loadState().then(() => {
 
   // 提醒：渲染时钟块倒计时 + 每秒检查
   initReminders();
-
-  // 首次访问展示帮助
-  if (!localStorage.getItem("deskoverlay.seen-help")) {
-    document.getElementById("help-overlay").hidden = false;
-    localStorage.setItem("deskoverlay.seen-help", "1");
-  }
 
   console.log("[DeskOverlay] 工作台已就绪 · 模块:", state.currentModule);
 });

@@ -9,6 +9,28 @@
 use std::time::{Duration, Instant};
 use sysinfo::{CpuRefreshKind, Disks, Networks, System};
 use tauri::{AppHandle, Emitter};
+use windows::Win32::System::Power::SYSTEM_POWER_STATUS;
+use windows::Win32::System::Power::GetSystemPowerStatus;
+
+/// 读取真实电源状态，返回 (电池百分比, 电源标签)。
+/// 电源标签：AC（插电）/ BATTERY（使用电池）/ CHARGING（充电中）。
+/// 桌面台式机无电池时返回 (0, "AC")。
+fn power_status() -> (u8, String) {
+    let mut sps: SYSTEM_POWER_STATUS = unsafe { std::mem::zeroed() };
+    let ok = unsafe { GetSystemPowerStatus(&mut sps) }.is_ok();
+    if !ok {
+        return (0, "AC".to_string());
+    }
+    // ACLineStatus：0=使用电池，1=插电，255=未知
+    // BatteryFlag：8 位值为充电中（0x08），128=无电池，255=未知；LifePercent 255=未知
+    let pct = if sps.BatteryLifePercent == 255 { 0 } else { sps.BatteryLifePercent };
+    let power = if sps.ACLineStatus == 0 {
+        if sps.BatteryFlag & 0x08 != 0 { "CHARGING".to_string() } else { "BATTERY".to_string() }
+    } else {
+        "AC".to_string()
+    };
+    (pct, power)
+}
 
 /// 启动系统指标 Provider 线程：每秒采集 CPU / 内存 / 网络速率 / 磁盘并 emit 事件。
 pub fn start_system_provider(app: AppHandle) {
@@ -34,10 +56,16 @@ pub fn start_system_provider(app: AppHandle) {
             let ram_total_gb = total / 1024.0 / 1024.0 / 1024.0;
             let ram_used_gb = used / 1024.0 / 1024.0 / 1024.0;
 
-            // 系统信息：CPU 型号 / 物理核心数 / 运行时间（秒）
+            // 系统信息：CPU 型号 / 物理核心数 / 逻辑核数 / 运行时间（秒）
             let cpu_name = sys.cpus().first().map(|c| c.brand().to_string()).unwrap_or_default();
-            let cpu_cores = sys.physical_core_count().unwrap_or(0) as u32;
+            let physical_cores = sys.physical_core_count().unwrap_or(0) as u32;
+            let logical_cores = sys.cpus().len() as u32;
             let uptime = System::uptime();
+            let os_name = System::name().unwrap_or_default();
+            let os_version = System::long_os_version().unwrap_or_default();
+            let host_name = System::host_name().unwrap_or_default();
+
+            let (batt_pct, power) = power_status();
 
             // 网络速率（byte/s）：累计收发字节的两次采样差值 / 间隔
             let mut rx: u64 = 0;
@@ -82,14 +110,18 @@ pub fn start_system_provider(app: AppHandle) {
                         "ram": ram_pct,
                         "ramUsedGb": ram_used_gb,
                         "ramTotalGb": ram_total_gb,
-                        // 网络速率 byte/s；电池占位（需 battery feature，后续扩展）
+                        // 网络速率 byte/s；电池/电源来自真实读取
                         "netUp": net_up,
                         "netDown": net_down,
-                        "battery": 0,
-                        "power": "AC",
-                        // 系统健康页：CPU 型号 / 物理核心数 / 开机时长（秒）/ 磁盘列表
+                        "battery": batt_pct,
+                        "power": power,
+                        // 系统健康页：CPU 型号 / 物理核心数 / 逻辑核数 / 开机时长（秒）/ 磁盘列表
                         "cpuName": cpu_name,
-                        "cpuCores": cpu_cores,
+                        "cpuCores": physical_cores,
+                        "logicalCores": logical_cores,
+                        "osName": os_name,
+                        "osVersion": os_version,
+                        "hostName": host_name,
                         "uptime": uptime,
                         "disks": disks_arr
                     }

@@ -35,7 +35,18 @@ function startSystem() {
       netUp: +netUp.toFixed(2),
       netDown: +netDown.toFixed(2),
       battery: +battery.toFixed(0),
-      power: battery > 95 ? "AC" : "Battery",
+      power: battery > 95 ? "AC" : "BATTERY",
+      cpuName: "AMD Ryzen 7 模拟",
+      cpuCores: 8,
+      logicalCores: 16,
+      osName: "Windows 11",
+      osVersion: "Windows 11 Pro (Build 22631)",
+      hostName: "DEV-PC",
+      uptime: 4 * 86400 + 8 * 3600,
+      disks: [
+        { name: "C", mount: "C:", totalGb: 512, usedGb: 287, pct: 56 },
+        { name: "D", mount: "D:", totalGb: 1024, usedGb: 361, pct: 35 },
+      ],
     });
   };
   tick();

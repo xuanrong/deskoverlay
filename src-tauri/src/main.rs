@@ -21,9 +21,21 @@ use tauri::{Emitter, Manager};
 use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CXSCREEN};
 
 /// 退出应用。
+/// 先销毁所有 WebView 窗口，避免 Chromium 在进程退出注销
+/// Chrome_WidgetWin_0 窗口类时仍有存活 HWND（如隐藏的 reminder 窗口），
+/// 从而消除 "Failed to unregister class Chrome_WidgetWin_0. Error = 1412" 日志。
+/// 销毁是异步的，延迟 200ms 再真正退出，确保 HWND 已被回收。
 #[tauri::command]
 fn quit_app(app: tauri::AppHandle) {
-    app.exit(0);
+    for label in ["main", "reminder"] {
+        if let Some(win) = app.get_webview_window(label) {
+            let _ = win.destroy();
+        }
+    }
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        app.exit(0);
+    });
 }
 
 /// 显示置顶提醒窗口（系统级：盖住浏览器等其他应用）。
@@ -121,8 +133,9 @@ fn read_json(file: &std::path::Path) -> Result<serde_json::Value, String> {
 }
 
 /// 读取持久化状态。
-/// state.json 存业务数据；musicSources（音源插件脚本，大字段）独立存 sources.json。
-/// 老数据迁移：state.json 中残留的 musicSources 会保留返回，下次保存自动分流到 sources.json。
+/// state.json 存业务数据；musicSources（音源插件脚本，大字段）独立存 sources.json；
+/// workLogs（工作记录，持续增长的用户数据）独立存 worklogs.json。
+/// 老数据迁移：state.json 中残留的 musicSources / workLogs 会保留返回，下次保存自动分流到独立文件。
 #[tauri::command]
 fn load_state(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
@@ -143,20 +156,27 @@ fn load_state(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
             state["musicSources"] = sv;
         }
     }
+    // 工作记录独立文件（存在则覆盖合并）
+    let logs_file = dir.join("worklogs.json");
+    if logs_file.exists() {
+        if let Ok(lv) = read_json(&logs_file) {
+            state["workLogs"] = lv;
+        }
+    }
     Ok(state)
 }
 
-/// 写入持久化状态：musicSources 分流到 sources.json，其余写 state.json。
+/// 写入持久化状态：musicSources 分流到 sources.json、workLogs 分流到 worklogs.json，其余写 state.json。
 #[tauri::command]
 fn save_state(app: tauri::AppHandle, state: serde_json::Value) -> Result<(), String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
 
     let mut state = state;
-    let sources = if let Some(obj) = state.as_object_mut() {
-        obj.remove("musicSources")
+    let (sources, logs) = if let Some(obj) = state.as_object_mut() {
+        (obj.remove("musicSources"), obj.remove("workLogs"))
     } else {
-        None
+        (None, None)
     };
 
     // 业务数据
@@ -168,7 +188,13 @@ fn save_state(app: tauri::AppHandle, state: serde_json::Value) -> Result<(), Str
     let sources_file = dir.join("sources.json");
     let sdata = serde_json::to_string_pretty(&sources.unwrap_or_else(|| serde_json::json!([])))
         .map_err(|e| e.to_string())?;
-    fs::write(&sources_file, sdata).map_err(|e| e.to_string())
+    fs::write(&sources_file, sdata).map_err(|e| e.to_string())?;
+
+    // 工作记录（持续增长的用户数据独立文件，便于单独备份/导出）
+    let logs_file = dir.join("worklogs.json");
+    let ldata = serde_json::to_string_pretty(&logs.unwrap_or_else(|| serde_json::json!([])))
+        .map_err(|e| e.to_string())?;
+    fs::write(&logs_file, ldata).map_err(|e| e.to_string())
 }
 
 /// 桌面文件项。

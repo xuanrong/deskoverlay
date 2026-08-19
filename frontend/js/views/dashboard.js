@@ -5,6 +5,8 @@ import { state, saveState, pushRecentOp, onRecentOp } from "../state.js";
 import { STATUS_LABEL, TASK_STATUSES, PRIORITY_LABEL } from "../config.js";
 import { ICON_EXTERNAL, ICON_SEARCH, ICON_EDIT, ICON_TRASH, ICON_CHECK, ICON_FOLDER, ICON_IMAGE, ICON_DOC, ICON_CODE, ICON_ARCHIVE, ICON_VIDEO, ICON_MUSIC, ICON_PAPERCLIP } from "../icons.js";
 import { esc, showDialog } from "./common.js";
+import { createDatePicker } from "../datepicker.js";
+import { createSelect } from "../selectbox.js";
 
 // 最近操作类型 → 图标（线性 SVG）+ 标签
 const OP_META = {
@@ -125,27 +127,67 @@ export function renderDashboard(view) {
 function renderTasksMini(el, view) {
   el.innerHTML = `
     <div class="dash-section-title">
-      <span>待办事项</span><span class="dash-count" id="d-task-stats"></span>
-      <button class="dash-add-btn" id="d-task-add" title="添加待办">+</button>
+      <span>待办事项</span>
+      <button class="dash-add-btn" id="d-task-add" title="添加待办" aria-label="添加待办">＋</button>
     </div>
     <div class="dash-task-list" id="d-task-list"></div>`;
 
   el.querySelector("#d-task-add").addEventListener("click", () => showTaskModal("new", null, render));
 
   const listEl = el.querySelector("#d-task-list");
-  const statsEl = el.querySelector("#d-task-stats");
+  // 指针拖拽状态：WebView2 中 HTML5 DnD 事件不稳定，改用 pointer 系列 + 浮动卡片跟手
+  let drag = null; // { id, el, startX, startY, moved, ghost, raf }
+  let suppressClick = false; // 拖拽结束后的 click 不触发编辑弹窗
+
+  function clearDragVisual() {
+    listEl.querySelectorAll(".dash-task").forEach((r) => {
+      r.classList.remove("dragging", "drag-before", "drag-after");
+    });
+    document.body.classList.remove("no-select");
+    if (drag) {
+      if (drag.ghost) drag.ghost.remove();
+      if (drag.raf) cancelAnimationFrame(drag.raf);
+      drag.ghost = null;
+      drag.raf = 0;
+    }
+  }
+
+  // 根据指针 Y 坐标计算插入目标行
+  function targetAt(y) {
+    const rows = Array.from(listEl.querySelectorAll(".dash-task:not(.dragging)"));
+    for (const r of rows) {
+      const b = r.getBoundingClientRect();
+      if (y < b.top + b.height / 2) return { id: r.dataset.id, cls: "drag-before" };
+    }
+    if (rows.length) return { id: rows[rows.length - 1].dataset.id, cls: "drag-after" };
+    return null;
+  }
+
+  // 松手：按指针位置落位
+  function finishDrag() {
+    const fromId = drag?.id;
+    const moved = drag?.moved;
+    const t = targetAt(drag?.lastY ?? 0);
+    clearDragVisual();
+    drag = null;
+    if (moved && fromId && t && t.id !== fromId) {
+      suppressClick = true;
+      Tasks.reorder(fromId, t.id);
+    }
+  }
+
   function render() {
     const tasks = Tasks.list().slice(0, 8);
     listEl.innerHTML = tasks.length
       ? tasks.map((t) => {
           const p = /^P\d$/.test(t.priority || "") ? t.priority : "P2";
           const pn = parseInt(p.slice(1), 10);
-          const pCls = pn <= 1 ? " high" : pn >= 3 ? " low" : "";
+          const pCls = pn === 0 ? " critical" : pn === 1 ? " high" : pn === 2 ? " medium" : " low";
           const st = t.status || "pending";
           return `
         <div class="dash-task${st === "done" ? " done" : ""}" data-id="${t.id}">
           <span class="t-status st-${st}">${STATUS_ICONS[st] || ""}<span class="ts-text">${STATUS_LABEL[st] || st}</span></span>
-          <span class="t-prio${pCls}" title="优先级：${PRIORITY_LABEL[p] || ""}">${p}</span>
+          <span class="t-prio${pCls}">${p}</span>
           <span class="t-text">${esc(t.text)}</span>
           ${t.tags && t.tags.length ? `<span class="t-tags">${t.tags.map((tg) => `#${esc(tg)}`).join(" ")}</span>` : ""}
           ${t.due ? `<span class="t-due">${esc(t.due).slice(5)}</span>` : ""}
@@ -155,11 +197,68 @@ function renderTasksMini(el, view) {
     listEl.querySelectorAll(".dash-task").forEach((row) => {
       const task = Tasks.list().find((x) => x.id === row.dataset.id);
       if (!task) return;
-      row.addEventListener("click", () => showTaskModal("edit", task, render));
+      row.addEventListener("click", () => {
+        if (suppressClick) { suppressClick = false; return; }
+        showTaskModal("edit", task, render);
+      });
+      row.addEventListener("pointerdown", (e) => {
+        if (e.button !== 0 || e.target.closest(".t-status")) return;
+        drag = { id: row.dataset.id, el: row, startX: e.clientX, startY: e.clientY, lastY: e.clientY, moved: false, ghost: null, raf: 0 };
+        try { row.setPointerCapture(e.pointerId); } catch (_) {}
+      });
     });
-    const s = Tasks.stats();
-    statsEl.textContent = `${s.done}/${s.total}`;
   }
+
+  // 拖动中：越过阈值后创建跟随鼠标的浮动卡片，实时高亮插入点
+  window.addEventListener("pointermove", (e) => {
+    if (!drag) return;
+    const dy = e.clientY - drag.startY;
+    if (!drag.moved && Math.abs(dy) < 6) return;
+    drag.moved = true;
+    drag.lastY = e.clientY;
+    drag.el.classList.add("dragging");
+    document.body.classList.add("no-select");
+
+    if (!drag.ghost) {
+      const rect = drag.el.getBoundingClientRect();
+      const ghost = drag.el.cloneNode(true);
+      ghost.className = "dash-task drag-ghost";
+      ghost.removeAttribute("data-id");
+      ghost.style.left = rect.left + "px";
+      ghost.style.top = rect.top + "px";
+      ghost.style.width = rect.width + "px";
+      ghost.style.height = rect.height + "px";
+      document.body.appendChild(ghost);
+      drag.ghost = ghost;
+    }
+    const dx = e.clientX - drag.startX;
+    if (!drag.raf) {
+      drag.raf = requestAnimationFrame(() => {
+        drag.raf = 0;
+        if (drag.ghost) drag.ghost.style.transform = `translate(${dx}px, ${dy}px)`;
+      });
+    }
+
+    // 插入线指示
+    const t = targetAt(e.clientY);
+    listEl.querySelectorAll(".dash-task").forEach((r) => r.classList.remove("drag-before", "drag-after"));
+    if (t) listEl.querySelector(`[data-id="${t.id}"]`)?.classList.add(t.cls);
+
+    // 靠近列表上下边缘时自动滚动
+    const lr = listEl.getBoundingClientRect();
+    if (e.clientY < lr.top + 28) listEl.scrollTop -= 8;
+    else if (e.clientY > lr.bottom - 28) listEl.scrollTop += 8;
+  });
+
+  window.addEventListener("pointerup", () => {
+    if (!drag) return;
+    if (!drag.moved) { clearDragVisual(); drag = null; return; }
+    finishDrag();
+  });
+  window.addEventListener("pointercancel", () => {
+    if (drag) { clearDragVisual(); drag = null; }
+  });
+
   render();
   const off = Bus.on("tasks-changed", render);
   view.onDestroy(() => { off(); hideTaskModal(); });
@@ -180,20 +279,12 @@ function showTaskModal(mode = "new", task = null, onDone) {
         <textarea id="tm-text" rows="4" placeholder="待办内容…">${task ? esc(task.text) : ""}</textarea>
       </div>
       <div class="tm-row">
-        <div class="tm-field"><label>状态</label>
-          <select id="tm-status">
-            ${TASK_STATUSES.map((s) => `<option value="${s}"${task && task.status === s ? " selected" : (!task && s === "pending") ? " selected" : ""}>${STATUS_LABEL[s]}</option>`).join("")}
-          </select>
-        </div>
-        <div class="tm-field"><label>优先级</label>
-          <select id="tm-priority">
-            ${["P0","P1","P2","P3","P4"].map((p) => `<option value="${p}"${task && task.priority === p ? " selected" : (!task && p === "P2") ? " selected" : ""}>${p} · ${PRIORITY_LABEL[p]}</option>`).join("")}
-          </select>
-        </div>
+        <div class="tm-field"><label>状态</label><div id="tm-status"></div></div>
+        <div class="tm-field"><label>优先级</label><div id="tm-priority"></div></div>
       </div>
       <div class="tm-row">
-        <div class="tm-field"><label>开始日期</label><input id="tm-start" type="date" value="${task ? task.startDate || "" : ""}" /></div>
-        <div class="tm-field"><label>截止日期</label><input id="tm-due" type="date" value="${task ? task.due || "" : ""}" /></div>
+        <div class="tm-field"><label>开始日期</label><div id="tm-start"></div></div>
+        <div class="tm-field"><label>截止日期</label><div id="tm-due"></div></div>
       </div>
       <div class="tm-field"><label>标签</label><input id="tm-tags" type="text" value="${task ? (task.tags || []).join(",") : ""}" placeholder="逗号分隔，如 工作,紧急" /></div>
       <div class="tm-actions">
@@ -206,6 +297,21 @@ function showTaskModal(mode = "new", task = null, onDone) {
 
   const textEl = taskModalEl.querySelector("#tm-text");
   textEl.focus();
+
+  // 日期输入：自定义日期控件（替代原生 date 输入，规避 WebView2 占位文字问题）
+  createDatePicker({ el: taskModalEl.querySelector("#tm-start"), value: task ? task.startDate || "" : "" });
+  createDatePicker({ el: taskModalEl.querySelector("#tm-due"), value: task ? task.due || "" : "" });
+  // 下拉：自定义选择控件（替代原生 select，弹出面板样式与深色主题统一）
+  createSelect({
+    el: taskModalEl.querySelector("#tm-status"),
+    value: task ? task.status : "pending",
+    options: TASK_STATUSES.map((s) => ({ value: s, label: STATUS_LABEL[s] })),
+  });
+  createSelect({
+    el: taskModalEl.querySelector("#tm-priority"),
+    value: task ? task.priority : "P2",
+    options: ["P0", "P1", "P2", "P3", "P4"].map((p) => ({ value: p, label: `${p} · ${PRIORITY_LABEL[p]}` })),
+  });
 
   const submit = () => {
     const t = textEl.value.trim();
@@ -242,14 +348,18 @@ function showTaskModal(mode = "new", task = null, onDone) {
   });
 }
 function hideTaskModal() {
-  if (taskModalEl) { taskModalEl.remove(); taskModalEl = null; }
+  if (taskModalEl) {
+    taskModalEl.querySelectorAll(".dp, .cs").forEach((d) => d._close?.());
+    taskModalEl.remove();
+    taskModalEl = null;
+  }
 }
 
 // -------------------- 文件中心（右侧） --------------------
 async function renderFilesBlock(el, view) {
   const CATS = ["文件夹", "图片", "文档", "代码", "压缩", "视频", "音频", "其他"];
-  // 当前 tab 提升到 load() 外：操作后刷新时保留，避免跳回首个 tab
-  let currentTab = "";
+  // 当前 tab 持久化到导航状态：切换模块/重启后恢复上次浏览的分类
+  let currentTab = state.navState?.dashboard?.tab || "";
 
   // 完整刷新：重新拉取桌面文件 → 重新分组 → 重渲染 tabs/content（操作后调用）
   async function load() {
@@ -279,7 +389,6 @@ async function renderFilesBlock(el, view) {
     }
     // 保留当前 tab；若该分类已无文件（删光/改名），回退到首个 tab
     if (!tabs.includes(currentTab)) currentTab = tabs[0];
-
     el.innerHTML = `
     <div class="dash-section-title">文件中心 <span class="dash-count">${files.length}</span></div>
     <div class="file-tabs" id="d-file-tabs"></div>
@@ -317,6 +426,11 @@ async function renderFilesBlock(el, view) {
       tabsEl.querySelectorAll(".file-tab").forEach((btn) => {
         btn.addEventListener("click", () => {
           currentTab = btn.dataset.cat;
+          // 持久化当前分类 tab，切走再回来时保持上次浏览位置
+          if (!state.navState) state.navState = {};
+          if (!state.navState.dashboard) state.navState.dashboard = {};
+          state.navState.dashboard.tab = currentTab;
+          saveState();
           renderTabs();
           renderContent();
         });

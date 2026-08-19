@@ -4,6 +4,7 @@ import { invoke } from "../bus.js";
 import { state, saveState } from "../state.js";
 import { ICON_MUSIC, ICON_SHUFFLE, ICON_REPEAT, ICON_HEART, ICON_PREV, ICON_NEXT, ICON_PLAY, ICON_PAUSE, ICON_LIST, ICON_MORE, ICON_VOLUME } from "../icons.js";
 import { esc, normalizeSongs } from "./common.js";
+import { createSelect } from "../selectbox.js";
 
 const musicAudio = new Audio();
 let currentSong = null; // { title, artist, artwork, url, type, song, srcId, lyric }
@@ -114,16 +115,13 @@ function savePlayback() {
     } : null,
     playing: !!musicAudio.src && !musicAudio.paused,
     currentTime: musicAudio.currentTime || 0,
+    volume: state.playback.volume ?? musicAudio.volume ?? 0.8,
   };
   saveState();
 }
-let lastPlaybackSave = 0;
+// 仅在播放、暂停、切歌（loadMeta）时写盘，避免播放期间每 10s 全量重写状态文件
 musicAudio.addEventListener("play", savePlayback);
 musicAudio.addEventListener("pause", savePlayback);
-musicAudio.addEventListener("timeupdate", () => {
-  const now = Date.now();
-  if (now - lastPlaybackSave > 10000) { lastPlaybackSave = now; savePlayback(); }
-});
 
 // 直接播放一首（不动队列；各视图负责自己的 UI 渲染）
 function loadMeta({ title, artist, artwork, url, type, song, srcId }) {
@@ -563,7 +561,7 @@ export function initPlayback() {
 }
 
 export function renderMusic(view) {
-  view.header.innerHTML = `<div class="view-title">在线音乐</div><div class="view-sub">在线播放 · 点「在线」搜索歌单/榜单</div>`;
+  view.header.style.display = "none";
   const body = view.body;
   body.innerHTML = `
     <div class="music-view">
@@ -596,7 +594,7 @@ export function renderMusic(view) {
           <button class="mc-btn mc-pill" id="mc-online" title="在线音乐（音源搜索/歌单/排行榜）">在线</button>
           <div class="mc-vol" title="音量">
             <span>${ICON_VOLUME}</span>
-            <input type="range" id="mc-vol-range" min="0" max="100" value="80" />
+            <input type="range" id="mc-vol-range" min="0" max="100" value="${Math.round((state.playback.volume ?? 0.8) * 100)}" />
           </div>
           <button class="mc-btn" id="mc-more" title="更多">${ICON_MORE}</button>
         </div>
@@ -691,8 +689,15 @@ export function renderMusic(view) {
 
   body.querySelector("#mc-vol-range").addEventListener("input", (e) => {
     musicAudio.volume = e.target.value / 100;
+    // 音量跟随持久化状态：切视图/重启后保持一致
+    state.playback.volume = musicAudio.volume;
   });
-  musicAudio.volume = 0.8;
+  // 每次渲染用持久化音量同步播放器与滑杆（不再硬编码覆盖用户设置）
+  musicAudio.volume = state.playback.volume ?? 0.8;
+  const volRange = body.querySelector("#mc-vol-range");
+  if (volRange && Math.abs(+volRange.value - Math.round(musicAudio.volume * 100)) > 1) {
+    volRange.value = Math.round(musicAudio.volume * 100);
+  }
 
   // 底部功能按钮：喜欢/随机/上一首/下一首/队列/在线
   const likeBtn = body.querySelector("#mc-like");
@@ -743,9 +748,9 @@ function openOnlineMusic() {
         <div class="online-src-side" id="online-src-side"></div>
         <div class="online-main">
           <div class="online-mode-tabs" id="online-mode-tabs">
-            <button data-mode="search" class="active">搜索</button>
-            <button data-mode="toplist">排行榜</button>
+            <button data-mode="toplist" class="active">排行榜</button>
             <button data-mode="sheet">歌单</button>
+            <button data-mode="search">搜索</button>
           </div>
           <div class="online-panel" id="online-panel"></div>
           <div class="online-results" id="online-results"></div>
@@ -765,7 +770,7 @@ function openOnlineMusic() {
   const panelEl = ov.querySelector("#online-panel");
   const resultsEl = ov.querySelector("#online-results");
   let current = (state.musicSources || []).find((s) => s.code) || null;
-  let mode = "search"; // search | toplist | sheet
+  let mode = "toplist"; // search | toplist | sheet
   let favMode = false; // 左侧「喜欢」tab 激活时
   let panelInput = null;
   let typeSelectEl = null;
@@ -902,8 +907,11 @@ function openOnlineMusic() {
       let html = "";
       for (const grp of groups) {
         if (grp.title) html += `<div class="online-group-title">${esc(grp.title)}</div>`;
-        for (const it of grp.list) {
-          html += `<div class="online-item"><span class="mr-play">▤</span><span class="mr-title">${esc(it.title || it.name)}</span><span class="mr-artist">${esc(it.description || "")}</span></div>`;
+        for (let gi = 0; gi < grp.list.length; gi++) {
+          const it = grp.list[gi];
+          const rank = gi + 1;
+          const topCls = rank <= 3 ? ` top${rank}` : "";
+          html += `<div class="online-item toplist-item${topCls}"><span class="tl-rank">${rank}</span><span class="mr-title">${esc(it.title || it.name)}</span><span class="mr-artist">${esc(it.description || "")}</span></div>`;
         }
       }
       const frag = document.createElement("div");
@@ -934,7 +942,7 @@ function openOnlineMusic() {
       renderCollection(sheets, {
         title: current.name + " · 热门歌单",
         back: () => loadDefaultSheets(),
-        renderRow: (it) => `<div class="online-item"><span class="mr-play">☰</span><span class="mr-title">${esc(it.title || it.name)}</span><span class="mr-artist">${esc(it.artist || it.description || "")}</span></div>`,
+        renderRow: (it) => `<div class="online-item sheet-item"><span class="sheet-ico">♫</span><span class="sheet-info"><span class="sheet-title">${esc(it.title || it.name)}</span><span class="sheet-desc">${esc(it.artist || it.description || "")}</span></span></div>`,
         onClick: (sheet) => loadSheetDetail(sheet, ""),
       });
     } catch (e) {
@@ -957,7 +965,7 @@ function openOnlineMusic() {
         renderCollection(normalizeList(res), {
           title: `歌单「${kw}」`,
           back: () => { if (panelInput) panelInput.value = kw; doSearch(); },
-          renderRow: (it) => `<div class="online-item"><span class="mr-play">☰</span><span class="mr-title">${esc(it.title || it.name)}</span><span class="mr-artist">${esc(it.artist || it.description || "")}</span></div>`,
+          renderRow: (it) => `<div class="online-item sheet-item"><span class="sheet-ico">♫</span><span class="sheet-info"><span class="sheet-title">${esc(it.title || it.name)}</span><span class="sheet-desc">${esc(it.artist || it.description || "")}</span></span></div>`,
           onClick: (sheet) => loadSheetDetail(sheet, kw),
         });
       } else if (type === "album") {
@@ -977,13 +985,15 @@ function openOnlineMusic() {
 
   // 搜索类型下拉（按插件 supportedSearchType 过滤；歌单走模式 tab）
   function updateTypeOptions(typeEl) {
-    typeEl.innerHTML = `<option value="music">歌曲</option>`;
-    if (!current) return;
-    try {
-      const plugin = loadMusicPlugin(current.code);
-      const sup = plugin.supportedSearchType || [];
-      if (sup.includes("album")) typeEl.innerHTML += `<option value="album">专辑</option>`;
-    } catch (e) {}
+    const opts = [{ value: "music", label: "歌曲" }];
+    if (current) {
+      try {
+        const plugin = loadMusicPlugin(current.code);
+        const sup = plugin.supportedSearchType || [];
+        if (sup.includes("album")) opts.push({ value: "album", label: "专辑" });
+      } catch (e) {}
+    }
+    typeEl._setOptions?.(opts);
   }
 
   // 模式切换
@@ -1011,11 +1021,14 @@ function openOnlineMusic() {
     const isSheet = mode === "sheet";
     panelEl.innerHTML = `
       <input id="online-input" type="text" placeholder="${isSheet ? "搜索歌单…" : "搜索歌曲…"}" autocomplete="off" spellcheck="false" />
-      ${isSheet ? "" : `<select id="online-type" title="搜索类型"><option value="music">歌曲</option></select>`}
+      ${isSheet ? "" : `<div id="online-type" class="online-type-cs" title="搜索类型"></div>`}
       <button class="mc-btn mc-pill" id="online-btn">搜索</button>`;
     panelInput = panelEl.querySelector("#online-input");
     typeSelectEl = isSheet ? null : panelEl.querySelector("#online-type");
-    if (typeSelectEl) updateTypeOptions(typeSelectEl);
+    if (typeSelectEl) {
+      createSelect({ el: typeSelectEl, value: "music", options: [{ value: "music", label: "歌曲" }] });
+      updateTypeOptions(typeSelectEl);
+    }
     panelEl.querySelector("#online-btn").addEventListener("click", doSearch);
     panelInput.addEventListener("keydown", (e) => { if (e.key === "Enter") doSearch(); });
     panelInput.focus();
@@ -1057,5 +1070,5 @@ function openOnlineMusic() {
   modeTabsEl.querySelectorAll("button").forEach((b) => b.addEventListener("click", () => switchMode(b.dataset.mode)));
 
   renderSrcSide();
-  switchMode("search");
+  switchMode("toplist");
 }
