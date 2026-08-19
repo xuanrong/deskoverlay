@@ -48,4 +48,8 @@ if (TAURI && TAURI.event && typeof TAURI.event.listen === "function") {
   TAURI.event
     .listen("im-notify", (e) => Bus.emit("im-notify", e.payload))
     .catch((err) => console.warn("[bridge] im-notify 监听失败：", err));
+  // 久坐提醒触发事件：桥接进 Bus，供 app.js 记入「最近操作」（后端触发了才会发出）。
+  TAURI.event
+    .listen("sedentary-fire", (e) => Bus.emit("sedentary-fire", e.payload))
+    .catch((err) => console.warn("[bridge] sedentary-fire 监听失败：", err));
 }

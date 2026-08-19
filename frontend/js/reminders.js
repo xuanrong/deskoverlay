@@ -6,29 +6,96 @@ import { esc } from "./views/common.js";
 
 const mcReminders = document.getElementById("mc-reminders");
 
-// 渲染时钟块右侧提醒区：纵向列表，启用项 icon+名称+右侧子信息（每日时刻 或 间隔倒计时）
+// 久坐提醒图标（线性 SVG，currentColor）
+const ICON_STRETCH = `<svg viewBox="0 0 24 24"><circle cx="12" cy="4.5" r="2"/><path d="M12 7.5v4"/><path d="M8.5 9.5 12 7.5l3.5 2"/><path d="M12 11.5 8.5 16"/><path d="M12 11.5 15.5 15"/></svg>`;
+
+// 距下次触发的剩余毫秒（用于「按临近时间排序」）。
+// daily：到今天 HH:MM 的剩余时间（已过则计入明天）；interval：剩余倒计时；无时间信息返回 Infinity。
+function approachingMs(r, nowTs) {
+  if (r.type === "interval") {
+    const interval = (r.intervalMin || 60) * 60000;
+    return r.lastAt ? Math.max(0, interval - (nowTs - r.lastAt)) : interval;
+  }
+  if (!r.time) return Infinity;
+  const [h, m] = r.time.split(":").map(Number);
+  const t = new Date();
+  t.setHours(h, m, 0, 0);
+  let diff = t.getTime() - nowTs;
+  if (diff <= 0) diff += 24 * 3600 * 1000;
+  return diff;
+}
+
+// 渲染时钟块右侧提醒区：最多 3 行，按「距下次触发时间」升序（临近者在前）。
+// 久坐提醒无前端倒计时，固定置顶以保证可见；其余定时/间隔提醒按临近时间排序，取满 3 行为止。
 function renderReminders() {
-  const active = (state.reminders || []).filter((r) => r.enabled);
   const nowTs = Date.now();
-  mcReminders.innerHTML = active.length
-    ? active.map((r) => {
-        let sub;
-        if (r.type === "interval") {
-          const interval = (r.intervalMin || 60) * 60000;
-          const rem = r.lastAt ? Math.max(0, interval - (nowTs - r.lastAt)) : interval;
-          sub = rem >= 60000 ? `${Math.ceil(rem / 60000)}m` : `${Math.max(1, Math.ceil(rem / 1000))}s`;
-        } else {
-          sub = r.time || "--:--";
-        }
-        return `
-      <div class="mc-rem-row" data-id="${esc(r.id)}" title="${esc(r.label)} · ${esc(sub)}">
+  const MAX_ROWS = 3;
+  const rows = [];
+  if (state.sedentary && state.sedentary.enabled) {
+    rows.push({
+      id: "sedentary",
+      icon: ICON_STRETCH,
+      label: "久坐提醒",
+      sub: `${state.sedentary.intervalMin || 45}m`,
+      pinned: true,
+    });
+  }
+  const active = (state.reminders || [])
+    .filter((r) => r.enabled)
+    .map((r) => {
+      let sub;
+      if (r.type === "interval") {
+        const interval = (r.intervalMin || 60) * 60000;
+        const rem = r.lastAt ? Math.max(0, interval - (nowTs - r.lastAt)) : interval;
+        sub = rem >= 60000 ? `${Math.ceil(rem / 60000)}m` : `${Math.max(1, Math.ceil(rem / 1000))}s`;
+      } else {
+        sub = r.time || "--:--";
+      }
+      return { id: r.id, icon: r.icon, label: r.label, sub, key: approachingMs(r, nowTs) };
+    })
+    .sort((a, b) => a.key - b.key);
+  for (const r of active) {
+    if (rows.length >= MAX_ROWS) break;
+    rows.push(r);
+  }
+  mcReminders.innerHTML = rows.length
+    ? rows.map((r) => `
+      <div class="mc-rem-row" data-id="${esc(r.id)}" title="${esc(r.label)} · ${esc(r.sub)}">
         <span class="mc-rem-icon">${r.icon}</span>
         <span class="mc-rem-label">${esc(r.label)}</span>
-        <span class="mc-rem-time">${esc(sub)}</span>
-      </div>`;
-      }).join("")
+        <span class="mc-rem-time">${esc(r.sub)}</span>
+      </div>`).join("")
     : `<div class="mc-rem-row mc-rem-empty" title="提醒设置"><span class="mc-rem-icon">${ICON_CLOCK}</span><span class="mc-rem-label">提醒设置</span></div>`;
   mcReminders.querySelectorAll(".mc-rem-row").forEach((b) => b.addEventListener("click", openReminderSettings));
+}
+
+// 将久坐配置推送到后端（监控线程据此启停与计时）。
+// 注意：参数名用 intervalMin（camelCase）——Tauri v2 将 Rust 的 interval_min 转成
+// camelCase 暴露给 JS，传 interval_min 会导致命令报「missing required key intervalMin」而失效。
+async function pushSedentaryConfig() {
+  const s = state.sedentary || { enabled: false, intervalMin: 45 };
+  try {
+    await invoke("set_sedentary_config", {
+      enabled: !!s.enabled,
+      intervalMin: s.intervalMin || 45,
+    });
+  } catch (e) {
+    console.warn("[sedentary] 配置推送失败", e);
+  }
+}
+
+// 每秒增量更新：仅刷新间隔项的倒计时文本（不重建 DOM，避免时钟块闪烁）
+function updateReminders() {
+  const nowTs = Date.now();
+  mcReminders.querySelectorAll(".mc-rem-row").forEach((row) => {
+    const r = (state.reminders || []).find((x) => x.id === row.dataset.id && x.enabled);
+    if (!r || r.type !== "interval") return;
+    const interval = (r.intervalMin || 60) * 60000;
+    const rem = r.lastAt ? Math.max(0, interval - (nowTs - r.lastAt)) : interval;
+    const sub = rem >= 60000 ? `${Math.ceil(rem / 60000)}m` : `${Math.max(1, Math.ceil(rem / 1000))}s`;
+    const timeEl = row.querySelector(".mc-rem-time");
+    if (timeEl && timeEl.textContent !== sub) timeEl.textContent = sub;
+  });
 }
 
 // 每秒检查：daily 到 HH:MM 触发（当日防重复）；interval 滚动计时（lastAt + 间隔）
@@ -93,15 +160,46 @@ function openReminderSettings() {
   const ov = document.createElement("div");
   ov.id = "rm-modal";
   ov.className = "task-modal-overlay";
+  const sed = state.sedentary || { enabled: false, intervalMin: 45 };
   ov.innerHTML = `
     <div class="task-modal remind-modal">
       <h3>提醒设置</h3>
+      <div class="sed-section" id="sed-section">
+        <div class="sed-head">
+          <span class="sed-title">久坐提醒</span>
+          <label class="rm-toggle"><input type="checkbox" id="sed-enable" ${sed.enabled ? "checked" : ""}/><span>启用</span></label>
+        </div>
+        <div class="sed-body">
+          <span>连续使用</span>
+          <input class="sed-int" id="sed-int" type="number" min="1" max="240" value="${sed.intervalMin || 45}" />
+          <span>分钟后提醒（离开 ≥3 分钟视为休息，重新计时）</span>
+        </div>
+      </div>
       <div class="rm-list" id="rm-list"></div>
       <div class="rm-add"><button class="tm-cancel" id="rm-add-btn">+ 添加提醒</button></div>
       <div class="tm-actions"><button class="btn-primary cm-ok" id="rm-done">完成</button></div>
     </div>`;
   document.body.appendChild(ov);
   const list = ov.querySelector("#rm-list");
+
+  // 久坐提醒：开关 + 间隔（变更即推送后端并刷新时钟块指示）
+  const sedEnable = ov.querySelector("#sed-enable");
+  const sedInt = ov.querySelector("#sed-int");
+  if (sedEnable) sedEnable.addEventListener("change", () => {
+    if (!state.sedentary) state.sedentary = { enabled: false, intervalMin: 45 };
+    state.sedentary.enabled = sedEnable.checked;
+    saveState();
+    pushSedentaryConfig();
+    renderReminders();
+  });
+  if (sedInt) sedInt.addEventListener("change", () => {
+    if (!state.sedentary) state.sedentary = { enabled: false, intervalMin: 45 };
+    state.sedentary.intervalMin = Math.max(1, Math.min(240, parseInt(sedInt.value, 10) || 45));
+    sedInt.value = state.sedentary.intervalMin;
+    saveState();
+    pushSedentaryConfig();
+    renderReminders();
+  });
 
   function renderRows() {
     list.innerHTML = (state.reminders || []).map((r, i) => {
@@ -129,6 +227,7 @@ function openReminderSettings() {
         const r = state.reminders[el.dataset.i];
         if (r && el.value.trim()) r.label = el.value.trim();
         saveState();
+        renderReminders();
       });
     });
     list.querySelectorAll(".rm-type").forEach((el) => {
@@ -138,6 +237,7 @@ function openReminderSettings() {
         r.type = el.value;
         saveState();
         renderRows();
+        renderReminders();
       });
     });
     list.querySelectorAll(".rm-time").forEach((el) => {
@@ -146,6 +246,7 @@ function openReminderSettings() {
         if (!r) return;
         r.time = el.value || "";
         saveState();
+        renderReminders();
       });
     });
     list.querySelectorAll(".rm-int").forEach((el) => {
@@ -155,6 +256,7 @@ function openReminderSettings() {
         r.intervalMin = Math.max(1, Math.min(1440, parseInt(el.value, 10) || 60));
         el.value = r.intervalMin;
         saveState();
+        renderReminders();
       });
     });
     list.querySelectorAll(".rm-toggle input").forEach((el) => {
@@ -163,6 +265,7 @@ function openReminderSettings() {
         if (!r) return;
         r.enabled = el.checked;
         saveState();
+        renderReminders();
       });
     });
     list.querySelectorAll(".rm-del").forEach((el) => {
@@ -170,6 +273,7 @@ function openReminderSettings() {
         state.reminders.splice(el.dataset.i, 1);
         saveState();
         renderRows();
+        renderReminders();
       });
     });
   }
@@ -178,6 +282,7 @@ function openReminderSettings() {
     state.reminders.push({ id: "r" + Date.now().toString(36), label: "新提醒", icon: ICON_CLOCK, type: "daily", time: "09:00", intervalMin: 60, enabled: true, lastAt: 0, lastTriggeredDate: "" });
     saveState();
     renderRows();
+    renderReminders();
   });
   ov.querySelector("#rm-done").addEventListener("click", () => ov.remove());
   ov.addEventListener("click", (e) => { if (e.target === ov) ov.remove(); });
@@ -186,8 +291,9 @@ function openReminderSettings() {
   renderRows();
 }
 
-/// 初始化提醒：渲染时钟块倒计时 + 每秒检查。
+/// 初始化提醒：渲染时钟块倒计时 + 推送久坐配置 + 每秒增量检查。
 export function initReminders() {
   renderReminders();
-  setInterval(() => { checkReminders(); renderReminders(); }, 1000);
+  pushSedentaryConfig();
+  setInterval(() => { checkReminders(); updateReminders(); }, 1000);
 }

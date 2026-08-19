@@ -2,10 +2,11 @@
 // 范式：侧边导航 + 固定主区域单模块切换（无拖拽面板、无工作模式）。
 // 状态：统一由 state.js 单例管理，Rust 侧 state.json 持久化。
 import { MODULES } from "./config.js";
-import { state, loadState, saveState } from "./state.js";
+import { state, loadState, saveState, pushRecentOp } from "./state.js";
 import { Bus, invoke } from "./bus.js";
 import { Providers } from "./providers.js";
 import { VIEW_RENDERERS } from "./views.js";
+import { initPlayback } from "./views/music.js";
 import { Tasks } from "./tasks.js";
 import { CommandBar } from "./commandbar.js";
 import { initReminders } from "./reminders.js";
@@ -130,6 +131,11 @@ Bus.on("provider-emit", ({ config_hash, output }) => {
   }
 });
 
+// 久坐提醒弹出：记入最近操作，便于回溯。
+Bus.on("sedentary-fire", () => {
+  pushRecentOp({ type: "sedentary", action: "提醒弹出", name: "久坐提醒" });
+});
+
 
 // -------------------- 事件绑定 --------------------
 window.addEventListener("keydown", (e) => {
@@ -163,6 +169,9 @@ loadState().then(() => {
   renderNav();
   const initial = MODULES.some((m) => m.id === state.currentModule) ? state.currentModule : "dashboard";
   switchModule(initial);
+
+  // 恢复音乐播放状态（队列/歌曲/播放位置）
+  initPlayback();
 
   // 提醒：渲染时钟块倒计时 + 每秒检查
   initReminders();

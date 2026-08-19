@@ -9,8 +9,10 @@ export const state = {
   notes: "",
   recentOps: [], // 最近操作记录：{ ts, type, action, name, ... }
   reminders: [], // 提醒配置：{ id, label, icon, type, time/intervalMin, enabled, ... }
+  sedentary: { enabled: false, intervalMin: 45 }, // 久坐提醒：开关 + 连续使用间隔（分钟）
   musicSources: [], // 音乐音源插件：{ id, name, src, code }
   favorites: [], // 收藏的歌曲：{ title, artist, artwork, url }
+  playback: { queue: [], index: -1, song: null, playing: false, currentTime: 0 }, // 音乐播放状态（重启恢复）
 };
 
 let ready = false;
@@ -30,8 +32,22 @@ export async function loadState() {
   } else if (!Array.isArray(state.reminders)) {
     state.reminders = [];
   }
+  // 久坐提醒：结构校验
+  if (!state.sedentary || typeof state.sedentary !== "object") {
+    state.sedentary = { enabled: false, intervalMin: 45 };
+  } else {
+    if (typeof state.sedentary.enabled !== "boolean") state.sedentary.enabled = false;
+    if (typeof state.sedentary.intervalMin !== "number") state.sedentary.intervalMin = 45;
+    state.sedentary.intervalMin = Math.max(1, Math.min(240, state.sedentary.intervalMin || 45));
+  }
   if (!Array.isArray(state.musicSources)) state.musicSources = [];
   if (!Array.isArray(state.favorites)) state.favorites = [];
+  // 播放状态：结构校验
+  if (!state.playback || typeof state.playback !== "object") {
+    state.playback = { queue: [], index: -1, song: null, playing: false, currentTime: 0 };
+  }
+  if (!Array.isArray(state.playback.queue)) state.playback.queue = [];
+  if (typeof state.playback.index !== "number") state.playback.index = -1;
   ready = true;
   readyQueue.forEach((fn) => fn());
   readyQueue.length = 0;

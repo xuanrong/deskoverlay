@@ -7,7 +7,11 @@
 //! 持久化：state.json 写入 app_data_dir（跨 WebView 重装不丢失）。
 //! 前端经 load_state / save_state 命令读写，不再用 localStorage。
 
+// 发布版使用 Windows GUI 子系统，避免安装后弹出命令窗口
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 mod desktop_inject;
+mod sedentary;
 mod sys_bridge;
 
 use std::fs;
@@ -22,16 +26,10 @@ fn quit_app(app: tauri::AppHandle) {
     app.exit(0);
 }
 
-/// 前端调试日志 → 转发到终端（排查歌词等前端问题）。
-#[tauri::command]
-fn log_msg(msg: String) {
-    eprintln!("[deskoverlay:frontend] {}", msg);
-}
-
 /// 显示置顶提醒窗口（系统级：盖住浏览器等其他应用）。
-/// Rust 端负责定位到主屏右上角、置顶并显示，再向 reminder 窗口推送内容。
-#[tauri::command]
-fn show_reminder(app: tauri::AppHandle, icon: String, title: String, message: String) {
+/// 定位到主屏右上角、置顶并显示，再向 reminder 窗口推送内容。
+/// pub：久坐监控线程复用该逻辑弹出提醒（见 sedentary.rs）。
+pub fn present_reminder(app: &tauri::AppHandle, icon: &str, title: &str, message: &str) {
     if let Some(win) = app.get_webview_window("reminder") {
         // 主屏右上角（预留 24px 边距）
         let size = win.outer_size().unwrap_or(tauri::PhysicalSize::new(380, 150));
@@ -45,6 +43,12 @@ fn show_reminder(app: tauri::AppHandle, icon: String, title: String, message: St
             serde_json::json!({ "icon": icon, "title": title, "message": message }),
         );
     }
+}
+
+/// 显示置顶提醒命令（前端可调用；参数与 present_reminder 对应）。
+#[tauri::command]
+fn show_reminder(app: tauri::AppHandle, icon: String, title: String, message: String) {
+    present_reminder(&app, &icon, &title, &message);
 }
 
 /// 隐藏置顶提醒窗口（reminder 页点"知道了"或 8s 超时后调用）。
@@ -270,9 +274,16 @@ fn rename_file(name: String, new_name: String) -> Result<(), String> {
 
 fn main() {
     tauri::Builder::default()
+        .manage(sedentary::new_sedentary_state())
         .setup(|app| {
             // 启动系统指标 Provider 数据桥（CPU + 内存 → provider-emit）
             sys_bridge::start_system_provider(app.handle().clone());
+
+            // 久坐提醒：启动后端键鼠活动监控线程（配置经 set_sedentary_config 下发）
+            sedentary::start_sedentary_monitor(
+                app.handle().clone(),
+                app.state::<sedentary::SedentaryState>().inner().clone(),
+            );
 
             // 嵌入桌面 WorkerW（成为桌面本身），再显示
             if let Some(win) = app.get_webview_window("main") {
@@ -283,7 +294,7 @@ fn main() {
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![quit_app, log_msg, show_reminder, hide_reminder, http_get, http_post, load_state, save_state, list_desktop_files, open_file, reveal_file, delete_file, rename_file])
+        .invoke_handler(tauri::generate_handler![quit_app, show_reminder, hide_reminder, http_get, http_post, load_state, save_state, list_desktop_files, open_file, reveal_file, delete_file, rename_file, sedentary::set_sedentary_config])
         .run(tauri::generate_context!())
         .expect("DeskOverlay 运行失败");
 }

@@ -23,12 +23,6 @@
   --danger: #ff7b72;
   --purple: #bc8cff;
 
-  --gold-1: #f6e27a;
-  --gold-2: #d4af37;
-  --gold-3: #a67c1a;
-  --gold-grad: linear-gradient(135deg, #f9e27e 0%, #d4af37 45%, #a67c1a 100%);
-  --gold-glow: 0 0 0 1px rgba(212, 175, 55, 0.35), 0 0 18px rgba(212, 175, 55, 0.18);
-
   --radius: 16px;
   --radius-sm: 10px;
   --shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
@@ -117,21 +111,6 @@ html, body {
   letter-spacing: 0.5px;
 }
 
-/* 导航栏顶部时钟（固定，不随模块切换变化） */
-.nav-clock {
-  padding: 6px 12px 16px;
-  border-bottom: 1px solid var(--border);
-  text-align: left;
-}
-.nc-time {
-  font-size: 28px; font-weight: 700; line-height: 1.1;
-  font-variant-numeric: tabular-nums; letter-spacing: 0.5px;
-  background: var(--gold-grad);
-  -webkit-background-clip: text; background-clip: text; color: transparent;
-}
-.nc-greet { font-size: 13px; color: var(--text); margin-top: 4px; }
-.nc-date { font-size: 11px; color: var(--text-faint); margin-top: 2px; }
-
 #nav-list {
   display: flex;
   flex-direction: column;
@@ -203,12 +182,14 @@ html, body {
   gap: 18px;
 }
 
-/* 主区域顶部时钟块（固定，切换模块时始终可见）：左日期 / 中时间 / 右系统监控 */
+/* 主区域顶部时钟块（固定，切换模块时始终可见）：左时间 / 右提醒 */
 .main-clock {
   flex: 0 0 auto;
   display: flex;
-  align-items: stretch;
+  align-items: center;
   gap: 24px;
+  /* 负 margin 抵消 #main 的 padding，使时钟块顶部与左右贴边无缝 */
+  margin: -20px -32px 0;
   padding: 14px 24px;
   background: var(--bg-panel-2);
   border: 1px solid var(--border);
@@ -228,17 +209,21 @@ html, body {
 .mc-time {
   font-size: 48px; font-weight: 700; line-height: 1.05;
   font-variant-numeric: tabular-nums; letter-spacing: 1px;
-  background: var(--gold-grad);
+  background: linear-gradient(135deg, var(--blue), #79c0ff);
   -webkit-background-clip: text; background-clip: text; color: transparent;
   margin-top: 4px;
 }
 
-/* 时钟块右侧提醒区（每日定时，纵向列表） */
+/* 时钟块右侧提醒区（每日定时，纵向列表）：最多 3 行，超出内部滚动，不撑高时钟块 */
 .mc-reminders {
   display: flex; flex-direction: column; justify-content: center;
-  gap: 6px; margin-left: auto; flex: 0 0 auto;
+  gap: 6px; margin-left: auto; flex: 0 0 auto; align-self: center;
   min-width: 160px; padding: 2px 4px;
+  max-height: 92px; overflow-y: auto;
+  scrollbar-width: thin;
 }
+.mc-reminders::-webkit-scrollbar { width: 5px; }
+.mc-reminders::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 3px; }
 .mc-rem-row {
   display: flex; align-items: center; gap: 10px;
   padding: 4px 6px; border-radius: 6px;
@@ -287,6 +272,31 @@ html, body {
 }
 .rm-del:hover { color: var(--danger); }
 .rm-add { margin-bottom: 4px; }
+
+/* 久坐提醒设置段（提醒设置弹窗顶部） */
+.sed-section {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  margin-bottom: 14px;
+}
+.sed-head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 10px;
+}
+.sed-title { font-size: 14px; font-weight: 600; color: var(--text); }
+.sed-body {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  font-size: 12.5px; color: var(--text-dim); line-height: 1.5;
+}
+.sed-int {
+  width: 64px;
+  background: #111820; border: 1px solid #2a3340; color: var(--text);
+  padding: 7px 9px; border-radius: var(--radius-sm); font-size: 13px;
+  outline: none; font-family: var(--font);
+}
+.sed-int:focus { border-color: var(--blue); }
 
 /* 提醒弹卡（右上角滑入） */
 .rm-toast {
@@ -761,27 +771,32 @@ html, body {
   font-size: 11px; color: var(--text-dim); margin-top: 3px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.music-controls { display: flex; align-items: center; justify-content: center; gap: 8px; }
+.music-controls { display: flex; align-items: center; justify-content: center; gap: 6px; }
 .mc-btn {
   background: transparent; border: 0; color: var(--text-dim); cursor: pointer;
-  font-size: 16px; padding: 4px 8px; transition: color var(--t-fast);
+  font-size: 16px; padding: 0; transition: color var(--t-fast), background var(--t-fast);
   font-family: var(--font); line-height: 1;
+  width: 34px; height: 34px;
+  display: grid; place-items: center;
+  border-radius: 8px;
 }
 .mc-btn svg {
   width: 18px; height: 18px; fill: none; stroke: currentColor;
   stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round;
-  display: block; margin: 0 auto;
+  display: block;
 }
-.mc-btn:hover { color: var(--text); }
-.mc-btn.mc-big { font-size: 30px; color: var(--text); }
+.mc-btn:hover { color: var(--text); background: rgba(255,255,255,0.06); }
+.mc-btn.mc-big { width: 46px; height: 46px; color: var(--text); }
+.mc-btn.mc-big svg { width: 26px; height: 26px; }
 .mc-btn.mc-big:hover { color: var(--blue); }
 .mc-btn.active { color: var(--blue); }
 .mc-btn.has { color: var(--blue); }
 .mc-btn:disabled { opacity: 0.35; cursor: default; }
-.mc-btn:disabled:hover { color: var(--text-dim); }
+.mc-btn:disabled:hover { color: var(--text-dim); background: transparent; }
 .mc-btn.mc-pill {
+  width: auto; height: auto; padding: 6px 14px;
   border: 1px solid var(--border);
-  border-radius: 999px; padding: 4px 12px; font-size: 12px;
+  border-radius: 999px; font-size: 12px;
   color: var(--text-dim);
 }
 .mc-btn.mc-pill:hover { color: var(--text); border-color: var(--border-strong); }
@@ -796,6 +811,11 @@ html, body {
 .mc-vol {
   display: flex; align-items: center; gap: 6px;
   color: var(--text-dim); font-size: 14px; flex: 0 0 auto;
+}
+.mc-vol svg {
+  width: 16px; height: 16px; fill: none; stroke: currentColor;
+  stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round;
+  display: block;
 }
 .mc-vol input[type="range"] {
   width: 80px; accent-color: var(--blue);
@@ -905,6 +925,29 @@ html, body {
 }
 .tm-field textarea { resize: vertical; min-height: 100px; line-height: 1.6; }
 .tm-field input:focus, .tm-field select:focus, .tm-field textarea:focus { border-color: var(--blue); }
+
+/* 原生日期/时间/数字控件暗色主题化：color-scheme 让原生 spinner 与日历弹窗自动适配深色 UI */
+input[type="number"],
+input[type="date"],
+input[type="time"] { color-scheme: dark; }
+
+/* 数字输入框：移除原生上下微调按钮（直接键入数值） */
+input[type="number"] { -moz-appearance: textfield; }
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none; margin: 0;
+}
+
+/* 日历/时钟选择指示器图标：调暗，悬停偏蓝高亮 */
+input[type="date"]::-webkit-calendar-picker-indicator,
+input[type="time"]::-webkit-calendar-picker-indicator {
+  filter: invert(0.75); opacity: 0.7; cursor: pointer;
+  transition: opacity var(--t-fast), filter var(--t-fast);
+}
+input[type="date"]::-webkit-calendar-picker-indicator:hover,
+input[type="time"]::-webkit-calendar-picker-indicator:hover {
+  opacity: 1; filter: invert(0.7) sepia(1) saturate(4) hue-rotate(175deg);
+}
 .tm-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .tm-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 16px; }
 .tm-cancel {
@@ -1136,7 +1179,7 @@ html, body {
 .cal-cell.muted { color: var(--text-faint); opacity: 0.5; }
 .cal-cell.has::after {
   content: ""; position: absolute; bottom: 4px; left: 50%; transform: translateX(-50%);
-  width: 4px; height: 4px; border-radius: 50%; background: var(--gold-2);
+  width: 4px; height: 4px; border-radius: 50%; background: var(--blue);
 }
 
 /* 速记 */
@@ -1153,6 +1196,157 @@ html, body {
 }
 .notes-area:focus { border-color: var(--blue); }
 .notes-saved { font-size: 11px; color: var(--text-faint); text-align: right; margin-top: 6px; flex: 0 0 auto; }
+
+/* ====================== 休息一下（小游戏） ====================== */
+.relax-view {
+  display: flex; gap: 18px; height: 100%; padding: 20px; min-height: 0;
+}
+.relax-side {
+  flex: 0 0 auto; width: 220px;
+  display: flex; flex-direction: column; gap: 8px;
+  overflow-y: auto;
+}
+.relax-game {
+  display: flex; flex-direction: column; gap: 3px; text-align: left;
+  padding: 12px 14px; border-radius: 10px;
+  border: 1px solid var(--border); background: var(--bg-panel);
+  color: var(--text-dim); font-family: var(--font);
+  cursor: pointer; transition: all var(--t-fast);
+}
+.relax-game:hover { border-color: var(--border-strong); color: var(--text); background: rgba(255,255,255,0.04); }
+.relax-game.active {
+  border-color: rgba(88,166,255,0.35); background: rgba(88,166,255,0.12);
+  color: var(--blue);
+}
+.relax-game .rg-title { font-size: 14px; font-weight: 600; }
+.relax-game .rg-desc { font-size: 11px; line-height: 1.5; color: var(--text-faint); }
+.relax-game.active .rg-desc { color: var(--text-dim); }
+.relax-main {
+  flex: 1 1 auto; min-width: 0; min-height: 0;
+  display: flex; align-items: center; justify-content: center;
+  overflow: auto;
+}
+
+/* 数独 */
+.sudoku-wrap {
+  display: flex; flex-direction: column; align-items: center; gap: 14px;
+  padding: 16px;
+}
+.sudoku-head {
+  display: flex; align-items: center; gap: 12px;
+}
+.sudoku-title { font-size: 18px; font-weight: 700; }
+.sudoku-btn {
+  background: transparent; border: 1px solid var(--border-strong);
+  color: var(--text-dim); padding: 6px 14px; border-radius: 8px;
+  font-size: 12.5px; font-family: var(--font); cursor: pointer;
+  transition: all var(--t-fast);
+}
+.sudoku-btn:hover { color: var(--text); border-color: var(--blue); }
+.sudoku-board {
+  display: grid; grid-template-columns: repeat(9, 42px);
+  grid-template-rows: repeat(9, 42px);
+  border: 2px solid var(--border-strong); border-radius: 8px;
+  background: var(--bg-panel); overflow: hidden;
+  outline: none;
+}
+.sdk-cell {
+  display: grid; place-items: center;
+  font-size: 18px; font-weight: 500; color: var(--text);
+  border: 1px solid rgba(255,255,255,0.06);
+  cursor: pointer; user-select: none;
+  background: transparent;
+  transition: background var(--t-fast);
+}
+/* 3×3 宫粗线 */
+.sdk-cell:nth-child(3n) { border-right: 2px solid var(--border-strong); }
+.sdk-cell:nth-child(9n) { border-right: none; }
+.sdk-cell:nth-child(n+19):nth-child(-n+27) { border-bottom: 2px solid var(--border-strong); }
+.sdk-cell:nth-child(n+46):nth-child(-n+54) { border-bottom: 2px solid var(--border-strong); }
+.sdk-cell.giver { color: var(--text-dim); font-weight: 700; background: rgba(255,255,255,0.05); }
+.sdk-cell.hl { background: rgba(88,166,255,0.08); }
+.sdk-cell.sel {
+  background: rgba(88,166,255,0.22);
+  box-shadow: inset 0 0 0 2px var(--blue);
+}
+.sdk-cell.conflict { color: var(--danger); background: rgba(255,123,114,0.14); font-weight: 700; }
+.sdk-cell:hover:not(.sel) { background: rgba(255,255,255,0.05); }
+.sudoku-pad { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+.sdk-num {
+  width: 40px; height: 40px; border-radius: 9px;
+  border: 1px solid var(--border-strong); background: var(--bg-panel);
+  color: var(--text); font-size: 16px; font-weight: 600; font-family: var(--font);
+  cursor: pointer; transition: all var(--t-fast);
+}
+.sdk-num:hover { border-color: var(--blue); color: var(--blue); }
+.sdk-num.sdk-erase { width: auto; padding: 0 14px; font-size: 13px; color: var(--text-dim); }
+.sudoku-msg { min-height: 20px; font-size: 13.5px; color: var(--text-dim); }
+.sudoku-msg.ok { color: var(--green); font-weight: 600; }
+.sudoku-diff { display: flex; gap: 6px; }
+.sudoku-diff .diff-btn { font-size: 11.5px; padding: 5px 10px; }
+.sudoku-diff .diff-btn.active { color: var(--blue); border-color: var(--blue); }
+
+/* 2048 */
+.t2048-wrap {
+  display: flex; flex-direction: column; align-items: center; gap: 14px;
+  padding: 16px;
+}
+.t2048-head { display: flex; align-items: center; gap: 14px; }
+.t2048-title { font-size: 18px; font-weight: 700; }
+.t2048-score, .t2048-best { font-size: 13px; color: var(--text-dim); }
+.t2048-score b, .t2048-best b { color: var(--text); font-variant-numeric: tabular-nums; }
+.t2048-board {
+  display: grid; grid-template-columns: repeat(4, 88px); gap: 8px;
+  background: var(--bg-panel); border: 1px solid var(--border);
+  border-radius: 12px; padding: 10px;
+}
+.t2048-cell {
+  width: 88px; height: 88px; border-radius: 8px;
+  display: grid; place-items: center;
+  background: rgba(255,255,255,0.04);
+  font-size: 26px; font-weight: 800; color: #fff;
+  transition: background var(--t-fast);
+}
+.t2048-cell.filled { color: #fff; text-shadow: 0 1px 4px rgba(0,0,0,0.35); }
+.t2048-msg { min-height: 20px; font-size: 14px; color: var(--text-dim); }
+.t2048-msg.ok { color: var(--green); font-weight: 600; }
+.t2048-pad { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.t2048-pad-mid { display: flex; gap: 6px; }
+
+/* 扫雷 */
+.mine-wrap {
+  display: flex; flex-direction: column; align-items: center; gap: 14px;
+  padding: 16px;
+}
+.mine-head { display: flex; align-items: center; gap: 16px; }
+.mine-title { font-size: 18px; font-weight: 700; }
+.mine-info { font-size: 13px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.mine-info b { color: var(--text); }
+.mine-board {
+  display: grid; grid-template-columns: repeat(9, 36px); gap: 2px;
+  background: var(--bg-panel); border: 1px solid var(--border);
+  border-radius: 8px; padding: 6px;
+  user-select: none;
+}
+.mine-cell {
+  width: 36px; height: 36px; border-radius: 4px;
+  display: grid; place-items: center;
+  font-size: 15px; font-weight: 700; cursor: pointer;
+  background: rgba(88,166,255,0.16);
+  transition: background var(--t-fast);
+}
+.mine-cell.odd { background: rgba(88,166,255,0.12); }
+.mine-cell.even { background: rgba(88,166,255,0.2); }
+.mine-cell:hover { filter: brightness(1.2); }
+.mine-cell.open { background: rgba(255,255,255,0.05); cursor: default; }
+.mine-cell.open:hover { filter: none; }
+.mine-cell.boom { background: rgba(255,123,114,0.4); }
+.mine-cell.n1 { color: var(--blue); }
+.mine-cell.n2 { color: var(--green); }
+.mine-cell.n3 { color: var(--danger); }
+.mine-cell.n4 { color: var(--purple); }
+.mine-msg { min-height: 20px; font-size: 14px; color: var(--text-dim); }
+.mine-msg.ok { color: var(--green); font-weight: 600; }
 
 /* 项目监控 */
 .proj-row {

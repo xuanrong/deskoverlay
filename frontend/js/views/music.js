@@ -2,7 +2,7 @@
 // 全局播放器（音乐页 / 在线音乐页共享）：音频由 musicAudio 单例承载，UI 由各视图自行渲染。
 import { invoke } from "../bus.js";
 import { state, saveState } from "../state.js";
-import { ICON_MUSIC, ICON_SHUFFLE, ICON_REPEAT } from "../icons.js";
+import { ICON_MUSIC, ICON_SHUFFLE, ICON_REPEAT, ICON_HEART, ICON_PREV, ICON_NEXT, ICON_PLAY, ICON_PAUSE, ICON_LIST, ICON_MORE, ICON_VOLUME } from "../icons.js";
 import { esc, normalizeSongs } from "./common.js";
 
 const musicAudio = new Audio();
@@ -55,57 +55,24 @@ function extractLrc(res, depth = 0) {
   return "";
 }
 
-// 调试日志：同时输出到前端 console 与 Rust 终端（log_msg 命令）。
-// 对象用循环安全的 inspect 序列化（JSON.stringify 遇循环引用会失败）。
-function inspect(v, depth = 0, seen = new Set()) {
-  if (v === null) return "null";
-  const t = typeof v;
-  if (t !== "object") return String(v).slice(0, 120);
-  if (seen.has(v)) return "[Circular]";
-  seen.add(v);
-  if (v instanceof Date) return "Date(" + v.toISOString() + ")";
-  if (Array.isArray(v)) return `Array(${v.length})[${v.map((x) => inspect(x, depth + 1, seen)).join(",").slice(0, 300)}]`;
-  const keys = Object.keys(v).slice(0, 20);
-  return `{${keys.map((k) => `${k}:${inspect(v[k], depth + 1, seen)}`).join(", ").slice(0, 400)}}`;
-}
-function dbg(...args) {
-  const msg = args.map((a) => (typeof a === "string" ? a : inspect(a))).join(" ");
-  console.log("[music]", msg);
-  invoke("log_msg", { msg }).catch(() => {});
-}
-
 async function fetchLyric(song, srcId) {
-  dbg("fetchLyric 开始", { title: song && (song.title || song.name), srcId });
   const src = (state.musicSources || []).find((x) => x.id === srcId);
-  if (!src || !song) { dbg("跳过：无音源或无歌曲对象"); return; }
+  if (!src || !song) return;
   try {
     const plugin = loadMusicPlugin(src.code);
-    if (typeof plugin.getLyric !== "function") {
-      dbg("插件无 getLyric 方法（不支持歌词）");
-      if (lyricEl) lyricEl.innerHTML = `<div class="dash-empty">暂无歌词（音源不支持）</div>`;
-      return;
-    }
-    dbg("调用 plugin.getLyric");
+    if (typeof plugin.getLyric !== "function") return;
     const res = await plugin.getLyric(song);
-    dbg("getLyric 返回结构", res);
     const lrc = extractLrc(res);
-    dbg("extractLrc 结果长度", lrc.length, "| 前80字符:", lrc.slice(0, 80));
     if (!lrc) {
-      if (lyricEl) lyricEl.innerHTML = `<div class="dash-empty">暂无歌词（返回为空）</div>`;
+      if (lyricEl) lyricEl.innerHTML = `<div class="dash-empty">暂无歌词</div>`;
       return;
     }
     if (currentSong && currentSong.srcId === srcId) {
       currentSong.lyric = lrc;
       currentLyric = parseLrc(lrc);
-      dbg("歌词解析行数", currentLyric.length);
       if (lyricEl) renderLyric();
-    } else {
-      dbg("歌词返回时歌曲已切换，忽略");
     }
-  } catch (e) {
-    dbg("歌词拉取异常", String(e));
-    if (lyricEl) lyricEl.innerHTML = `<div class="dash-empty">暂无歌词（拉取失败：${esc(String(e).slice(0, 60))}）</div>`;
-  }
+  } catch (e) { /* 歌词拉取失败不阻塞播放 */ }
 }
 
 // 音乐页歌词区（由 renderMusic 设置）与高亮索引
@@ -136,6 +103,28 @@ let queueModalEl = null;
 // 播完自动下一首（只绑定一次）
 musicAudio.addEventListener("ended", () => { if (playQueue.length) playNext(); });
 
+// 持久化播放状态（队列/索引/当前歌曲/播放中/进度），重启后恢复
+function savePlayback() {
+  state.playback = {
+    queue: playQueue.map((it) => ({ meta: it.meta || {}, song: it.song || null, srcId: it.srcId || null, url: it.url || null, type: it.type || "在线" })),
+    index: queueIndex,
+    song: currentSong ? {
+      title: currentSong.title, artist: currentSong.artist, artwork: currentSong.artwork,
+      url: currentSong.url, type: currentSong.type, srcId: currentSong.srcId,
+    } : null,
+    playing: !!musicAudio.src && !musicAudio.paused,
+    currentTime: musicAudio.currentTime || 0,
+  };
+  saveState();
+}
+let lastPlaybackSave = 0;
+musicAudio.addEventListener("play", savePlayback);
+musicAudio.addEventListener("pause", savePlayback);
+musicAudio.addEventListener("timeupdate", () => {
+  const now = Date.now();
+  if (now - lastPlaybackSave > 10000) { lastPlaybackSave = now; savePlayback(); }
+});
+
 // 直接播放一首（不动队列；各视图负责自己的 UI 渲染）
 function loadMeta({ title, artist, artwork, url, type, song, srcId }) {
   currentSong = { title, artist, artwork, url, type, song, srcId, lyric: null };
@@ -147,6 +136,7 @@ function loadMeta({ title, artist, artwork, url, type, song, srcId }) {
   if (song && srcId) fetchLyric(song, srcId);
   syncPlayerButtons?.();
   syncMusicUI?.();
+  savePlayback();
 }
 
 // 在线列表播放：整列表入队，播放 index 项
@@ -164,11 +154,12 @@ function playList(list, index, src) {
 }
 
 // 加载并播放队列项 i（在线项需先经 getMediaSource 取播放地址）
-async function loadQueueItem(i) {
+// forceReload=true 时忽略已缓存 url，强制重新获取（用于启动恢复，防止旧链接失效）
+async function loadQueueItem(i, forceReload) {
   const item = playQueue[i];
   if (!item) return;
   queueIndex = i;
-  if (item.url) { loadMeta({ ...item.meta, url: item.url, type: item.type, song: item.song, srcId: item.srcId }); return; }
+  if (item.url && !forceReload) { loadMeta({ ...item.meta, url: item.url, type: item.type, song: item.song, srcId: item.srcId }); return; }
   if (item.srcId) {
     const src = (state.musicSources || []).find((x) => x.id === item.srcId);
     if (src) {
@@ -364,7 +355,8 @@ function loadMusicPlugin(code) {
     }
     return { url: a, method, params, headers, body };
   }
-  const request = (method) => (a, b, c) => {
+  // axios 既可作为函数调用 axios({url,method,...})，也可 axios.get/post(...)（Parcel 打包插件大量用前者）
+  const axiosExec = (method, a, b, c) => {
     const r = normAxios(method, a, b, c);
     const full = r.url + toQuery(r.params);
     const h = r.headers || {};
@@ -381,13 +373,16 @@ function loadMusicPlugin(code) {
     }));
   };
 
-  const axiosMock = {
-    get: request("GET"), post: request("POST"), put: request("POST"), delete: request("GET"),
-    default: { get: request("GET"), post: request("POST") },
-    create: () => axiosMock,
-    interceptors: { request: { use() {} }, response: { use() {} } },
-    getUri: (cfg) => (cfg && cfg.url) || "",
-  };
+  const axiosMock = (cfg) => axiosExec((cfg && cfg.method) || "GET", cfg, undefined, undefined);
+  axiosMock.get = (url, cfg) => axiosExec("GET", url, cfg);
+  axiosMock.post = (url, data, cfg) => axiosExec("POST", url, data, cfg);
+  axiosMock.put = (url, data, cfg) => axiosExec("POST", url, data, cfg);
+  axiosMock.delete = (url, cfg) => axiosExec("GET", url, cfg);
+  axiosMock.head = (url, cfg) => axiosExec("GET", url, cfg);
+  axiosMock.default = axiosMock;
+  axiosMock.create = () => axiosMock;
+  axiosMock.interceptors = { request: { use() {} }, response: { use() {} } };
+  axiosMock.getUri = (cfg) => (cfg && cfg.url) || "";
   const heMock = {
     decode: (s) => String(s)
       .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
@@ -395,11 +390,46 @@ function loadMusicPlugin(code) {
       .replace(/&#(\d+);/g, (m, n) => String.fromCharCode(n)),
     encode: (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"),
   };
+  // crypto-js 最小实现：仅覆盖插件用到的 Base64→UTF8 解密（不依赖浏览器 atob/TextDecoder）
+  const b64decode = (str) => {
+    const B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=";
+    const s = String(str).replace(/[^A-Za-z0-9+/=]/g, "");
+    let bits, h1, h2, h3, h4, i = 0, out = "";
+    while (i < s.length) {
+      h1 = B64.indexOf(s[i++]); h2 = B64.indexOf(s[i++]);
+      h3 = B64.indexOf(s[i++]); h4 = B64.indexOf(s[i++]);
+      bits = (h1 << 18) | (h2 << 12) | (h3 << 6) | h4;
+      out += String.fromCharCode((bits >> 16) & 0xff, (bits >> 8) & 0xff, bits & 0xff);
+    }
+    return out; // 二进制串
+  };
+  const utf8decode = (bin) => {
+    let out = "", p = 0;
+    while (p < bin.length) {
+      const c = bin.charCodeAt(p++);
+      if (c < 0x80) out += String.fromCharCode(c);
+      else if (c < 0xe0) out += String.fromCharCode(((c & 0x1f) << 6) | (bin.charCodeAt(p++) & 0x3f));
+      else out += String.fromCharCode(((c & 0x0f) << 12) | ((bin.charCodeAt(p++) & 0x3f) << 6) | (bin.charCodeAt(p++) & 0x3f));
+    }
+    return out;
+  };
+  const cryptoUtf8 = {};
+  const cryptoMock = {
+    enc: {
+      Utf8: cryptoUtf8,
+      Base64: {
+        parse: (str) => ({ toString: (enc) => (enc === cryptoUtf8 ? utf8decode(b64decode(str)) : String(str)) }),
+        stringify: (wa) => (wa && wa.toString ? wa.toString(cryptoUtf8) : ""),
+      },
+    },
+    MD5: () => ({ toString: () => "" }),
+    AES: { decrypt: () => ({ toString: () => "" }) },
+  };
   const require = (name) => {
     if (name === "axios") return axiosMock;
     if (name === "he") return heMock;
     if (name === "cheerio") return { load: () => ({ text: () => "", html: () => "" }) };
-    if (name === "crypto-js" || name === "crypto-js/...") return {};
+    if (name === "crypto-js" || name === "crypto-js/...") return cryptoMock;
     if (name === "dayjs") return { default: () => ({ format: () => "" }) };
     if (name === "lodash" || name === "lodash/...") return {};
     return {};
@@ -419,7 +449,10 @@ function loadMusicPlugin(code) {
 
   const fn = new Function("module", "exports", "globalThis", "require", `'use strict';\n${code}\n`);
   fn(mod, mod.exports, sandbox, require);
-  return mod.exports || {};
+  const out = mod.exports || {};
+  // Parcel/ESM 打包的插件会把真实实例挂在 .default 上，需解包；
+  // 不解包则 plugin.search / getMediaSource 等全部为 undefined（表现为「缺少search」）
+  return out.default && typeof out.default === "object" ? out.default : out;
 }
 
 // ---- 音源管理弹窗：添加（URL/本地 js）/ 移除 ----
@@ -506,8 +539,31 @@ function showMusicSources(onDone) {
   renderList();
 }
 
+// 启动恢复：从持久化的 playback 重建队列、恢复当前歌曲与播放位置/状态
+export function initPlayback() {
+  const pb = state.playback;
+  if (!pb || !Array.isArray(pb.queue) || !pb.queue.length) return;
+  playQueue = pb.queue.map((it) => ({
+    meta: it.meta || {},
+    song: it.song || null,
+    srcId: it.srcId || null,
+    url: it.url || null,
+    type: it.type || "在线",
+  }));
+  const idx = (typeof pb.index === "number" && pb.index >= 0 && pb.index < playQueue.length) ? pb.index : 0;
+  loadQueueItem(idx, true).then(() => {
+    if (pb.currentTime) {
+      const seek = () => { try { musicAudio.currentTime = pb.currentTime; } catch (e) {} };
+      if (musicAudio.readyState >= 1) seek();
+      else musicAudio.addEventListener("loadedmetadata", seek, { once: true });
+    }
+    if (!pb.playing) musicAudio.pause();
+    savePlayback();
+  });
+}
+
 export function renderMusic(view) {
-  view.header.innerHTML = `<div class="view-title">音乐</div><div class="view-sub">在线播放 · 点「在线」搜索歌单/榜单</div>`;
+  view.header.innerHTML = `<div class="view-title">在线音乐</div><div class="view-sub">在线播放 · 点「在线」搜索歌单/榜单</div>`;
   const body = view.body;
   body.innerHTML = `
     <div class="music-view">
@@ -529,20 +585,20 @@ export function renderMusic(view) {
           <div class="music-sub" id="music-sub">${esc(currentSong ? (currentSong.artist || currentSong.type || "") : "未播放")}</div>
         </div>
         <div class="music-controls">
-          <button class="mc-btn" id="mc-like" title="喜欢（收藏到在线音乐-喜欢）">♡</button>
+          <button class="mc-btn" id="mc-like" title="喜欢（收藏到在线音乐-喜欢）">${ICON_HEART}</button>
           <button class="mc-btn" id="mc-shuffle" title="随机/顺序播放">${ICON_REPEAT}</button>
-          <button class="mc-btn" id="mc-prev" title="上一首">⏮</button>
-          <button class="mc-btn mc-big" id="mc-play" title="播放/暂停">▶</button>
-          <button class="mc-btn" id="mc-next" title="下一首">⏭</button>
-          <button class="mc-btn" id="mc-list" title="列表">☰</button>
+          <button class="mc-btn" id="mc-prev" title="上一首">${ICON_PREV}</button>
+          <button class="mc-btn mc-big" id="mc-play" title="播放/暂停">${ICON_PLAY}</button>
+          <button class="mc-btn" id="mc-next" title="下一首">${ICON_NEXT}</button>
+          <button class="mc-btn" id="mc-list" title="列表">${ICON_LIST}</button>
         </div>
         <div class="music-right">
           <button class="mc-btn mc-pill" id="mc-online" title="在线音乐（音源搜索/歌单/排行榜）">在线</button>
           <div class="mc-vol" title="音量">
-            <span>♪</span>
+            <span>${ICON_VOLUME}</span>
             <input type="range" id="mc-vol-range" min="0" max="100" value="80" />
           </div>
-          <button class="mc-btn" id="mc-more" title="更多">···</button>
+          <button class="mc-btn" id="mc-more" title="更多">${ICON_MORE}</button>
         </div>
       </div>
     </div>`;
@@ -587,7 +643,7 @@ export function renderMusic(view) {
 
   function updatePlayBtn() {
     const playing = !musicAudio.paused && !!musicAudio.src;
-    playBtn.textContent = playing ? "⏸" : "▶";
+    playBtn.innerHTML = playing ? ICON_PAUSE : ICON_PLAY;
     if (discEl) discEl.classList.toggle("playing", playing);
   }
   function onPlayPause() { updatePlayBtn(); syncPlayerButtons?.(); }
@@ -648,7 +704,6 @@ export function renderMusic(view) {
   syncPlayerButtons = () => {
     const fav = !!(currentSong && currentSong.url && (state.favorites || []).some((f) => f.url === currentSong.url));
     likeBtn.classList.toggle("active", fav);
-    likeBtn.textContent = fav ? "♥" : "♡";
     // 随机/顺序播放图标切换
     shuffleBtn.innerHTML = randomMode ? ICON_SHUFFLE : ICON_REPEAT;
     shuffleBtn.classList.toggle("active", randomMode);
@@ -785,11 +840,9 @@ function openOnlineMusic() {
         rankid: topList.rankid ?? topList.id ?? topList.rank_id ?? topList.specialid ?? topList.code ?? topList.rankId,
         volid: topList.volid ?? topList.vol ?? topList.vol_id ?? topList.version,
       };
-      dbg("榜单详情参数", { rankid: normalized.rankid, volid: normalized.volid, title: normalized.title });
       const res = await plugin.getTopListDetail(normalized, 1);
       renderSongList(normalizeMusicList(res), { title: "排行榜：" + (topList.title || ""), back: renderTopLists });
     } catch (e) {
-      dbg("榜单详情失败", e && (e.stack || e.message));
       resultsEl.innerHTML = `<div class="dash-empty">加载失败：${esc(String(e && e.message || e))}</div>`;
     }
   }
@@ -806,7 +859,6 @@ function openOnlineMusic() {
         back: () => { if (keyword) { if (panelInput) panelInput.value = keyword; doSearch(); } else loadDefaultSheets(); },
       });
     } catch (e) {
-      dbg("歌单详情失败", e && (e.stack || e.message));
       resultsEl.innerHTML = `<div class="dash-empty">加载失败：${esc(String(e && e.message || e))}</div>`;
     }
   }
@@ -820,7 +872,6 @@ function openOnlineMusic() {
       const res = await plugin.getAlbumInfo(album);
       renderSongList(normalizeMusicList(res), { title: "专辑：" + (album.title || ""), back: () => { if (panelInput) panelInput.value = keyword; doSearch(); } });
     } catch (e) {
-      dbg("专辑详情失败", e && (e.stack || e.message));
       resultsEl.innerHTML = `<div class="dash-empty">加载失败：${esc(String(e && e.message || e))}</div>`;
     }
   }
@@ -833,7 +884,6 @@ function openOnlineMusic() {
       const plugin = loadMusicPlugin(current.code);
       if (typeof plugin.getTopLists !== "function") throw new Error("该音源不支持排行榜");
       const raw = normalizeList(await plugin.getTopLists());
-      dbg("getTopLists 分组(前2)", raw.slice(0, 2));
       // 收集分组与扁平索引（榜单 id 字段可能是 id/rankid，点详情时统一归一化）
       const groups = [];
       const items = [];
@@ -858,14 +908,11 @@ function openOnlineMusic() {
       }
       const frag = document.createElement("div");
       frag.innerHTML = html;
-      let idx = 0;
-      frag.querySelectorAll(".online-item").forEach((row) => {
-        row.addEventListener("click", () => loadTopListDetail(items[idx]));
-        idx++;
+      frag.querySelectorAll(".online-item").forEach((row, i) => {
+        row.addEventListener("click", () => loadTopListDetail(items[i]));
       });
       resultsEl.appendChild(frag);
     } catch (e) {
-      dbg("排行榜失败", e && (e.stack || e.message));
       resultsEl.innerHTML = `<div class="dash-empty">加载失败：${esc(String(e && e.message || e))}</div>`;
     }
   }
@@ -877,8 +924,8 @@ function openOnlineMusic() {
     try {
       const plugin = loadMusicPlugin(current.code);
       let res = null;
-      if (typeof plugin.getMusicSheetPage === "function") res = await plugin.getMusicSheetPage(1, "hot");
-      else if (typeof plugin.getMusicSheets === "function") res = await plugin.getMusicSheets(1, "hot");
+      // 协议标准：默认推荐歌单走 getRecommendSheetsByTag（默认 tag id 为空字符串）
+      if (typeof plugin.getRecommendSheetsByTag === "function") res = await plugin.getRecommendSheetsByTag({ id: "" }, 1);
       const sheets = normalizeList(res);
       if (!sheets.length) {
         resultsEl.innerHTML = `<div class="dash-empty">输入关键词搜索歌单</div>`;
@@ -891,7 +938,6 @@ function openOnlineMusic() {
         onClick: (sheet) => loadSheetDetail(sheet, ""),
       });
     } catch (e) {
-      dbg("默认歌单失败", e && (e.stack || e.message));
       resultsEl.innerHTML = `<div class="dash-empty">歌单加载失败：${esc(String(e && e.message || e))} · 可输入关键词搜索</div>`;
     }
   }
@@ -925,7 +971,6 @@ function openOnlineMusic() {
         renderSongList(normalizeSongs(res), null);
       }
     } catch (e) {
-      dbg("搜索失败", e && (e.stack || e.message));
       resultsEl.innerHTML = `<div class="dash-empty">搜索失败：${esc(String(e && e.message || e))}</div>`;
     }
   }

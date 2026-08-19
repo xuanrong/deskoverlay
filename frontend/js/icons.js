@@ -38,3 +38,17 @@ export const ICON_CLOCK = `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9
 // 音乐播放模式
 export const ICON_SHUFFLE = `<svg viewBox="0 0 24 24"><path d="M16 3h5v5"/><path d="M4 20 20 4"/><path d="M21 15v6h-6"/><path d="M4 4l5 5"/></svg>`;
 export const ICON_REPEAT = `<svg viewBox="0 0 24 24"><path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></svg>`;
+
+// 音乐播放控制（统一线性风格）
+export const ICON_HEART = `<svg viewBox="0 0 24 24"><path d="M19 14c1.5-1.5 3-3.2 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.8 0-3 .5-4.5 2-1.5-1.5-2.7-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4 3 5.5l7 7Z"/></svg>`;
+export const ICON_PREV = `<svg viewBox="0 0 24 24"><path d="M6 4v16"/><path d="M20 5l-10 7 10 7z"/></svg>`;
+export const ICON_NEXT = `<svg viewBox="0 0 24 24"><path d="M18 4v16"/><path d="M4 5l10 7-10 7z"/></svg>`;
+export const ICON_PLAY = `<svg viewBox="0 0 24 24"><path d="M7 4l13 8-13 8z"/></svg>`;
+export const ICON_PAUSE = `<svg viewBox="0 0 24 24"><path d="M8 4v16"/><path d="M16 4v16"/></svg>`;
+export const ICON_LIST = `<svg viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13"/><path d="M3.5 6h.01M3.5 12h.01M3.5 18h.01"/></svg>`;
+export const ICON_MORE = `<svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>`;
+export const ICON_VOLUME = `<svg viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>`;
+
+// 休息一下 / 小游戏
+export const ICON_GAME = `<svg viewBox="0 0 24 24"><path d="M6 11h4"/><path d="M8 9v4"/><path d="M15 12.5h.01M17.5 10h.01"/><rect x="2" y="6" width="20" height="12" rx="4"/></svg>`;
+export const ICON_GRID = `<svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/></svg>`;

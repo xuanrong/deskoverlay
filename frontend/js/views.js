@@ -3,11 +3,13 @@
 import { renderDashboard } from "./views/dashboard.js";
 import { renderSystem } from "./views/system.js";
 import { renderMusic } from "./views/music.js";
+import { renderRelax } from "./views/relax.js";
 import { renderNotes } from "./views/notes.js";
 
 export const VIEW_RENDERERS = {
   dashboard: renderDashboard,
   system: renderSystem,
   music: renderMusic,
+  relax: renderRelax,
   notes: renderNotes,
 };

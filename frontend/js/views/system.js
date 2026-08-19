@@ -70,7 +70,12 @@ export function renderSystem(view) {
     els.cpuName.textContent = output.cpuName || "--";
     els.cores.textContent = `${output.cpuCores ?? "-"} 核`;
     els.uptime.textContent = fmtUptime(output.uptime ?? 0);
-    els.disks.innerHTML = (output.disks || []).map((d) => `
+    // 磁盘列表：内容未变化时不重建，避免每秒重绘造成"刷新"感
+    const disks = output.disks || [];
+    const disksJson = JSON.stringify(disks);
+    if (disksJson !== lastDisksJson) {
+      lastDisksJson = disksJson;
+      els.disks.innerHTML = disks.map((d) => `
       <div class="sys-disk">
         <div class="sys-disk-top">
           <span class="sys-disk-name">${esc(d.name || d.mount)}</span>
@@ -79,6 +84,8 @@ export function renderSystem(view) {
         </div>
         <div class="sys-bar"><div class="sys-bar-fill disk" style="width:${(d.pct ?? 0).toFixed(0)}%"></div></div>
       </div>`).join("") || `<div class="dash-empty">无磁盘信息</div>`;
+    }
   });
+  let lastDisksJson = "";
   view.onDestroy(off);
 }
