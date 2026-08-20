@@ -14,10 +14,13 @@ export const state = {
   workLogs: [], // 工作记录：{ id, date:"YYYY-MM-DD", time:"HH:MM", text, type, tags }
   ideabox: [], // 灵感碎片：{ id, text, tag, ts }（按添加顺序排列）
   ideaTags: [], // 灵感碎片自定义标签（内置标签之外的扩展）
+  mineBest: {}, // 扫雷最佳用时（秒）：{ easy, medium, hard }
   musicSources: [], // 音乐音源插件：{ id, name, src, code }
   favorites: [], // 收藏的歌曲：{ title, artist, artwork, url }
   playback: { queue: [], index: -1, song: null, playing: false, currentTime: 0 }, // 音乐播放状态（重启恢复）
   navState: {}, // 各模块导航浏览状态：{ [moduleId]: { scrollTop, tab, ... } }（切换/重启后恢复）
+  settings: { rememberModule: true }, // 应用设置：rememberModule=启动时回到上次模块
+  lock: { enabled: false, minutes: 5 }, // 隐私锁定：离开 enabled 分钟自动锁定全屏
 };
 
 let ready = false;
@@ -66,6 +69,19 @@ export async function loadState() {
   // 灵感碎片自定义标签：结构校验（去重、非空、去内置重名）
   if (!Array.isArray(state.ideaTags)) state.ideaTags = [];
   state.ideaTags = Array.from(new Set(state.ideaTags.filter((t) => typeof t === "string" && t.trim())));
+  // 扫雷最佳用时：结构校验（数值类型）
+  if (!state.mineBest || typeof state.mineBest !== "object" || Array.isArray(state.mineBest)) state.mineBest = {};
+  for (const k of ["easy", "medium", "hard"]) {
+    if (typeof state.mineBest[k] !== "number") state.mineBest[k] = null;
+  }
+  // 应用设置：结构校验
+  if (!state.settings || typeof state.settings !== "object" || Array.isArray(state.settings)) state.settings = {};
+  if (typeof state.settings.rememberModule !== "boolean") state.settings.rememberModule = true;
+  // 隐私锁定：结构校验
+  if (!state.lock || typeof state.lock !== "object" || Array.isArray(state.lock)) state.lock = {};
+  if (typeof state.lock.enabled !== "boolean") state.lock.enabled = false;
+  if (typeof state.lock.minutes !== "number") state.lock.minutes = 5;
+  state.lock.minutes = Math.max(1, Math.min(120, Math.round(state.lock.minutes) || 5));
   // 导航浏览状态：结构校验
   if (!state.navState || typeof state.navState !== "object" || Array.isArray(state.navState)) {
     state.navState = {};

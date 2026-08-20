@@ -15,12 +15,14 @@ function shuffle(arr) {
 function ok(board, idx, v) {
   const r = Math.floor(idx / 9), c = idx % 9;
   for (let i = 0; i < 9; i++) {
-    if (board[r * 9 + i] === v) return false;
-    if (board[i * 9 + c] === v) return false;
+    const ri = r * 9 + i, ci = i * 9 + c;
+    if (ri !== idx && board[ri] === v) return false;
+    if (ci !== idx && board[ci] === v) return false;
   }
   const br = Math.floor(r / 3) * 3, bc = Math.floor(c / 3) * 3;
   for (let i = 0; i < 3; i++) for (let k = 0; k < 3; k++) {
-    if (board[(br + i) * 9 + bc + k] === v) return false;
+    const bi = (br + i) * 9 + bc + k;
+    if (bi !== idx && board[bi] === v) return false;
   }
   return true;
 }

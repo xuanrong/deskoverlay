@@ -10,6 +10,7 @@ import { initPlayback } from "./views/music.js";
 import { Tasks } from "./tasks.js";
 import { CommandBar } from "./commandbar.js";
 import { initReminders } from "./reminders.js";
+import { startLockController } from "./lock.js";
 import { ICON_CHECK, ICON_EXTERNAL } from "./icons.js";
 
 // -------------------- 视图包装 --------------------
@@ -182,7 +183,10 @@ document.getElementById("help-close").addEventListener("click", () => {
 // 异步初始化状态，就绪后渲染导航与当前模块
 loadState().then(() => {
   renderNav();
-  const initial = MODULES.some((m) => m.id === state.currentModule) ? state.currentModule : "dashboard";
+  // 启动进入的模块：默认回到「今日概览」；设置允许记住上次所在模块
+  const remember = state.settings?.rememberModule !== false;
+  const last = MODULES.some((m) => m.id === state.currentModule) ? state.currentModule : "dashboard";
+  const initial = remember ? last : "dashboard";
   switchModule(initial);
 
   // 恢复音乐播放状态（队列/歌曲/播放位置）
@@ -190,6 +194,9 @@ loadState().then(() => {
 
   // 提醒：渲染时钟块倒计时 + 每秒检查
   initReminders();
+
+  // 隐私锁定：离开设定时长后全屏遮罩
+  startLockController();
 
   console.log("[DeskOverlay] 工作台已就绪 · 模块:", state.currentModule);
 });

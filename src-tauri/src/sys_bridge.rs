@@ -9,8 +9,16 @@
 use std::time::{Duration, Instant};
 use sysinfo::{CpuRefreshKind, Disks, Networks, System};
 use tauri::{AppHandle, Emitter};
+use windows::Win32::System::SystemInformation::GetTickCount64;
+use windows::Win32::UI::Input::KeyboardAndMouse::{GetLastInputInfo, LASTINPUTINFO};
 use windows::Win32::System::Power::SYSTEM_POWER_STATUS;
 use windows::Win32::System::Power::GetSystemPowerStatus;
+use windows::core::Interface;
+use windows::Win32::Media::Audio::{
+    IAudioSessionControl2, IAudioSessionEnumerator, IAudioSessionManager2, IMMDevice,
+    IMMDeviceEnumerator, MMDeviceEnumerator, AudioSessionStateActive, eMultimedia, eRender,
+};
+use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_ALL, COINIT_MULTITHREADED};
 
 /// 读取真实电源状态，返回 (电池百分比, 电源标签)。
 /// 电源标签：AC（插电）/ BATTERY（使用电池）/ CHARGING（充电中）。
@@ -128,6 +136,61 @@ pub fn start_system_provider(app: AppHandle) {
                 }),
             );
 
+            std::thread::sleep(Duration::from_secs(1));
+        }
+    });
+}
+
+/// 取当前距最后一次键鼠输入的空闲毫秒数（全局，跨所有应用）；失败返回 0。
+fn last_input_idle_ms() -> u64 {
+    let mut info = LASTINPUTINFO { cbSize: std::mem::size_of::<LASTINPUTINFO>() as u32, dwTime: 0 };
+    if !unsafe { GetLastInputInfo(&mut info) }.as_bool() {
+        return 0;
+    }
+    let now32 = (unsafe { GetTickCount64() } & 0xFFFF_FFFF) as u32;
+    now32.wrapping_sub(info.dwTime) as u64
+}
+
+/// 检测是否有音频会话正在播放（用于"看视频/听音乐不锁屏"）。
+/// 遍历默认多媒体播放设备的音频会话，只要存在非"系统音"且状态为 Active 即视为播放。
+fn is_audio_playing() -> bool {
+    unsafe {
+        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+        let r = (|| -> windows::core::Result<bool> {
+            let enumerator: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)?;
+            let device: IMMDevice = enumerator.GetDefaultAudioEndpoint(eRender, eMultimedia)?;
+            let manager: IAudioSessionManager2 = device.Activate::<IAudioSessionManager2>(CLSCTX_ALL, None)?;
+            let sessions: IAudioSessionEnumerator = manager.GetSessionEnumerator()?;
+            let count = sessions.GetCount()?;
+            for i in 0..count {
+                let control = sessions.GetSession(i)?;
+                let ctrl2: IAudioSessionControl2 = control.cast()?;
+                // 系统音（按键提示音等）不算播放，异常即不是系统音
+                if ctrl2.IsSystemSoundsSession().is_ok() { continue; }
+                if control.GetState()? == AudioSessionStateActive {
+                    return Ok(true);
+                }
+            }
+            Ok(false)
+        })();
+        CoUninitialize();
+        r.unwrap_or(false)
+    }
+}
+
+/// 全局空闲监控：每秒把"距上次输入的毫秒数"与"是否有音频播放"推送给前端
+/// （system-idle 事件）。供隐私锁屏使用——无论用户在哪应用操作都不算空闲，
+/// 且播放视频/音乐时即使无输入也不触发锁定。
+pub fn start_lock_idle_monitor(app: AppHandle) {
+    std::thread::spawn(move || {
+        loop {
+            let _ = app.emit(
+                "system-idle",
+                serde_json::json!({
+                    "idleMs": last_input_idle_ms(),
+                    "audioPlaying": is_audio_playing(),
+                }),
+            );
             std::thread::sleep(Duration::from_secs(1));
         }
     });

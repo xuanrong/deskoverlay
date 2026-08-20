@@ -298,12 +298,37 @@ fn rename_file(name: String, new_name: String) -> Result<(), String> {
     fs::rename(&from, &to).map_err(|e| e.to_string())
 }
 
+/// 显示系统级锁屏窗口：全屏置顶（盖住其它应用与任务栏），并通知锁屏页开始动画。
+#[tauri::command]
+fn show_lock(app: tauri::AppHandle) {
+    if let Some(win) = app.get_webview_window("lock") {
+        let _ = win.set_always_on_top(true);
+        let _ = win.set_fullscreen(true);
+        let _ = win.show();
+        let _ = win.set_focus();
+    }
+    let _ = app.emit("lock-init", ());
+}
+
+/// 隐藏系统级锁屏窗口。
+#[tauri::command]
+fn hide_lock(app: tauri::AppHandle) {
+    if let Some(win) = app.get_webview_window("lock") {
+        let _ = win.hide();
+        let _ = win.set_always_on_top(false);
+    }
+    let _ = app.emit("lock-hide", ());
+}
+
 fn main() {
     tauri::Builder::default()
         .manage(sedentary::new_sedentary_state())
         .setup(|app| {
             // 启动系统指标 Provider 数据桥（CPU + 内存 → provider-emit）
             sys_bridge::start_system_provider(app.handle().clone());
+
+            // 全局空闲监控（供隐私锁屏判断）
+            sys_bridge::start_lock_idle_monitor(app.handle().clone());
 
             // 久坐提醒：启动后端键鼠活动监控线程（配置经 set_sedentary_config 下发）
             sedentary::start_sedentary_monitor(
@@ -320,7 +345,7 @@ fn main() {
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![quit_app, show_reminder, hide_reminder, http_get, http_post, load_state, save_state, list_desktop_files, open_file, reveal_file, delete_file, rename_file, sedentary::set_sedentary_config])
+        .invoke_handler(tauri::generate_handler![quit_app, show_reminder, hide_reminder, http_get, http_post, load_state, save_state, list_desktop_files, open_file, reveal_file, delete_file, rename_file, show_lock, hide_lock, sedentary::set_sedentary_config])
         .run(tauri::generate_context!())
         .expect("DeskOverlay 运行失败");
 }

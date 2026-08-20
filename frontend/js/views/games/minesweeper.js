@@ -1,5 +1,8 @@
 // 扫雷：左键翻开（空格扩散），右键标旗/取消，踩雷结束，全部非雷翻开胜利。
 // 难度：简单 9×9×10 / 中等 13×13×28 / 困难 16×16×40，可随时切换。
+// 记录每个难度的最佳用时（耐久于配置，重启保留）。
+
+import { state, saveState } from "../../state.js";
 
 const DIFFS = {
   easy:   { label: "简单", rows: 9,  cols: 9,  mines: 10, size: 38 },
@@ -14,6 +17,7 @@ export function renderMinesweeper(el) {
         <span class="mine-title">扫雷</span>
         <span class="mine-info">🚩 <b id="mine-flag">10</b></span>
         <span class="mine-info">⏱ <b id="mine-time">0</b></span>
+        <span class="mine-info">🏆 <b id="mine-best">--</b></span>
         <div class="mine-diffs" id="mine-diffs"></div>
         <button class="sudoku-btn" id="mine-new">新游戏</button>
       </div>
@@ -24,10 +28,12 @@ export function renderMinesweeper(el) {
   const boardEl = el.querySelector("#mine-board");
   const flagEl = el.querySelector("#mine-flag");
   const timeEl = el.querySelector("#mine-time");
+  const bestEl = el.querySelector("#mine-best");
   const msgEl = el.querySelector("#mine-msg");
   const diffsEl = el.querySelector("#mine-diffs");
 
   let diff = DIFFS.easy;
+  let diffKey = "easy";
   let mines = [];    // rows*cols bool
   let revealed = []; // rows*cols bool
   let flags = [];    // rows*cols bool
@@ -104,7 +110,20 @@ export function renderMinesweeper(el) {
       clearInterval(timer);
       msgEl.textContent = "🎉 胜利！全部排除";
       msgEl.classList.add("ok");
+      // 记录该难度最佳用时
+      const prev = state.mineBest?.[diffKey];
+      if (typeof prev !== "number" || seconds < prev) {
+        state.mineBest[diffKey] = seconds;
+        saveState();
+      }
+      updateBest();
     }
+  }
+
+  // 显示当前难度最佳用时
+  function updateBest() {
+    const b = state.mineBest?.[diffKey];
+    bestEl.textContent = typeof b === "number" ? `${b}s` : "--";
   }
 
   function toggleFlag(i) {
@@ -155,7 +174,9 @@ export function renderMinesweeper(el) {
       b.classList.toggle("active", active);
       b.addEventListener("click", () => {
         diff = DIFFS[b.dataset.diff];
+        diffKey = b.dataset.diff;
         renderDiffs();
+        updateBest();
         init(-1);
         render();
       });
@@ -166,6 +187,7 @@ export function renderMinesweeper(el) {
   boardEl.addEventListener("contextmenu", (e) => e.preventDefault());
 
   renderDiffs();
+  updateBest();
   init(-1);
   render();
 }

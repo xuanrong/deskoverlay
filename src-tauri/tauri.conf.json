@@ -37,6 +37,20 @@
         "visible": false,
         "alwaysOnTop": true,
         "skipTaskbar": true
+      },
+      {
+        "label": "lock",
+        "title": "",
+        "url": "lock.html",
+        "fullscreen": true,
+        "decorations": false,
+        "transparent": false,
+        "resizable": false,
+        "shadow": false,
+        "visible": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": false,
+        "focus": false
       }
     ],
     "security": {

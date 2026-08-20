@@ -7,6 +7,7 @@ import { renderRelax } from "./views/relax.js";
 import { renderNotes } from "./views/notes.js";
 import { renderWorkLog } from "./views/worklog.js";
 import { renderIdeabox } from "./views/ideabox.js";
+import { renderSettings } from "./views/settings.js";
 
 export const VIEW_RENDERERS = {
   dashboard: renderDashboard,
@@ -16,4 +17,5 @@ export const VIEW_RENDERERS = {
   music: renderMusic,
   relax: renderRelax,
   notes: renderNotes,
+  settings: renderSettings,
 };
