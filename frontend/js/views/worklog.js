@@ -68,12 +68,12 @@ export function renderWorkLog(view) {
   const body = view.body;
   body.innerHTML = `
     <div class="wl-form">
-      <div class="wl-form-row">
-        <label>日期 <span id="wl-date"></span></label>
-        <label>类型 <span id="wl-type"></span></label>
-      </div>
-      <div class="wl-form-main">
-        <textarea id="wl-text" rows="2" placeholder="记录今天做了什么…（回车换行，Ctrl+回车添加）"></textarea>
+      <textarea id="wl-text" rows="2" placeholder="记录一条工作，Ctrl+Enter 提交…"></textarea>
+      <div class="wl-form-foot">
+        <div class="wl-form-row">
+          <label>日期 <span id="wl-date"></span></label>
+          <label>类型 <span id="wl-type"></span></label>
+        </div>
         <button class="btn-primary wl-add" id="wl-add">添加记录</button>
       </div>
     </div>

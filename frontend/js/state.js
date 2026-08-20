@@ -12,6 +12,8 @@ export const state = {
   sedentary: { enabled: false, intervalMin: 45 }, // 久坐提醒：开关 + 连续使用间隔（分钟）
   water: { enabled: false, intervalMin: 90 }, // 喝水提醒：开关 + 间隔（分钟）
   workLogs: [], // 工作记录：{ id, date:"YYYY-MM-DD", time:"HH:MM", text, type, tags }
+  ideabox: [], // 灵感碎片：{ id, text, tag, ts }（按添加顺序排列）
+  ideaTags: [], // 灵感碎片自定义标签（内置标签之外的扩展）
   musicSources: [], // 音乐音源插件：{ id, name, src, code }
   favorites: [], // 收藏的歌曲：{ title, artist, artwork, url }
   playback: { queue: [], index: -1, song: null, playing: false, currentTime: 0 }, // 音乐播放状态（重启恢复）
@@ -58,6 +60,12 @@ export async function loadState() {
   // 工作记录：结构校验
   if (!Array.isArray(state.workLogs)) state.workLogs = [];
   state.workLogs = state.workLogs.filter((w) => w && typeof w === "object" && w.id && w.text);
+  // 灵感碎片：结构校验
+  if (!Array.isArray(state.ideabox)) state.ideabox = [];
+  state.ideabox = state.ideabox.filter((i) => i && typeof i === "object" && i.id && typeof i.text === "string" && i.text.trim());
+  // 灵感碎片自定义标签：结构校验（去重、非空、去内置重名）
+  if (!Array.isArray(state.ideaTags)) state.ideaTags = [];
+  state.ideaTags = Array.from(new Set(state.ideaTags.filter((t) => typeof t === "string" && t.trim())));
   // 导航浏览状态：结构校验
   if (!state.navState || typeof state.navState !== "object" || Array.isArray(state.navState)) {
     state.navState = {};

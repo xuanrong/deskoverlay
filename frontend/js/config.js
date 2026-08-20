@@ -1,11 +1,12 @@
 // 模块定义 — 侧边导航 + 固定模块布局（无拖拽、无工作模式）。
 // 每个模块对应导航栏一项与主区域一个固定视图。
 // icon 为线性 SVG（stroke currentColor），导航/指令条统一渲染。
-import { ICON_HOME, ICON_ACTIVITY, ICON_MUSIC, ICON_NOTES, ICON_GAME, ICON_WATER, ICON_CALENDAR, ICON_BUILDING, ICON_CLOCK, ICON_LIST } from "./icons.js";
+import { ICON_HOME, ICON_ACTIVITY, ICON_MUSIC, ICON_NOTES, ICON_GAME, ICON_WATER, ICON_CALENDAR, ICON_BUILDING, ICON_CLOCK, ICON_LIST, ICON_IDEA } from "./icons.js";
 
 export const MODULES = [
   { id: "dashboard", title: "今日概览", icon: ICON_HOME },
   { id: "worklog", title: "工作记录", icon: ICON_LIST },
+  { id: "ideabox", title: "灵感碎片", icon: ICON_IDEA },
   { id: "system", title: "系统健康", icon: ICON_ACTIVITY },
   { id: "music", title: "在线音乐", icon: ICON_MUSIC },
   { id: "relax", title: "休息一下", icon: ICON_GAME },

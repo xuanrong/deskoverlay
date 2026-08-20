@@ -177,7 +177,7 @@ function renderTasksMini(el, view) {
   }
 
   function render() {
-    const tasks = Tasks.list().slice(0, 8);
+    const tasks = Tasks.list();
     listEl.innerHTML = tasks.length
       ? tasks.map((t) => {
           const p = /^P\d$/.test(t.priority || "") ? t.priority : "P2";
@@ -360,6 +360,8 @@ async function renderFilesBlock(el, view) {
   const CATS = ["文件夹", "图片", "文档", "代码", "压缩", "视频", "音频", "其他"];
   // 当前 tab 持久化到导航状态：切换模块/重启后恢复上次浏览的分类
   let currentTab = state.navState?.dashboard?.tab || "";
+  // 布局模式（list 列表 / grid 网格），同样持久化
+  let layout = state.navState?.dashboard?.layout || "list";
 
   // 完整刷新：重新拉取桌面文件 → 重新分组 → 重渲染 tabs/content（操作后调用）
   async function load() {
@@ -390,7 +392,9 @@ async function renderFilesBlock(el, view) {
     // 保留当前 tab；若该分类已无文件（删光/改名），回退到首个 tab
     if (!tabs.includes(currentTab)) currentTab = tabs[0];
     el.innerHTML = `
-    <div class="dash-section-title">文件中心 <span class="dash-count">${files.length}</span></div>
+    <div class="dash-section-title">文件中心 <span class="dash-count">${files.length}</span>
+      <button class="file-layout-toggle" id="d-file-layout" title="切换布局">${layout === "grid" ? "列表" : "网格"}</button>
+    </div>
     <div class="file-tabs" id="d-file-tabs"></div>
     <div class="file-tab-content" id="d-file-content"></div>
     <div class="recent-ops">
@@ -400,16 +404,34 @@ async function renderFilesBlock(el, view) {
 
     const tabsEl = el.querySelector("#d-file-tabs");
     const contentEl = el.querySelector("#d-file-content");
+    const layoutBtn = el.querySelector("#d-file-layout");
+    layoutBtn?.addEventListener("click", () => {
+      layout = layout === "grid" ? "list" : "grid";
+      // 持久化布局偏好
+      if (!state.navState) state.navState = {};
+      if (!state.navState.dashboard) state.navState.dashboard = {};
+      state.navState.dashboard.layout = layout;
+      saveState();
+      layoutBtn.textContent = layout === "grid" ? "列表" : "网格";
+      renderContent();
+    });
     el.querySelector(".recent-ops-all").addEventListener("click", showRecentOpsDialog);
 
     function renderContent() {
       const arr = groups[currentTab] || [];
       const icon = FILE_ICONS[currentTab] || ICON_PAPERCLIP;
-      contentEl.innerHTML = arr.map((f) => `
-      <div class="fg-item" data-name="${esc(f.name)}" title="${esc(f.name)}（右键操作）">
-        <span class="fg-icon">${icon}</span><span class="fg-name">${esc(f.name)}</span>
-      </div>`).join("");
-      contentEl.querySelectorAll(".fg-item").forEach((item) => {
+      if (layout === "grid") {
+        contentEl.innerHTML = `<div class="fg-grid">` + arr.map((f) => `
+        <div class="fg-card" data-name="${esc(f.name)}" title="${esc(f.name)}（右键操作）">
+          <span class="fg-icon">${icon}</span><span class="fg-name">${esc(f.name)}</span>
+        </div>`).join("") + `</div>`;
+      } else {
+        contentEl.innerHTML = `<div class="fg-list">` + arr.map((f) => `
+        <div class="fg-item" data-name="${esc(f.name)}" title="${esc(f.name)}（右键操作）">
+          <span class="fg-icon">${icon}</span><span class="fg-name">${esc(f.name)}</span>
+        </div>`).join("") + `</div>`;
+      }
+      contentEl.querySelectorAll(".fg-item, .fg-card").forEach((item) => {
         item.addEventListener("contextmenu", (e) => {
           e.preventDefault();
           showFileMenu(e.clientX, e.clientY, item.dataset.name, view, load);

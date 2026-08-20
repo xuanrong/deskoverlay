@@ -1398,6 +1398,30 @@ body.no-select { user-select: none; }
 .fg-icon { flex: 0 0 auto; font-size: 15px; }
 .fg-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+/* 文件中心网格布局 */
+.file-layout-toggle {
+  margin-left: auto; align-self: center;
+  padding: 3px 10px; border-radius: 7px; border: 1px solid var(--border);
+  background: transparent; color: var(--text-dim); font-size: 11.5px; cursor: pointer;
+  font-family: var(--font); transition: all var(--t-fast);
+}
+.file-layout-toggle:hover { background: var(--bg-hover); color: var(--text); border-color: rgba(88,166,255,0.35); }
+.fg-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(86px, 1fr)); gap: 8px; padding: 2px; }
+.fg-card {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 7px;
+  padding: 14px 6px 12px; border-radius: 10px;
+  background: var(--bg-panel-2); border: 1px solid var(--border);
+  cursor: default; text-align: center; min-width: 0;
+  transition: border-color var(--t-fast), background var(--t-fast);
+}
+.fg-card:hover { background: var(--bg-hover); border-color: rgba(88,166,255,0.35); }
+.fg-card .fg-icon { font-size: 30px; margin: 0; }
+.fg-card .fg-icon svg { width: 34px; height: 34px; stroke-width: 1.5; }
+.fg-card .fg-name {
+  font-size: 11.5px; color: var(--text-dim); max-width: 100%;
+  word-break: break-all; overflow: hidden; text-overflow: ellipsis;
+}
+
 /* 文件 tab 栏 */
 .file-tabs {
   display: flex; flex-wrap: wrap; gap: 4px;
@@ -1509,6 +1533,107 @@ body.no-select { user-select: none; }
 .notes-area:focus { border-color: var(--blue); }
 .notes-saved { font-size: 11px; color: var(--text-faint); text-align: right; margin-top: 6px; flex: 0 0 auto; }
 
+/* 灵感碎片 */
+.idea-composer {
+  background: var(--bg-panel-2); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 14px 16px 12px;
+  margin-bottom: 16px; flex: 0 0 auto;
+}
+.idea-composer-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 10px; }
+.idea-form-tags { display: flex; flex-wrap: wrap; gap: 4px; }
+/* 灵感/工作记录两块的输入框样式统一 */
+.idea-input,
+.wl-form > textarea {
+  width: 100%;
+  background: var(--bg-input); border: 1px solid var(--border-input);
+  border-radius: var(--radius); color: var(--text);
+  font-family: var(--font); font-size: 14px; line-height: 1.6;
+  padding: 10px 14px; outline: none;
+}
+.wl-form > textarea { resize: none; min-height: 42px; }
+.idea-input::placeholder,
+.wl-form > textarea::placeholder { color: var(--text-faint); }
+.idea-input:focus,
+.wl-form > textarea:focus { border-color: var(--blue); }
+.idea-filters { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
+.filter-chip { position: relative; display: inline-flex; align-items: center; }
+.filter-chip-del {
+  position: absolute; top: -7px; right: -7px;
+  width: 15px; height: 15px; border-radius: 50%;
+  display: none; align-items: center; justify-content: center;
+  background: var(--bg-panel-2); color: var(--text-faint);
+  border: 1px solid var(--border-strong); cursor: pointer;
+  font-size: 10px; line-height: 1; padding: 0;
+}
+.filter-chip:hover .filter-chip-del { display: flex; }
+.filter-chip-del:hover { color: var(--danger); border-color: rgba(255,90,80,0.5); background: rgba(255,90,80,0.14); }
+.idea-tag-add { border-style: dashed !important; color: var(--text-faint) !important; font-size: 11.5px; }
+.idea-tag-add:hover { color: var(--blue) !important; border-color: rgba(88,166,255,0.4) !important; background: rgba(88,166,255,0.1) !important; }
+.idea-add { flex: 0 0 auto; padding: 8px 16px; }
+.idea-tag-opt {
+  padding: 3px 10px; border-radius: 12px; border: 1px solid var(--border);
+  background: transparent; color: var(--text-dim); font-size: 11.5px; cursor: pointer;
+  font-family: var(--font); transition: all var(--t-fast);
+}
+.idea-tag-opt:hover { background: var(--bg-hover); color: var(--text); }
+.idea-tag-opt.active { color: var(--blue); border-color: rgba(88,166,255,0.4); background: rgba(88,166,255,0.14); }
+.idea-grid {
+  display: flex; align-items: flex-start; gap: 12px;
+}
+.idea-col {
+  flex: 1 1 0; min-width: 0;
+  display: flex; flex-direction: column; gap: 12px;
+}
+.idea-card {
+  display: flex; flex-direction: column; gap: 10px;
+  background: var(--bg-panel-2); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 14px 16px 10px;
+  transition: border-color var(--t-fast), background var(--t-fast);
+}
+.idea-card:hover { border-color: var(--border-strong); background: var(--bg-hover); }
+.idea-text {
+  font-size: 14px; line-height: 1.6; color: var(--text);
+  overflow-wrap: break-word; white-space: pre-wrap;
+}
+.idea-meta {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  margin-top: auto; padding-top: 8px;
+}
+.idea-meta-left { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.idea-tag { font-size: 10.5px; font-weight: 600; padding: 2px 8px; border-radius: 11px; flex: 0 0 auto; }
+.idea-tag.id-idea { background: rgba(210,153,34,0.18); color: var(--amber); }
+.idea-tag.id-think { background: rgba(177,99,252,0.16); color: var(--purple); }
+.idea-tag.id-todo { background: rgba(88,166,255,0.16); color: var(--blue); }
+.idea-tag.id-read { background: rgba(63,185,80,0.16); color: var(--green); }
+.idea-tag.id-life { background: rgba(210,153,34,0.16); color: var(--amber); }
+.idea-tag.id-other { background: rgba(154,167,180,0.14); color: var(--text-dim); }
+.idea-tag.id-custom { background: rgba(95,207,201,0.16); color: #4fd1c5; }
+.idea-time { font-size: 11px; color: var(--text-faint); font-variant-numeric: tabular-nums; flex: 0 0 auto; }
+.idea-actions { display: flex; align-items: center; gap: 2px; flex: 0 0 auto; }
+.idea-edit, .idea-del {
+  opacity: 0; flex: 0 0 auto; width: 22px; height: 22px;
+  display: flex; align-items: center; justify-content: center;
+  background: transparent; border: 0; color: var(--text-faint);
+  border-radius: 6px; cursor: pointer; font-size: 13px;
+}
+.idea-card:hover .idea-edit, .idea-card:hover .idea-del { opacity: 1; }
+.idea-edit:hover { background: var(--bg-hover); color: var(--blue); }
+.idea-del:hover { background: rgba(255,90,80,0.16); color: var(--danger); }
+
+/* 灵感编辑弹窗 */
+.idea-edit-modal { width: min(560px, 92vw); }
+.idea-edit-modal h3 { margin: 0 0 14px; font-size: 17px; }
+.idea-edit-modal .tm-field { margin: 0 0 14px; }
+.idea-edit-modal textarea {
+  width: 100%; min-height: 132px; resize: vertical;
+  background: var(--bg-panel); border: 1px solid var(--border);
+  border-radius: var(--radius); color: var(--text);
+  font-family: var(--font); font-size: 14px; line-height: 1.7; padding: 12px 14px; outline: none;
+}
+.idea-edit-modal textarea:focus { border-color: var(--blue); }
+.idea-modal-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 18px; }
+.idea-edit-modal .tm-actions { gap: 8px; padding-top: 4px; }
+
 /* ====================== 工作记录（按天时间线） ====================== */
 .wl-form {
   background: var(--bg-panel);
@@ -1537,15 +1662,13 @@ body.no-select { user-select: none; }
 .wl-form-row .cs { display: inline-flex; align-items: center; gap: 6px; height: auto; padding: 6px 10px; cursor: pointer; }
 .wl-form-row .dp:focus, .wl-form-row .cs:focus { border-color: var(--blue); box-shadow: none; }
 .wl-form-row input:focus, .wl-form-row .dp:focus, .wl-form-row .cs:focus { border-color: var(--blue); }
-.wl-form-main { display: flex; gap: 10px; align-items: stretch; }
-.wl-form-main textarea {
-  flex: 1 1 auto; resize: none; min-height: 42px;
-  background: var(--bg-input); border: 1px solid var(--border-input); color: var(--text);
-  border-radius: var(--radius-sm); outline: none; font-family: var(--font);
-  font-size: 13.5px; line-height: 1.6; padding: 8px 10px;
+.wl-form > textarea {
+  resize: none; min-height: 42px;
 }
-.wl-form-main textarea:focus { border-color: var(--blue); }
-.wl-add { flex: 0 0 auto; align-self: stretch; min-height: 42px; }
+.wl-form > textarea:focus { border-color: var(--blue); }
+.wl-form-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.wl-form-foot .wl-form-row { flex: 1 1 auto; }
+.idea-add, .wl-add { flex: 0 0 auto; }
 
 /* 时间线 */
 .wl-timeline { display: flex; flex-direction: column; gap: 20px; }

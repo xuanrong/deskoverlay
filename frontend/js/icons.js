@@ -52,3 +52,6 @@ export const ICON_VOLUME = `<svg viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 
 // 休息一下 / 小游戏
 export const ICON_GAME = `<svg viewBox="0 0 24 24"><path d="M6 11h4"/><path d="M8 9v4"/><path d="M15 12.5h.01M17.5 10h.01"/><rect x="2" y="6" width="20" height="12" rx="4"/></svg>`;
 export const ICON_GRID = `<svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/></svg>`;
+
+// 灵感碎片
+export const ICON_IDEA = `<svg viewBox="0 0 24 24"><path d="M9 18h6"/><path d="M10 21h4"/><path d="M12 3a6 6 0 0 1 3.6 10.8c-.7.5-1.1 1.3-1.2 2.2h-4.8c-.1-.9-.5-1.7-1.2-2.2A6 6 0 0 1 12 3z"/><path d="M12 8v2"/><path d="M12 13h.01"/></svg>`;
