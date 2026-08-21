@@ -141,10 +141,12 @@ Providers.startAll();
 const mcTime = document.getElementById("mc-time");
 const mcDate = document.getElementById("mc-date");
 Bus.on("provider-emit", ({ config_hash, output }) => {
-  if (config_hash === "clock") {
-    mcTime.textContent = output.time || "--:--:--";
-    mcDate.textContent = output.date || "";
-  }
+  if (config_hash !== "clock") return;
+  // 仅在值变化时写 DOM，避免每秒无条件赋值触发多余重排
+  const time = output.time || "--:--:--";
+  const date = output.date || "";
+  if (mcTime.textContent !== time) mcTime.textContent = time;
+  if (mcDate.textContent !== date) mcDate.textContent = date;
 });
 
 // 久坐提醒弹出：记入最近操作，便于回溯。

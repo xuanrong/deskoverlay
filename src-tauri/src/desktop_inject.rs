@@ -96,7 +96,6 @@ pub fn get_desktop_target() -> HWND {
             Some(enum_desktop_proc),
             LPARAM((&mut workerw as *mut HWND) as isize),
         );
-        eprintln!("[deskoverlay] 目标背景 WorkerW 句柄={:p}", workerw.0);
         workerw
     }
 }
@@ -132,7 +131,6 @@ pub fn embed_in_desktop(hwnd: HWND) {
     unsafe {
         let target = get_desktop_target();
         if target.is_invalid() {
-            eprintln!("[deskoverlay] 未找到桌面 WorkerW 目标，放弃注入");
             return;
         }
 
@@ -156,7 +154,7 @@ pub fn embed_in_desktop(hwnd: HWND) {
 
         // 关键：在 SetParent 之前（窗口还是顶层时）先设置直角圆角偏好 + 矩形形状。
         // DWM 合成层在窗口转为子窗口后可能缓存旧圆角，此时设置最可靠。
-        let corner0 = set_rect_corners(hwnd);
+        let _ = set_rect_corners(hwnd);
         let mut rc0 = RECT::default();
         let _ = GetWindowRect(hwnd, &mut rc0);
         let rgn0 = CreateRectRgn(0, 0, rc0.right - rc0.left, rc0.bottom - rc0.top);
@@ -171,10 +169,7 @@ pub fn embed_in_desktop(hwnd: HWND) {
             SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
         );
 
-        match SetParent(hwnd, Some(target)) {
-            Ok(old) => eprintln!("[deskoverlay] SetParent 成功，旧父句柄={:p}", old.0),
-            Err(e) => eprintln!("[deskoverlay] SetParent 失败：{e}"),
-        }
+        let _ = SetParent(hwnd, Some(target));
 
         // 子窗口坐标相对父工作区；故意放大并偏移到屏幕外：
         // DWM 圆角若残留在窗口四角，则落在屏幕外，屏幕内四角即为直角。
@@ -191,11 +186,11 @@ pub fn embed_in_desktop(hwnd: HWND) {
         let _ = ShowWindow(hwnd, SW_SHOW);
 
         // 子窗口状态下再次设置直角 + 用窗口实际尺寸强制矩形区域。
-        let corner1 = set_rect_corners(hwnd);
+        let _ = set_rect_corners(hwnd);
         let mut rc = RECT::default();
         let _ = GetWindowRect(hwnd, &mut rc);
         let rgn = CreateRectRgn(0, 0, rc.right - rc.left, rc.bottom - rc.top);
-        let rgn_res = SetWindowRgn(hwnd, Some(rgn), true);
+        let _ = SetWindowRgn(hwnd, Some(rgn), true);
         let _ = SetWindowPos(
             hwnd,
             None,
@@ -204,23 +199,6 @@ pub fn embed_in_desktop(hwnd: HWND) {
             0,
             0,
             SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
-        );
-        // 诊断：确认 WS_CHILD 生效 + SetWindowRgn 成功与否 + DWM 圆角偏好设置结果
-        let st_after = GetWindowLongPtrW(hwnd, GWL_STYLE);
-        eprintln!(
-            "[deskoverlay] 直角诊断：corner0={} corner1={} Rgn={} WS_CHILD={}",
-            corner0,
-            corner1,
-            rgn_res,
-            (st_after & WS_CHILD.0 as isize) != 0
-        );
-
-        let mut rect = RECT::default();
-        let _ = GetWindowRect(hwnd, &mut rect);
-        eprintln!(
-            "[deskoverlay] 已注入桌面 WorkerW（窗口矩形 L{}/T{}/R{}/B{}，{}x{}）",
-            rect.left, rect.top, rect.right, rect.bottom,
-            rect.right - rect.left, rect.bottom - rect.top
         );
     }
 }
@@ -250,7 +228,6 @@ pub fn start_explorer_watcher(hwnd: HWND, initial_target: HWND) {
                         let _ = SetWindowPos(hwnd, None, 0, 0, vw, vh, SWP_NOACTIVATE | SWP_SHOWWINDOW);
                         let _ = ShowWindow(hwnd, SW_SHOW);
                         last_target = t;
-                        eprintln!("[deskoverlay] 自愈：重新嵌入桌面");
                     }
                 }
             }

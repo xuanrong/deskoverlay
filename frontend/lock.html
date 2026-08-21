@@ -5,79 +5,81 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>已锁定</title>
   <style>
-    html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; font-family: "Microsoft YaHei UI", "Segoe UI", sans-serif; user-select: none; }
-    .lock-wrap {
+    html, body {
+      margin: 0; padding: 0; width: 100%; height: 100%;
+      overflow: hidden; font-family: "Microsoft YaHei UI", "Segoe UI", sans-serif;
+      user-select: none; background: #05070a;
+    }
+    .lock-universe {
+      position: fixed; inset: 0;
+      background:
+        radial-gradient(circle at 50% 50%, rgba(30, 45, 72, 0.55) 0%, rgba(8, 12, 20, 0.95) 55%, #020305 100%);
+      overflow: hidden;
+    }
+    #sky {
+      position: absolute; inset: 0;
       width: 100%; height: 100%;
+      display: block;
+    }
+    .sun-wrap {
+      position: absolute;
+      left: 50%; top: 50%;
+      translate: -50% -50%;
+      z-index: 10;
+      cursor: pointer;
       display: flex; align-items: center; justify-content: center;
-      background: radial-gradient(120% 120% at 50% 12%, rgba(20, 40, 30, 0.55), rgba(6, 8, 12, 0.97));
-      box-sizing: border-box;
     }
-    .lock-card {
-      --g: 0; --gc: 0;
-      display: flex; flex-direction: column; align-items: center; gap: 4px;
-      padding: 36px 48px; border-radius: 24px;
-      background: rgba(14, 18, 26, 0.8); border: 1px solid rgba(255,255,255,0.1);
-      box-shadow: 0 24px 70px rgba(0,0,0,0.55);
+    .sun {
+      width: 15vmin; height: 15vmin;
+      min-width: 96px; min-height: 96px;
+      border-radius: 50%;
+      background:
+        radial-gradient(circle at 35% 35%, #fff7d1 0%, #ffcc33 25%, #ff9933 55%, #c44e1c 100%);
+      box-shadow:
+        0 0 40px 8px rgba(255, 180, 60, 0.55),
+        0 0 90px 24px rgba(255, 130, 30, 0.28),
+        inset -8px -8px 30px rgba(120, 40, 10, 0.45);
+      animation: sunPulse 3.2s ease-in-out infinite alternate;
+      transition: filter 0.2s ease, box-shadow 0.2s ease;
+    }
+    .sun-wrap:hover .sun {
+      filter: brightness(1.15);
+      box-shadow:
+        0 0 55px 14px rgba(255, 190, 70, 0.7),
+        0 0 120px 36px rgba(255, 140, 40, 0.38),
+        inset -8px -8px 30px rgba(120, 40, 10, 0.45);
+    }
+    .sun-wrap:active .sun { filter: brightness(0.95); }
+    @keyframes sunPulse {
+      0% { transform: scale(1); filter: brightness(1); }
+      100% { transform: scale(1.04); filter: brightness(1.1); }
+    }
+    .lock-hint {
+      position: absolute;
+      left: 50%; bottom: 7vh;
+      translate: -50% 0;
       text-align: center;
+      color: rgba(230, 237, 243, 0.8);
+      pointer-events: none;
+      z-index: 10;
     }
-    .lock-tree { width: 170px; height: 185px; display: block; filter: drop-shadow(0 8px 20px rgba(0,0,0,0.4)); }
-    .lt-ground { fill: rgba(126, 100, 66, 0.35); }
-    .lt-trunk { fill: #6b4c33; transform-box: fill-box; transform-origin: 50% 100%; transform: scaleY(var(--g)); }
-    .lt-branch.bl, .lt-branch.br { transform-box: fill-box; opacity: var(--g); }
-    .lt-branch.bl { transform-origin: 100% 100%; transform: scale(var(--g)); }
-    .lt-branch.br { transform-origin: 0% 100%; transform: scale(var(--g)); }
-    .lt-branch circle { fill: #4e8c46; }
-    .lt-branch path { fill: #6b4c33; }
-    .lt-canopy { transform-box: fill-box; transform-origin: 50% 100%; transform: scale(var(--gc)); opacity: var(--gc); }
-    .lt-canopy .c1 { fill: #2ea043; }
-    .lt-canopy .c2 { fill: #3aa653; }
-    .lt-canopy .c3 { fill: #21702f; }
-    .lt-orb { opacity: var(--gc); }
-    .lt-orb circle { fill: #d8f0d8; }
-    .lock-title { margin-top: 8px; font-size: 20px; font-weight: 700; color: #e6edf3; }
-    .lock-sub { font-size: 13.5px; color: #9aa7b4; }
-    #unlock {
-      margin-top: 16px;
-      background: linear-gradient(135deg, #2ea043, #238636); border: 0; color: #fff;
-      padding: 10px 26px; border-radius: 10px; cursor: pointer;
-      font-size: 14px; font-family: inherit; font-weight: 600;
-      box-shadow: 0 2px 10px rgba(63, 185, 80, 0.35);
+    .lock-hint h1 {
+      margin: 0;
+      font-size: clamp(18px, 2.4vmin, 28px);
+      font-weight: 700;
+      letter-spacing: 1px;
+      text-shadow: 0 2px 14px rgba(0,0,0,0.6);
     }
-    #unlock:hover { filter: brightness(1.12); }
   </style>
 </head>
 <body>
-  <div class="lock-wrap">
-    <div class="lock-card">
-      <svg class="lock-tree" viewBox="0 0 120 132" aria-hidden="true">
-        <ellipse class="lt-ground" cx="60" cy="124" rx="40" ry="7"/>
-        <path class="lt-trunk" d="M60 124 C 58 96 57 76 60 56 C 63 76 62 96 60 124 Z"/>
-        <g class="lt-branch bl">
-          <path d="M59 82 C 42 78 28 70 22 58 C 34 62 46 66 59 70 Z"/>
-          <circle cx="14" cy="54" r="8"/>
-        </g>
-        <g class="lt-branch br">
-          <path d="M61 68 C 78 64 92 56 98 44 C 86 48 74 52 61 56 Z"/>
-          <circle cx="106" cy="48" r="8"/>
-        </g>
-        <g class="lt-canopy">
-          <circle cx="60" cy="34" r="26" class="c1"/>
-          <circle cx="34" cy="46" r="16" class="c2"/>
-          <circle cx="86" cy="46" r="16" class="c2"/>
-          <circle cx="46" cy="22" r="13" class="c2"/>
-          <circle cx="74" cy="22" r="13" class="c2"/>
-          <circle cx="60" cy="48" r="15" class="c3"/>
-        </g>
-        <g class="lt-orb">
-          <circle cx="52" cy="30" r="2.4"/>
-          <circle cx="68" cy="26" r="2.4"/>
-          <circle cx="42" cy="42" r="2.2"/>
-          <circle cx="78" cy="40" r="2.2"/>
-        </g>
-      </svg>
-      <div class="lock-title">屏幕已锁定</div>
-      <div class="lock-sub">为保护隐私，工作台内容已暂时隐藏</div>
-      <button id="unlock">主人确认解锁</button>
+  <div class="lock-universe">
+    <canvas id="sky"></canvas>
+    <div class="sun-wrap" id="sunUnlock" role="button" aria-label="解锁">
+      <div class="sun"></div>
+    </div>
+    <div class="lock-hint">
+      <h1>屏幕已锁定</h1>
     </div>
   </div>
   <script src="./js/lockpage.js"></script>

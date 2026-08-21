@@ -1578,55 +1578,7 @@ body.no-select { user-select: none; }
 .set-input input:focus { border-color: var(--blue); }
 .set-unit { font-size: 12px; color: var(--text-dim); }
 
-/* 隐私锁定全屏遮罩 */
-.lock-overlay {
-  position: fixed; inset: 0; z-index: 2147483000;
-  display: flex; align-items: center; justify-content: center;
-  background: radial-gradient(120% 120% at 50% 15%, rgba(20, 40, 30, 0.55), rgba(6, 8, 12, 0.94));
-  backdrop-filter: blur(14px);
-  opacity: 0; transition: opacity 0.3s ease;
-}
-.lock-overlay.show { opacity: 1; }
-.lock-card {
-  --g: 0; --gc: 0;
-  display: flex; flex-direction: column; align-items: center; gap: 6px;
-  padding: 34px 44px; border-radius: 22px;
-  background: rgba(14, 18, 26, 0.78); border: 1px solid var(--border);
-  box-shadow: 0 24px 70px rgba(0,0,0,0.55);
-  text-align: center;
-  user-select: none;
-}
-.lock-tree {
-  width: 150px; height: 165px; display: block;
-  filter: drop-shadow(0 6px 16px rgba(0,0,0,0.4));
-}
-.lt-ground { fill: rgba(126, 100, 66, 0.35); }
-.lt-trunk {
-  fill: #6b4c33;
-  transform-box: fill-box; transform-origin: 50% 100%;
-  transform: scaleY(var(--g));
-}
-.lt-branch.bl, .lt-branch.br {
-  transform-box: fill-box;
-  opacity: var(--g);
-}
-.lt-branch.bl { transform-origin: 100% 100%; transform: scale(var(--g)); }
-.lt-branch.br { transform-origin: 0% 100%; transform: scale(var(--g)); }
-.lt-branch circle { fill: #4e8c46; }
-.lt-branch path { fill: #6b4c33; }
-.lt-canopy {
-  transform-box: fill-box; transform-origin: 50% 100%;
-  transform: scale(var(--gc)); opacity: var(--gc);
-}
-.lt-canopy .c1 { fill: #2ea043; }
-.lt-canopy .c2 { fill: #3aa653; }
-.lt-canopy .c3 { fill: #21702f; }
-.lt-orb { opacity: var(--gc); }
-.lt-orb circle { fill: #d8f0d8; }
-.lock-msg { display: flex; flex-direction: column; align-items: center; gap: 6px; margin-top: 8px; }
-.lock-title { font-size: 18px; font-weight: 700; color: var(--text); }
-.lock-sub { font-size: 13px; color: var(--text-dim); }
-.lock-unlock { margin-top: 8px; }
+/* 隐私锁定全屏遮罩（浏览器开发态回退浮层样式由 lock.js 动态注入） */
 
 /* 灵感碎片 */
 .idea-composer {

@@ -7,6 +7,7 @@
 //! 网络速率：sysinfo `Networks` 独立类型取累计收发字节，两次采样差值 / 间隔 = 速率(byte/s)。
 
 use std::time::{Duration, Instant};
+use std::sync::atomic::{AtomicBool, Ordering};
 use sysinfo::{CpuRefreshKind, Disks, Networks, System};
 use tauri::{AppHandle, Emitter};
 use windows::Win32::System::SystemInformation::GetTickCount64;
@@ -19,6 +20,21 @@ use windows::Win32::Media::Audio::{
     IMMDeviceEnumerator, MMDeviceEnumerator, AudioSessionStateActive, eMultimedia, eRender,
 };
 use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_ALL, COINIT_MULTITHREADED};
+
+/// 系统健康页是否处于打开状态。仅打开时才采集并 emit，空闲时停止，避免后台空转。
+static SYSTEM_SAMPLING_ON: AtomicBool = AtomicBool::new(false);
+
+/// 打开系统健康页时调用：开启采样。
+#[tauri::command]
+pub fn start_system_sampling() {
+    SYSTEM_SAMPLING_ON.store(true, Ordering::Relaxed);
+}
+
+/// 离开系统健康页时调用：关闭采样，恢复正常空闲。
+#[tauri::command]
+pub fn stop_system_sampling() {
+    SYSTEM_SAMPLING_ON.store(false, Ordering::Relaxed);
+}
 
 /// 读取真实电源状态，返回 (电池百分比, 电源标签)。
 /// 电源标签：AC（插电）/ BATTERY（使用电池）/ CHARGING（充电中）。
@@ -40,7 +56,8 @@ fn power_status() -> (u8, String) {
     (pct, power)
 }
 
-/// 启动系统指标 Provider 线程：每秒采集 CPU / 内存 / 网络速率 / 磁盘并 emit 事件。
+/// 启动系统指标 Provider 线程：动态指标（CPU/内存/网络/电源）每秒采集，
+/// 静态信息（CPU 型号/OS/主机名/磁盘）每 5 秒更新一次，避免无谓的重复采集与序列化。
 pub fn start_system_provider(app: AppHandle) {
     std::thread::spawn(move || {
         let mut sys = System::new();
@@ -49,92 +66,110 @@ pub fn start_system_provider(app: AppHandle) {
         let mut prev_rx: u64 = 0;
         let mut prev_tx: u64 = 0;
         let mut prev_net_time = Instant::now();
+        let mut was_sampling = false;
+        // 静态信息缓存（每 5 秒刷新一次），与每秒的动态字段合并后推送
+        let mut static_fields = serde_json::json!({
+            "cpuName": "", "cpuCores": 0, "logicalCores": 0,
+            "osName": "", "osVersion": "", "hostName": "", "uptime": 0, "disks": []
+        });
+        let mut sample_no: u32 = 0;
         loop {
-            sys.refresh_cpu_specifics(CpuRefreshKind::everything());
-            sys.refresh_memory();
-            networks.refresh_list();
-            disks.refresh_list();
+            let sampling = SYSTEM_SAMPLING_ON.load(Ordering::Relaxed);
+            if sampling {
+                // 重新开启采样时重置网络速率基准，避免把离线时段的累计量算进瞬时速率
+                if !was_sampling {
+                    networks.refresh_list();
+                    prev_rx = networks.iter().map(|(_, n)| n.received()).sum();
+                    prev_tx = networks.iter().map(|(_, n)| n.transmitted()).sum();
+                    prev_net_time = Instant::now();
+                    was_sampling = true;
+                }
 
-            let cpu: f32 = sys.global_cpu_usage();
+                // —— 动态字段：每秒刷新 ——
+                sys.refresh_cpu_specifics(CpuRefreshKind::everything());
+                sys.refresh_memory();
+                networks.refresh_list();
+                let cpu: f32 = sys.global_cpu_usage();
 
-            let total = sys.total_memory() as f32;
-            let used = sys.used_memory() as f32;
-            let ram_pct = if total > 0.0 { (used / total) * 100.0 } else { 0.0 };
-            // 字节 → GB
-            let ram_total_gb = total / 1024.0 / 1024.0 / 1024.0;
-            let ram_used_gb = used / 1024.0 / 1024.0 / 1024.0;
+                let total = sys.total_memory() as f32;
+                let used = sys.used_memory() as f32;
+                let ram_pct = if total > 0.0 { (used / total) * 100.0 } else { 0.0 };
+                // 字节 → GB
+                let ram_total_gb = total / 1024.0 / 1024.0 / 1024.0;
+                let ram_used_gb = used / 1024.0 / 1024.0 / 1024.0;
 
-            // 系统信息：CPU 型号 / 物理核心数 / 逻辑核数 / 运行时间（秒）
-            let cpu_name = sys.cpus().first().map(|c| c.brand().to_string()).unwrap_or_default();
-            let physical_cores = sys.physical_core_count().unwrap_or(0) as u32;
-            let logical_cores = sys.cpus().len() as u32;
-            let uptime = System::uptime();
-            let os_name = System::name().unwrap_or_default();
-            let os_version = System::long_os_version().unwrap_or_default();
-            let host_name = System::host_name().unwrap_or_default();
+                let (batt_pct, power) = power_status();
 
-            let (batt_pct, power) = power_status();
+                // 网络速率（byte/s）：累计收发字节的两次采样差值 / 间隔
+                let rx: u64 = networks.iter().map(|(_, n)| n.received()).sum();
+                let tx: u64 = networks.iter().map(|(_, n)| n.transmitted()).sum();
+                let now = Instant::now();
+                let dt = now.duration_since(prev_net_time).as_secs_f64();
+                let net_down = if prev_rx > 0 && dt > 0.0 { (rx.saturating_sub(prev_rx)) as f64 / dt } else { 0.0 };
+                let net_up = if prev_tx > 0 && dt > 0.0 { (tx.saturating_sub(prev_tx)) as f64 / dt } else { 0.0 };
+                prev_rx = rx;
+                prev_tx = tx;
+                prev_net_time = now;
 
-            // 网络速率（byte/s）：累计收发字节的两次采样差值 / 间隔
-            let mut rx: u64 = 0;
-            let mut tx: u64 = 0;
-            for (_, net) in &networks {
-                rx += net.received();
-                tx += net.transmitted();
-            }
-            let now = Instant::now();
-            let dt = now.duration_since(prev_net_time).as_secs_f64();
-            let net_down = if prev_rx > 0 && dt > 0.0 { (rx.saturating_sub(prev_rx)) as f64 / dt } else { 0.0 };
-            let net_up = if prev_tx > 0 && dt > 0.0 { (tx.saturating_sub(prev_tx)) as f64 / dt } else { 0.0 };
-            prev_rx = rx;
-            prev_tx = tx;
-            prev_net_time = now;
+                // —— 静态字段：每 5 秒刷新一次 ——
+                if sample_no % 5 == 0 {
+                    disks.refresh_list();
+                    // 磁盘：名称 / 挂载点 / 总量 / 已用 / 使用率
+                    let disks_arr: Vec<serde_json::Value> = disks
+                        .iter()
+                        .filter(|d| d.total_space() > 0)
+                        .map(|d| {
+                            let total = d.total_space();
+                            let used = total.saturating_sub(d.available_space());
+                            let pct = if total > 0 { (used as f64 / total as f64) * 100.0 } else { 0.0 };
+                            let gb = 1024.0 * 1024.0 * 1024.0;
+                            serde_json::json!({
+                                "name": d.name().to_string_lossy(),
+                                "mount": d.mount_point().to_string_lossy(),
+                                "totalGb": total as f64 / gb,
+                                "usedGb": used as f64 / gb,
+                                "pct": pct
+                            })
+                        })
+                        .collect();
+                    static_fields = serde_json::json!({
+                        "cpuName": sys.cpus().first().map(|c| c.brand().to_string()).unwrap_or_default(),
+                        "cpuCores": sys.physical_core_count().unwrap_or(0) as u32,
+                        "logicalCores": sys.cpus().len() as u32,
+                        "osName": System::name().unwrap_or_default(),
+                        "osVersion": System::long_os_version().unwrap_or_default(),
+                        "hostName": System::host_name().unwrap_or_default(),
+                        "uptime": System::uptime(),
+                        "disks": disks_arr,
+                    });
+                }
+                sample_no = sample_no.wrapping_add(1);
 
-            // 磁盘：名称 / 挂载点 / 总量 / 已用 / 使用率
-            let disks_arr: Vec<serde_json::Value> = disks
-                .iter()
-                .filter(|d| d.total_space() > 0)
-                .map(|d| {
-                    let total = d.total_space();
-                    let used = total.saturating_sub(d.available_space());
-                    let pct = if total > 0 { (used as f64 / total as f64) * 100.0 } else { 0.0 };
-                    let gb = 1024.0 * 1024.0 * 1024.0;
-                    serde_json::json!({
-                        "name": d.name().to_string_lossy(),
-                        "mount": d.mount_point().to_string_lossy(),
-                        "totalGb": total as f64 / gb,
-                        "usedGb": used as f64 / gb,
-                        "pct": pct
-                    })
-                })
-                .collect();
-
-            let _ = app.emit(
-                "provider-emit",
-                serde_json::json!({
-                    "config_hash": "system",
-                    "output": {
-                        "cpu": cpu,
-                        "ram": ram_pct,
-                        "ramUsedGb": ram_used_gb,
-                        "ramTotalGb": ram_total_gb,
-                        // 网络速率 byte/s；电池/电源来自真实读取
-                        "netUp": net_up,
-                        "netDown": net_down,
-                        "battery": batt_pct,
-                        "power": power,
-                        // 系统健康页：CPU 型号 / 物理核心数 / 逻辑核数 / 开机时长（秒）/ 磁盘列表
-                        "cpuName": cpu_name,
-                        "cpuCores": physical_cores,
-                        "logicalCores": logical_cores,
-                        "osName": os_name,
-                        "osVersion": os_version,
-                        "hostName": host_name,
-                        "uptime": uptime,
-                        "disks": disks_arr
+                // 合并动态 + 静态后推送
+                let mut output = serde_json::json!({
+                    "cpu": cpu,
+                    "ram": ram_pct,
+                    "ramUsedGb": ram_used_gb,
+                    "ramTotalGb": ram_total_gb,
+                    // 网络速率 byte/s；电池/电源来自真实读取
+                    "netUp": net_up,
+                    "netDown": net_down,
+                    "battery": batt_pct,
+                    "power": power,
+                });
+                if let serde_json::Value::Object(stat) = static_fields.clone() {
+                    if let serde_json::Value::Object(o) = &mut output {
+                        o.extend(stat);
                     }
-                }),
-            );
+                }
+
+                let _ = app.emit("provider-emit", serde_json::json!({
+                    "config_hash": "system",
+                    "output": output,
+                }));
+            } else {
+                was_sampling = false;
+            }
 
             std::thread::sleep(Duration::from_secs(1));
         }
@@ -183,12 +218,19 @@ fn is_audio_playing() -> bool {
 /// 且播放视频/音乐时即使无输入也不触发锁定。
 pub fn start_lock_idle_monitor(app: AppHandle) {
     std::thread::spawn(move || {
+        // 空闲时长每秒都发（及时）；音频枚举开销较大，每 3 秒做一次并缓存结果
+        let mut audio_playing = false;
+        let mut tick = 0u32;
         loop {
+            if tick % 3 == 0 {
+                audio_playing = is_audio_playing();
+            }
+            tick = tick.wrapping_add(1);
             let _ = app.emit(
                 "system-idle",
                 serde_json::json!({
                     "idleMs": last_input_idle_ms(),
-                    "audioPlaying": is_audio_playing(),
+                    "audioPlaying": audio_playing,
                 }),
             );
             std::thread::sleep(Duration::from_secs(1));

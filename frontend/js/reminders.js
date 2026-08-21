@@ -1,5 +1,5 @@
 // 提醒功能：时钟块右侧提醒区（每日定时 / 间隔）、到期置顶提醒、配置弹窗。
-import { invoke } from "./bus.js";
+import { invoke, Heartbeat } from "./bus.js";
 import { state, saveState } from "./state.js";
 import { ICON_CLOCK, ICON_WATER } from "./icons.js";
 import { esc } from "./views/common.js";
@@ -327,9 +327,9 @@ function openReminderSettings() {
   renderRows();
 }
 
-/// 初始化提醒：渲染时钟块倒计时 + 推送久坐配置 + 每秒增量检查。
+/// 初始化提醒：渲染时钟块倒计时 + 推送久坐配置 + 每秒增量检查（走统一秒级心跳）。
 export function initReminders() {
   renderReminders();
   pushSedentaryConfig();
-  setInterval(() => { checkReminders(); updateReminders(); }, 1000);
+  Heartbeat.on(() => { checkReminders(); updateReminders(); });
 }

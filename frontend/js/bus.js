@@ -25,15 +25,32 @@ export const Bus = {
   },
 };
 
-// 命令面：优先调用真实 Rust 命令（report_panel_rect / remove_panel_rect 等），
-// 浏览器态回退到 Bus 模拟（cmd:<command>），保留后端对接缝。
+// 统一秒级心跳：各模块（时钟/提醒/锁定）把每秒回调注册到这里，共享一个 setInterval，
+// 避免常驻主窗口里多个 1s 定时器各自叠加与重复唤醒。on() 返回取消函数。
+const beats = new Set();
+let beatTimer = null;
+function beatTick() {
+  beats.forEach((f) => { try { f(); } catch (e) {} });
+}
+export const Heartbeat = {
+  on(fn) {
+    beats.add(fn);
+    if (!beatTimer) beatTimer = setInterval(beatTick, 1000);
+    return () => this.off(fn);
+  },
+  off(fn) {
+    beats.delete(fn);
+    if (beats.size === 0 && beatTimer) { clearInterval(beatTimer); beatTimer = null; }
+  },
+};
+
+// 命令面：优先调用真实 Rust 命令，失败必须抛升（不静默降级）。
+// 关键：真实 Tauri 态若命令失败（命令未注册 / IPC 异常），必须让 await 方拿到 rejection，
+// 否则层层的 catch(() => {}) 或 "shown !== false" 会把 undefined 当成功，导致退出/锁屏等静默失效。
+// 浏览器 dev 态无 __TAURI__，才回退到 Bus 模拟（cmd:<command>）。
 export async function invoke(command, args = {}) {
   if (TAURI && TAURI.core && typeof TAURI.core.invoke === "function") {
-    try {
-      return await TAURI.core.invoke(command, args);
-    } catch (e) {
-      console.warn(`[invoke:${command}] 调用失败，回退模拟：`, e);
-    }
+    return await TAURI.core.invoke(command, args);
   }
   Bus.emit(`cmd:${command}`, args);
   return Promise.resolve();

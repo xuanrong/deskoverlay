@@ -1,7 +1,7 @@
 // Provider 数据网格 — 对齐文档 §6「双向数据网格」与 §5.5 Provider 模型。
 // 数据流向: Provider → Event Bus(provider-emit) → Panel Renderer(按 config_hash 路由)。
 // 浏览器内系统指标用真实感随机游走模拟；Tauri 后端接入真实 sysinfo 后只需替换 emit 源。
-import { Bus } from "./bus.js";
+import { Bus, Heartbeat } from "./bus.js";
 import { ICON_GLOBE } from "./icons.js";
 
 const timers = new Map();
@@ -50,7 +50,7 @@ function startSystem() {
     });
   };
   tick();
-  timers.set("system", setInterval(tick, 1000));
+  timers.set("system", Heartbeat.on(tick));
 }
 
 // ---- 时钟 Provider ----
@@ -74,7 +74,7 @@ function startClock() {
     });
   };
   tick();
-  timers.set("clock", setInterval(tick, 1000));
+  timers.set("clock", Heartbeat.on(tick));
 }
 
 // ---- 天气 Provider (模拟，含 5 日预报) ----
@@ -105,6 +105,11 @@ export const Providers = {
   },
   startAll() { Object.keys(REGISTRY).forEach((h) => this.start(h)); },
   stop(hash) {
-    if (timers.has(hash)) { clearInterval(timers.get(hash)); timers.delete(hash); }
+    if (!timers.has(hash)) return;
+    const t = timers.get(hash);
+    // 走统一心跳的 provider 存的是取消函数，其余是 setInterval 句柄
+    if (typeof t === "function") t();
+    else clearInterval(t);
+    timers.delete(hash);
   },
 };

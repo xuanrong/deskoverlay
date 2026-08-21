@@ -1,5 +1,6 @@
 // 系统健康视图：CPU / 内存 / 网络 / 电源 实时监控 + 系统信息 + 磁盘。
 import { Bus } from "../bus.js";
+import { invoke } from "../bus.js";
 import { ICON_GEAR, ICON_CHIP, ICON_GLOBE, ICON_PLUG } from "../icons.js";
 import { esc } from "./common.js";
 
@@ -165,4 +166,7 @@ export function renderSystem(view) {
   let lastDisksJson = "";
   let firstTick = true;
   view.onDestroy(off);
+  // 系统采样仅在页面打开时进行（后端据此启停采集，空闲时停止）
+  invoke("start_system_sampling").catch(() => {});
+  view.onDestroy(() => { invoke("stop_system_sampling").catch(() => {}); });
 }

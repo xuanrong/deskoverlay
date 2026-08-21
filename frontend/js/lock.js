@@ -1,80 +1,206 @@
 // 隐私锁定：监测空闲，离开设定时长后弹出全屏遮罩防偷看。
-// 遮罩中央是一棵会随着锁定时间慢慢长大的树。
+// Tauri 正式环境使用系统级置顶窗口（lock.html）显示旋转星空；
+// 浏览器开发态回退到页面内浮层，视觉与 lock.html 保持一致。
 import { state } from "./state.js";
+import { Heartbeat } from "./bus.js";
 
 let lastActive = Date.now();
 let globalIdleMs = -1; // 由后端 system-idle 提供全局空闲毫秒（Tauri）
 let audioPlaying = false; // 是否有音频/视频正在播放
 let intervalId = null;
 let locked = false;
-let growRaf = 0;
 
 const ACTIVITY_EVENTS = ["mousemove", "mousedown", "keydown", "touchstart", "scroll"];
-const GROW_MS = 12000; // 树从萌发到长成的时间（毫秒）
 
 function onActivity() { lastActive = Date.now(); }
 
+function injectLockStyles() {
+  if (document.getElementById("lock-fallback-style")) return;
+  const style = document.createElement("style");
+  style.id = "lock-fallback-style";
+  style.textContent = `
+    .lock-overlay {
+      position: fixed; inset: 0; z-index: 2147483000;
+      display: flex; align-items: center; justify-content: center;
+      background:
+        radial-gradient(circle at 50% 50%, rgba(30, 45, 72, 0.55) 0%, rgba(8, 12, 20, 0.95) 55%, #020305 100%);
+      overflow: hidden;
+      opacity: 0; transition: opacity 0.3s ease;
+    }
+    .lock-overlay.show { opacity: 1; }
+    .lock-fb-sky { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+    .lock-fb-sun {
+      position: absolute; left: 50%; top: 50%;
+      translate: -50% -50%;
+      width: 15vmin; height: 15vmin; min-width: 96px; min-height: 96px;
+      border-radius: 50%; cursor: pointer; z-index: 10;
+      background: radial-gradient(circle at 35% 35%, #fff7d1 0%, #ffcc33 25%, #ff9933 55%, #c44e1c 100%);
+      box-shadow: 0 0 40px 8px rgba(255,180,60,0.55), 0 0 90px 24px rgba(255,130,30,0.28), inset -8px -8px 30px rgba(120,40,10,0.45);
+      animation: lockFbSunPulse 3.2s ease-in-out infinite alternate;
+      transition: filter 0.2s ease, box-shadow 0.2s ease;
+    }
+    .lock-fb-sun:hover { filter: brightness(1.15); box-shadow: 0 0 55px 14px rgba(255,190,70,0.7), 0 0 120px 36px rgba(255,140,40,0.38), inset -8px -8px 30px rgba(120,40,10,0.45); }
+    .lock-fb-sun:active { filter: brightness(0.95); }
+    @keyframes lockFbSunPulse {
+      0% { transform: translate(-50%, -50%) scale(1); filter: brightness(1); }
+      100% { transform: translate(-50%, -50%) scale(1.04); filter: brightness(1.1); }
+    }
+    .lock-fb-hint {
+      position: absolute; left: 50%; bottom: 7vh;
+      translate: -50% 0;
+      text-align: center; color: rgba(230,237,243,0.8);
+      pointer-events: none; z-index: 10;
+    }
+    .lock-fb-hint h1 { margin: 0; font-size: clamp(18px, 2.4vmin, 28px); font-weight: 700; letter-spacing: 1px; text-shadow: 0 2px 14px rgba(0,0,0,0.6); }
+  `;
+  document.head.appendChild(style);
+}
+
+// 一套行星+星星参数，与 lock.html 的 lockpage.js 保持一致
+const LOCK_PLANETS = [
+  { rx: 0.20, ry: 0.106, speed: 0.02, dir: 1, r: 0.0125, a0: 0.0, colors: ["#9cc4e6", "#3d5f82", "#1f2c3d"], ring: false },
+  { rx: 0.26, ry: 0.138, speed: 0.015, dir: -1, r: 0.015, a0: 1.8, colors: ["#ffe6b8", "#d9a95e", "#7a4e1e"], ring: false },
+  { rx: 0.32, ry: 0.166, speed: 0.012, dir: 1, r: 0.017, a0: 3.6, colors: ["#5fb0dc", "#2d7fb8", "#11395e"], ring: false },
+  { rx: 0.37, ry: 0.192, speed: 0.0095, dir: -1, r: 0.014, a0: 5.1, colors: ["#f0a073", "#a05028", "#5a2a12"], ring: false },
+  { rx: 0.435, ry: 0.224, speed: 0.0075, dir: 1, r: 0.023, a0: 1.1, colors: ["#f0d4a4", "#c48a5a", "#8a5a2a"], ring: false },
+  { rx: 0.50, ry: 0.255, speed: 0.006, dir: -1, r: 0.021, a0: 4.4, colors: ["#f2e6c2", "#c9ad7a", "#7a5c30"], ring: true },
+  { rx: 0.565, ry: 0.286, speed: 0.005, dir: 1, r: 0.016, a0: 2.4, colors: ["#b8ecec", "#5aa8b8", "#2a6080"], ring: false },
+  { rx: 0.62, ry: 0.315, speed: 0.004, dir: -1, r: 0.016, a0: 0.6, colors: ["#6aa6e8", "#2a4a9c", "#101f5e"], ring: false },
+];
+const LOCK_STAR_COUNT = 260;
+
+// 启动星空 canvas 动画，返回取消函数
+function startSkyAnim(canvas, planetsRef) {
+  const ctx = canvas.getContext("2d");
+  let dpr = 1, W = 0, H = 0, cx = 0, cy = 0;
+  let stars = [];
+  let raf = 0;
+
+  function resize() {
+    dpr = Math.max(1, window.devicePixelRatio || 1);
+    W = canvas.clientWidth || window.innerWidth;
+    H = canvas.clientHeight || window.innerHeight;
+    canvas.width = Math.round(W * dpr);
+    canvas.height = Math.round(H * dpr);
+    canvas.style.width = W + "px";
+    canvas.style.height = H + "px";
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    cx = W / 2;
+    cy = H / 2;
+    stars = [];
+    for (let i = 0; i < LOCK_STAR_COUNT; i++) {
+      stars.push({
+        x: Math.random() * W, y: Math.random() * H,
+        r: Math.random() < 0.85 ? 0.5 + Math.random() * 0.8 : 1.2 + Math.random() * 1.4,
+        base: 0.25 + Math.random() * 0.6, tw: 1.5 + Math.random() * 3.5, ph: Math.random() * Math.PI * 2,
+      });
+    }
+  }
+
+  function drawCircle(px, py, radius, stops) {
+    const g = ctx.createRadialGradient(px - radius * 0.35, py - radius * 0.35, radius * 0.1, px, py, radius);
+    g.addColorStop(0, stops[0]);
+    g.addColorStop(0.55, stops[1]);
+    g.addColorStop(1, stops[2]);
+    ctx.beginPath();
+    ctx.arc(px, py, radius, 0, Math.PI * 2);
+    ctx.fillStyle = g;
+    ctx.fill();
+  }
+
+  function frame(now) {
+    const t = now / 1000;
+    ctx.clearRect(0, 0, W, H);
+    for (const s of stars) {
+      const a = s.base + Math.sin(t * s.tw + s.ph) * 0.35;
+      ctx.globalAlpha = Math.max(0, Math.min(1, a));
+      ctx.fillStyle = "#fff";
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    // 星系核心辉光
+    const coreR = 0.13 * Math.min(W, H);
+    const core = ctx.createRadialGradient(cx, cy, 0, cx, cy, coreR);
+    core.addColorStop(0, "rgba(255,215,150,0.35)");
+    core.addColorStop(0.5, "rgba(255,170,110,0.12)");
+    core.addColorStop(1, "rgba(255,150,90,0)");
+    ctx.fillStyle = core;
+    ctx.beginPath();
+    ctx.arc(cx, cy, coreR, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.lineWidth = 1;
+    for (const p of planetsRef) {
+      ctx.strokeStyle = "rgba(255,255,255,0.10)";
+      ctx.beginPath();
+      ctx.ellipse(cx, cy, p.rx * Math.min(W, H), p.ry * Math.min(W, H), 0, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.save();
+    for (const p of planetsRef) {
+      const x = cx + Math.cos(p.a0) * p.rx * Math.min(W, H);
+      const y = cy + Math.sin(p.a0) * p.ry * Math.min(W, H);
+      const rad = p.r * Math.min(W, H);
+      if (p.ring) {
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(-0.35);
+        ctx.strokeStyle = "rgba(235,220,180,0.45)";
+        ctx.lineWidth = Math.max(1.5, rad * 0.28);
+        ctx.beginPath();
+        ctx.ellipse(0, 0, rad * 1.7, rad * 0.55, 0, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.strokeStyle = "rgba(235,220,180,0.28)";
+        ctx.lineWidth = Math.max(1, rad * 0.15);
+        ctx.beginPath();
+        ctx.ellipse(0, 0, rad * 2.1, rad * 0.7, 0, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+      }
+      drawCircle(x, y, rad, p.colors);
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.globalAlpha = 0.10;
+      for (let k = -1; k <= 1; k++) {
+        ctx.beginPath();
+        ctx.ellipse(0, k * rad * 0.4, rad * 0.95, rad * 0.22, 0, Math.PI, Math.PI * 2);
+        ctx.strokeStyle = "#fff";
+        ctx.lineWidth = Math.max(0.6, rad * 0.08);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+    ctx.restore();
+    for (const p of planetsRef) p.a0 += p.speed * 0.3 * p.dir;
+    raf = requestAnimationFrame(frame);
+  }
+
+  resize();
+  window.addEventListener("resize", resize);
+  raf = requestAnimationFrame(frame);
+  return () => {
+    cancelAnimationFrame(raf);
+    window.removeEventListener("resize", resize);
+  };
+}
+
 function buildOverlay() {
+  injectLockStyles();
   const ov = document.createElement("div");
   ov.id = "lock-overlay";
   ov.className = "lock-overlay";
   ov.innerHTML = `
-    <div class="lock-card">
-      <svg class="lock-tree" viewBox="0 0 120 132" aria-hidden="true">
-        <ellipse class="lt-ground" cx="60" cy="124" rx="40" ry="7"/>
-        <path class="lt-trunk" d="M60 124 C 58 96 57 76 60 56 C 63 76 62 96 60 124 Z"/>
-        <g class="lt-branch bl">
-          <path d="M59 82 C 42 78 28 70 22 58 C 34 62 46 66 59 70 Z"/>
-          <circle cx="14" cy="54" r="8"/>
-        </g>
-        <g class="lt-branch br">
-          <path d="M61 68 C 78 64 92 56 98 44 C 86 48 74 52 61 56 Z"/>
-          <circle cx="106" cy="48" r="8"/>
-        </g>
-        <g class="lt-canopy">
-          <circle cx="60" cy="34" r="26" class="c1"/>
-          <circle cx="34" cy="46" r="16" class="c2"/>
-          <circle cx="86" cy="46" r="16" class="c2"/>
-          <circle cx="46" cy="22" r="13" class="c2"/>
-          <circle cx="74" cy="22" r="13" class="c2"/>
-          <circle cx="60" cy="48" r="15" class="c3"/>
-        </g>
-        <g class="lt-orb">
-          <circle cx="52" cy="30" r="2.4"/>
-          <circle cx="68" cy="26" r="2.4"/>
-          <circle cx="42" cy="42" r="2.2"/>
-          <circle cx="78" cy="40" r="2.2"/>
-        </g>
-      </svg>
-      <div class="lock-msg">
-        <div class="lock-title">屏幕已锁定</div>
-        <div class="lock-sub">为保护隐私，工作台内容已暂时隐藏</div>
-        <button class="btn-primary lock-unlock">主人确认解锁</button>
-      </div>
+    <canvas class="lock-fb-sky"></canvas>
+    <div class="lock-fb-sun" role="button" aria-label="解锁" title="解锁"></div>
+    <div class="lock-fb-hint">
+      <h1>屏幕已锁定</h1>
     </div>`;
-  ov.querySelector(".lock-unlock").addEventListener("click", unlock);
+  startSkyAnim(ov.querySelector(".lock-fb-sky"), LOCK_PLANETS);
+  ov.querySelector(".lock-fb-sun").addEventListener("click", unlock);
   return ov;
-}
-
-// 树随时间长大：线性推进 --g / --gc（树干 → 树冠）
-function growIn(ov) {
-  const card = ov.querySelector(".lock-card");
-  card.style.setProperty("--g", 0);
-  card.style.setProperty("--gc", 0);
-  const start = performance.now();
-  const step = () => {
-    const p = Math.min(1, (performance.now() - start) / GROW_MS);
-    card.style.setProperty("--g", p.toFixed(3));
-    const gc = p <= 0.15 ? 0 : Math.min(1, (p - 0.15) / 0.85);
-    card.style.setProperty("--gc", gc.toFixed(3));
-    if (p < 1) growRaf = requestAnimationFrame(step);
-    else growRaf = 0;
-  };
-  growRaf = requestAnimationFrame(step);
-}
-
-function cancelGrow() {
-  if (growRaf) { cancelAnimationFrame(growRaf); growRaf = 0; }
 }
 
 function showLock() {
@@ -82,7 +208,6 @@ function showLock() {
   const ov = buildOverlay();
   document.body.appendChild(ov);
   requestAnimationFrame(() => ov.classList.add("show"));
-  growIn(ov);
 }
 
 // 触发锁屏：Tauri 用系统级置顶窗口；浏览器开发态用页面内浮层
@@ -90,7 +215,11 @@ async function doLock() {
   locked = true;
   const tauri = window.__TAURI__ || window.__TAURI_INTERNALS__;
   if (tauri && tauri.core && typeof tauri.core.invoke === "function") {
-    try { await tauri.core.invoke("show_lock"); return; } catch (_) { /* 回退本地浮层 */ }
+    try {
+      // show_lock 返回是否真正展示了系统级锁屏窗口；false 或调用失败则回退页面内遮罩
+      const shown = await tauri.core.invoke("show_lock");
+      if (shown !== false) return;
+    } catch (_) { /* 命令失败：落到本地浮层 */ }
   }
   showLock();
 }
@@ -98,7 +227,6 @@ async function doLock() {
 function unlock() {
   const ov = document.getElementById("lock-overlay");
   if (ov) { ov.classList.remove("show"); setTimeout(() => ov.remove(), 300); }
-  cancelGrow();
   locked = false;
   lastActive = Date.now();
 }
@@ -120,7 +248,8 @@ function tick() {
 export function startLockController() {
   ACTIVITY_EVENTS.forEach((e) => window.addEventListener(e, onActivity, { passive: true }));
   document.addEventListener("visibilitychange", () => { if (!document.hidden) lastActive = Date.now(); });
-  intervalId = setInterval(tick, 1000);
+  // 空闲检测走统一秒级心跳
+  intervalId = Heartbeat.on(tick);
   // 后端全局空闲事件：无论在哪应用操作都刷新
   if ((window.__TAURI__ || window.__TAURI_INTERNALS__) && window.__TAURI__?.event?.listen) {
     window.__TAURI__.event.listen("system-idle", (e) => {
@@ -138,8 +267,9 @@ export function startLockController() {
 }
 
 export function stopLockController() {
-  clearInterval(intervalId);
+  // intervalId 现在是 Heartbeat.on 返回的取消函数（而非定时器 id）
+  if (typeof intervalId === "function") intervalId();
+  else if (intervalId) clearInterval(intervalId);
   intervalId = null;
   ACTIVITY_EVENTS.forEach((e) => window.removeEventListener(e, onActivity));
-  cancelGrow();
 }
