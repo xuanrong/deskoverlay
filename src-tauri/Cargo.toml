@@ -13,6 +13,11 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 # 系统原生文件选择对话框：用于「设置 → 插件」选择外部插件文件
 tauri-plugin-dialog = "2"
+# 嵌入式 WebAssembly 运行时：加载外部插件的 Rust→wasm 后端（无需 dll，宿主内沙箱执行）。
+# 用轻量解释器 wasmi（特性简单、依赖小），对插件轻量后端足够。
+wasmi = { version = "0.31", default-features = false, features = ["std"] }
+# 解压外部「插件包」(zip)：宿主读取 manifest + 前端 + 后端源码
+zip = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sysinfo = { version = "0.32", features = ["network", "disk"] }

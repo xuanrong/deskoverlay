@@ -25,7 +25,7 @@ export function renderSettings(view) {
 
       <div class="set-panel">
         <div class="set-group-title">插件</div>
-        <div class="set-desc" style="padding:4px 0">通过外部 .js 插件文件扩展工作台模块（如微信读书）。插件不内置于应用。</div>
+        <div class="set-desc" style="padding:4px 0">通过 .zip 插件包扩展工作台模块（内含前端与后端源码/预编译 wasm），插件不内置于应用。</div>
         ${
           plugins.length
             ? plugins.map((p) => `
@@ -41,8 +41,8 @@ export function renderSettings(view) {
             : `<div class="dash-empty">暂无插件</div>`
         }
         <div class="set-row">
-          <div class="set-info"><div class="set-name">添加插件</div><div class="set-desc">选择一个符合插件契约的外部 ESM 插件文件（.js）</div></div>
-          <button class="btn-primary" id="set-plugin-add">选择插件文件</button>
+          <div class="set-info"><div class="set-name">添加插件</div><div class="set-desc">选择 .zip 插件包（含前端 + backend 源码/预编译 wasm，自动注册/加载并运行）</div></div>
+          <button class="btn-primary" id="set-plugin-add">选择插件包(zip)</button>
         </div>
       </div>
 
@@ -94,26 +94,57 @@ export function renderSettings(view) {
     body.querySelector("#set-plugin-add").addEventListener("click", async () => {
       let path = null;
       try {
-        // 系统文件选择对话框（tauri-plugin-dialog）
         const picked = await invoke("plugin:dialog|open", {
-          options: { multiple: false, title: "选择插件文件", filters: [{ name: "JS 插件", extensions: ["js"] }] },
+          options: { multiple: false, title: "选择插件包", filters: [{ name: "插件包", extensions: ["zip"] }] },
         }).catch(() => null);
         path = typeof picked === "string" && picked ? picked : null;
       } catch (_) { path = null; }
       if (!path) return; // 取消选择
-      try {
-        await addPlugin(path);
-      } catch (e) {
-        showDialog({ title: "插件加载失败", message: String(e && e.message || e), okText: "知道了", showCancel: false });
-        return;
-      }
-      renderBody();
+      await importPluginZip(path);
     });
+
+    // 移除插件
     body.querySelectorAll(".plugin-rm").forEach((btn) => {
       btn.addEventListener("click", () => {
         removePlugin(btn.dataset.path);
         renderBody();
       });
     });
+
+    // 导入并自动运行 zip 插件包（解压 → 注册前端 → 自动编译并运行后端）
+    async function importPluginZip(zipPath) {
+      let man;
+      try {
+        man = await invoke("install_plugin_package", { zipPath });
+      } catch (e) {
+        showDialog({ title: "导入失败", message: String(e && e.message || e), okText: "知道了", showCancel: false });
+        return;
+      }
+      const lines = [`已导入：${(man && (man.title || man.id)) || "插件"}`];
+      if (man && man.frontend) {
+        try { await addPlugin(man.frontend); lines.push("前端模块已注册 → 侧边栏可见"); }
+        catch (e) { lines.push("前端注册失败：" + (e && e.message || e)); }
+      }
+      // 后端：优先用 zip 自带 .wasm；否则用本机 cargo 自动编译后执行一次
+      let wasm = man && man.backend_wasm ? man.backend_wasm : null;
+      if (!wasm && man && man.backend_dir) {
+        try {
+          wasm = await invoke("build_wasm_backend", { backendDir: man.backend_dir });
+          lines.push("（后端由本机 cargo 自动编译）");
+        } catch (e) {
+          lines.push("后端编译失败：" + (e && e.message || e));
+        }
+      }
+      if (wasm) {
+        try {
+          const out = await invoke("run_wasm_backend", { path: wasm, input: "hello" });
+          lines.push(`后端执行结果：${out}`);
+        } catch (e) {
+          lines.push("后端执行失败：" + (e && e.message || e));
+        }
+      }
+      showDialog({ title: "导入结果", message: lines.join("\n"), okText: "知道了", showCancel: false });
+      renderBody();
+    }
   }
 }

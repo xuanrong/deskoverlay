@@ -11,8 +11,10 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod desktop_inject;
+mod plugin_pkg;
 mod sedentary;
 mod sys_bridge;
+mod wasm_plugin;
 
 use std::fs;
 use std::io::Read;
@@ -21,6 +23,29 @@ use std::sync::{Mutex, OnceLock};
 use tauri::webview::PageLoadEvent;
 use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CXSCREEN};
+
+/// 通用 Wasm 插件命令：读取外部 .wasm 后端文件并在宿主内沙箱执行（返回插件结果串）。
+#[tauri::command]
+fn run_wasm_backend(path: String, input: String) -> Result<String, String> {
+    let p = path.trim();
+    if p.is_empty() {
+        return Err("路径不能为空".to_string());
+    }
+    let bytes = std::fs::read(p).map_err(|e| format!("读取 wasm 失败：{e}"))?;
+    wasm_plugin::run_backend(&bytes, &input)
+}
+
+/// 安装外部插件包(zip)：解压到 app_data/plugins/<id>，返回 manifest 与各文件绝对路径。
+#[tauri::command]
+fn install_plugin_package(app: tauri::AppHandle, zip_path: String) -> Result<serde_json::Value, String> {
+    plugin_pkg::install(&app, zip_path.trim())
+}
+
+/// 编译插件包的后端源码为 .wasm（调用本机 cargo），返回 .wasm 绝对路径。
+#[tauri::command]
+fn build_wasm_backend(backend_dir: String) -> Result<String, String> {
+    plugin_pkg::build_backend(backend_dir.trim())
+}
 
 /// 退出应用。
 /// 先销毁所有 WebView 窗口，避免 Chromium 在进程退出注销
@@ -492,7 +517,7 @@ fn main() {
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![quit_app, show_reminder, hide_reminder, reminder_ready, read_text_file, http_get, http_post, load_state, save_state, list_desktop_files, image_thumbnail, open_file, reveal_file, delete_file, rename_file, show_lock, hide_lock, sys_bridge::start_system_sampling, sys_bridge::stop_system_sampling, sedentary::set_sedentary_config])
+        .invoke_handler(tauri::generate_handler![quit_app, show_reminder, hide_reminder, reminder_ready, read_text_file, run_wasm_backend, install_plugin_package, build_wasm_backend, http_get, http_post, load_state, save_state, list_desktop_files, image_thumbnail, open_file, reveal_file, delete_file, rename_file, show_lock, hide_lock, sys_bridge::start_system_sampling, sys_bridge::stop_system_sampling, sedentary::set_sedentary_config])
         .run(tauri::generate_context!())
         .expect("DeskOverlay 运行失败");
 }
