@@ -348,6 +348,35 @@ fn rename_file(name: String, new_name: String) -> Result<(), String> {
     fs::rename(&from, &to).map_err(|e| e.to_string())
 }
 
+/// 读取桌面图片文件为 base64 data URL，供文件中心显示缩略图。
+/// 超过 10MB 的图片不读取（太大，避免 base64 膨胀与解码内存开销），前端回退到图标。
+#[tauri::command]
+fn image_thumbnail(name: String) -> Result<String, String> {
+    let path = desktop_dir()?.join(&name);
+    let meta = std::fs::metadata(&path).map_err(|e| e.to_string())?;
+    if !meta.is_file() || meta.len() > 10 * 1024 * 1024 {
+        return Err("不是可预览的图片".to_string());
+    }
+    let data = fs::read(&path).map_err(|e| e.to_string())?;
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+    let mime = match ext.as_str() {
+        "png" => "image/png",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "bmp" => "image/bmp",
+        "svg" => "image/svg+xml",
+        "ico" => "image/x-icon",
+        _ => "image/jpeg", // jpg / jpeg
+    };
+    use base64::engine::general_purpose::STANDARD;
+    use base64::Engine;
+    Ok(format!("data:{};base64,{}", mime, STANDARD.encode(data)))
+}
+
 /// 按需获取锁屏窗口：已存在则直接复用；否则创建（全屏置顶、隐藏起步，非常驻）。
 fn ensure_lock(app: &tauri::AppHandle) -> Option<tauri::WebviewWindow> {
     if let Some(win) = app.get_webview_window("lock") {
@@ -416,7 +445,7 @@ fn main() {
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![quit_app, show_reminder, hide_reminder, http_get, http_post, load_state, save_state, list_desktop_files, open_file, reveal_file, delete_file, rename_file, show_lock, hide_lock, sys_bridge::start_system_sampling, sys_bridge::stop_system_sampling, sedentary::set_sedentary_config])
+        .invoke_handler(tauri::generate_handler![quit_app, show_reminder, hide_reminder, http_get, http_post, load_state, save_state, list_desktop_files, image_thumbnail, open_file, reveal_file, delete_file, rename_file, show_lock, hide_lock, sys_bridge::start_system_sampling, sys_bridge::stop_system_sampling, sedentary::set_sedentary_config])
         .run(tauri::generate_context!())
         .expect("DeskOverlay 运行失败");
 }

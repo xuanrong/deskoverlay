@@ -2,9 +2,9 @@
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "DeskOverlay",
   "version": "0.3.0",
-  "identifier": "com.deskoverlay.app",
+  "identifier": "com.deskoverlay.desktop",
   "build": {
-    "frontendDist": "../frontend",
+    "frontendDist": "../frontend/web",
     "devUrl": "http://localhost:1420",
     "beforeDevCommand": "node ../frontend/serve.js",
     "beforeBuildCommand": ""

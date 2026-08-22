@@ -16,6 +16,8 @@ serde_json = "1"
 sysinfo = { version = "0.32", features = ["network", "disk"] }
 # HTTP 代理：为音乐音源插件提供无 CORS 请求能力（get/post）
 ureq = "2"
+# 图片缩略图：桌面文件中心把图片读成 base64 data URL
+base64 = "0.22"
 # windows-core 作为直接依赖，便于使用其导出的 `w!` 宽字符串宏
 # （windows::core 系 windows_core 的别名，但 macro 经该别名导入不稳定）。
 windows-core = "0.61"

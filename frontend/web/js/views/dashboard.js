@@ -8,6 +8,14 @@ import { esc, showDialog } from "./common.js";
 import { createDatePicker } from "../datepicker.js";
 import { createSelect } from "../selectbox.js";
 
+// 文件中心布局切换用图标（本视图专用，不动共享的 ICON_LIST/ICON_GRID）
+const LAYOUT_LIST_ICON = `<svg viewBox="0 0 24 24"><path d="M3.5 5.5H21"/><path d="M3.5 12H21"/><path d="M3.5 18.5H21"/></svg>`;
+const LAYOUT_GRID_ICON = `<svg viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="7.5" height="7.5" rx="1.5"/><rect x="13" y="3.5" width="7.5" height="7.5" rx="1.5"/><rect x="3.5" y="13" width="7.5" height="7.5" rx="1.5"/><rect x="13" y="13" width="7.5" height="7.5" rx="1.5"/></svg>`;
+
+// 图片类扩展名 → 文件中心显示缩略图；成功结果按文件名缓存，避免每次渲染重复读取
+const IMAGE_EXTS = new Set(["jpg", "jpeg", "png", "gif", "webp", "bmp", "svg", "ico"]);
+const THUMB_CACHE = new Map();
+
 // 最近操作类型 → 图标（线性 SVG）+ 标签
 const OP_META = {
   file_open:   { icon: ICON_EXTERNAL, type: "文件" },
@@ -392,8 +400,8 @@ async function renderFilesBlock(el, view) {
     // 保留当前 tab；若该分类已无文件（删光/改名），回退到首个 tab
     if (!tabs.includes(currentTab)) currentTab = tabs[0];
     el.innerHTML = `
-    <div class="dash-section-title">文件中心 <span class="dash-count">${files.length}</span>
-      <button class="file-layout-toggle" id="d-file-layout" title="切换布局">${layout === "grid" ? "列表" : "网格"}</button>
+    <div class="dash-section-title">文件中心
+      <button class="file-layout-toggle" id="d-file-layout" title="切换布局">${layout === "grid" ? LAYOUT_LIST_ICON : LAYOUT_GRID_ICON}</button>
     </div>
     <div class="file-tabs" id="d-file-tabs"></div>
     <div class="file-tab-content" id="d-file-content"></div>
@@ -412,7 +420,7 @@ async function renderFilesBlock(el, view) {
       if (!state.navState.dashboard) state.navState.dashboard = {};
       state.navState.dashboard.layout = layout;
       saveState();
-      layoutBtn.textContent = layout === "grid" ? "列表" : "网格";
+      layoutBtn.innerHTML = layout === "grid" ? LAYOUT_LIST_ICON : LAYOUT_GRID_ICON;
       renderContent();
     });
     el.querySelector(".recent-ops-all").addEventListener("click", showRecentOpsDialog);
@@ -420,17 +428,17 @@ async function renderFilesBlock(el, view) {
     function renderContent() {
       const arr = groups[currentTab] || [];
       const icon = FILE_ICONS[currentTab] || ICON_PAPERCLIP;
-      if (layout === "grid") {
-        contentEl.innerHTML = `<div class="fg-grid">` + arr.map((f) => `
-        <div class="fg-card" data-name="${esc(f.name)}" title="${esc(f.name)}（右键操作）">
-          <span class="fg-icon">${icon}</span><span class="fg-name">${esc(f.name)}</span>
-        </div>`).join("") + `</div>`;
-      } else {
-        contentEl.innerHTML = `<div class="fg-list">` + arr.map((f) => `
-        <div class="fg-item" data-name="${esc(f.name)}" title="${esc(f.name)}（右键操作）">
-          <span class="fg-icon">${icon}</span><span class="fg-name">${esc(f.name)}</span>
-        </div>`).join("") + `</div>`;
-      }
+      const cell = (f) => {
+        const ext = (f.ext || "").toLowerCase();
+        const thumb = IMAGE_EXTS.has(ext)
+          ? `<span class="fg-thumb-box"><span class="fg-icon">${icon}</span><img class="fg-thumb" data-img="${esc(f.name)}" alt="" hidden></span>`
+          : `<span class="fg-icon">${icon}</span>`;
+        const cls = layout === "grid" ? "fg-card" : "fg-item";
+        return `<div class="${cls}" data-name="${esc(f.name)}" title="${esc(f.name)}（右键操作）">
+          ${thumb}<span class="fg-name">${esc(f.name)}</span>
+        </div>`;
+      };
+      contentEl.innerHTML = `<div class="${layout === "grid" ? "fg-grid" : "fg-list"}">` + arr.map(cell).join("") + `</div>`;
       contentEl.querySelectorAll(".fg-item, .fg-card").forEach((item) => {
         item.addEventListener("contextmenu", (e) => {
           e.preventDefault();
@@ -440,6 +448,27 @@ async function renderFilesBlock(el, view) {
           invoke("open_file", { name: item.dataset.name });
         });
       });
+      loadThumbs(contentEl);
+    }
+
+    // 异步为图片文件加载缩略图（成功→显示图，失败→移除 img 露出图标兜底）
+    async function loadThumbs(container) {
+      const imgs = Array.from(container.querySelectorAll("img.fg-thumb[data-img]"));
+      await Promise.all(imgs.map(async (img) => {
+        const name = img.dataset.img;
+        if (!THUMB_CACHE.has(name)) {
+          try {
+            THUMB_CACHE.set(name, (await invoke("image_thumbnail", { name })) || "");
+          } catch (e) {
+            THUMB_CACHE.set(name, "");
+          }
+        }
+        const url = THUMB_CACHE.get(name);
+        if (!url) { img.remove(); return; }
+        img.addEventListener("error", () => img.remove(), { once: true });
+        img.src = url;
+        img.hidden = false;
+      }));
     }
 
     function renderTabs() {

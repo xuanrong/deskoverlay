@@ -1,11 +1,10 @@
-// DeskOverlay Frontend — 零依赖静态服务器
-// 用于浏览器/WebView2 开发期预览。等价于 spike 的 dev-server.js。
+// DeskOverlay Frontend — 零依赖静态服务器，仅服务打包所需的 web 资产目录（frontend/web）。
 // 用法: node serve.js  然后访问 http://localhost:1420
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
 
-const ROOT = __dirname;
+const ROOT = path.join(__dirname, "web");
 const PORT = process.env.PORT || 1420;
 
 const MIME = {
