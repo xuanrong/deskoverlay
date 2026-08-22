@@ -20,6 +20,7 @@ export const state = {
   playback: { queue: [], index: -1, song: null, playing: false, currentTime: 0 }, // 音乐播放状态（重启恢复）
   navState: {}, // 各模块导航浏览状态：{ [moduleId]: { scrollTop, tab, ... } }（切换/重启后恢复）
   settings: { rememberModule: true }, // 应用设置：rememberModule=启动时回到上次模块
+  plugins: [], // 外部插件配置：{ id, title, path, enabled }（通过「设置 → 插件」导入）
   lock: { enabled: false, minutes: 5 }, // 隐私锁定：离开 enabled 分钟自动锁定全屏
 };
 
@@ -77,6 +78,9 @@ export async function loadState() {
   // 应用设置：结构校验
   if (!state.settings || typeof state.settings !== "object" || Array.isArray(state.settings)) state.settings = {};
   if (typeof state.settings.rememberModule !== "boolean") state.settings.rememberModule = true;
+  // 外部插件：结构校验
+  if (!Array.isArray(state.plugins)) state.plugins = [];
+  state.plugins = state.plugins.filter((p) => p && typeof p === "object" && typeof p.path === "string" && p.path.trim());
   // 隐私锁定：结构校验
   if (!state.lock || typeof state.lock !== "object" || Array.isArray(state.lock)) state.lock = {};
   if (typeof state.lock.enabled !== "boolean") state.lock.enabled = false;

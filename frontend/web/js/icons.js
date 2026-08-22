@@ -5,7 +5,6 @@ export const ICON_HOME = `<svg viewBox="0 0 24 24"><path d="M3 11l9-8 9 8"/><pat
 export const ICON_ACTIVITY = `<svg viewBox="0 0 24 24"><path d="M3 12h4l3 8 4-16 3 8h4"/></svg>`;
 export const ICON_MUSIC = `<svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>`;
 export const ICON_NOTES = `<svg viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v5h5"/><path d="M9 12h6M9 16h6"/></svg>`;
-export const ICON_BOOK = `<svg viewBox="0 0 24 24"><path d="M12 6c-1.8-1.2-4.2-1.5-7-1.2A2 2 0 0 0 3 6.7V19a1.7 1.7 0 0 0 1.9 1.7C7.8 20.5 10.3 21 12 21s4.2-.5 7.1-1.3A1.7 1.7 0 0 0 21 18V6.7a2 2 0 0 0-2-2c-2.8-.3-5.2 0-7 1.3z"/><path d="M12 6.5V20"/></svg>`;
 
 // 文件中心分类
 export const ICON_FOLDER = `<svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 3h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>`;

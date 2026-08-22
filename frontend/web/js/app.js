@@ -11,6 +11,7 @@ import { Tasks } from "./tasks.js";
 import { CommandBar } from "./commandbar.js";
 import { initReminders } from "./reminders.js";
 import { startLockController } from "./lock.js";
+import { initPlugins, onPluginsChanged } from "./plugins.js";
 import { ICON_CHECK, ICON_EXTERNAL } from "./icons.js";
 
 // -------------------- 视图包装 --------------------
@@ -70,6 +71,9 @@ function switchModule(id) {
   // 内容渲染完成后恢复该模块上次的滚动位置（异步渲染的视图也能生效）
   requestAnimationFrame(() => currentView?.restoreScroll());
 }
+
+// 插件集合变化（添加/移除）后重建导航
+onPluginsChanged(() => renderNav());
 
 // -------------------- 快速指令条 --------------------
 function buildCommands() {
@@ -182,8 +186,10 @@ document.getElementById("help-close").addEventListener("click", () => {
 });
 
 // -------------------- 启动 --------------------
-// 异步初始化状态，就绪后渲染导航与当前模块
-loadState().then(() => {
+// 异步初始化状态，就绪后加载外部插件、渲染导航与当前模块
+loadState().then(async () => {
+  // 先加载启用的外部插件（如微信读书），使插件模块注册进导航，再切初始模块（否则初始模块若是插件会找不到）
+  await initPlugins();
   renderNav();
   // 启动进入的模块：默认回到「今日概览」；设置允许记住上次所在模块
   const remember = state.settings?.rememberModule !== false;

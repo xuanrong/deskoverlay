@@ -468,6 +468,7 @@ fn hide_lock(app: tauri::AppHandle) {
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .manage(sedentary::new_sedentary_state())
         .setup(|app| {
             // 启动系统指标 Provider 数据桥（CPU + 内存 → provider-emit）
