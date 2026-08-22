@@ -196,7 +196,7 @@ function buildOverlay() {
     <canvas class="lock-fb-sky"></canvas>
     <div class="lock-fb-sun" role="button" aria-label="解锁" title="解锁"></div>
     <div class="lock-fb-hint">
-      <h1>屏幕已锁定</h1>
+      <h1>离开一会儿，马上回来</h1>
     </div>`;
   startSkyAnim(ov.querySelector(".lock-fb-sky"), LOCK_PLANETS);
   ov.querySelector(".lock-fb-sun").addEventListener("click", unlock);

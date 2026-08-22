@@ -221,7 +221,7 @@ function toggleFavorite() {
 // 在线弹窗「喜欢」tab 的结果区（openOnlineMusic 设置）
 let favEl = null;
 
-// 渲染收藏歌曲列表到指定容器（点击 → 整列表入队播放）
+// 渲染收藏歌曲列表到指定容器（点击 → 整列表入队播放；右侧 ✕ 取消收藏）
 function renderFavoritesInto(el) {
   const favs = state.favorites || [];
   el.innerHTML = favs.length
@@ -230,10 +230,29 @@ function renderFavoritesInto(el) {
         <span class="mr-play">▶</span>
         <span class="mr-title">${esc(f.title || "")}</span>
         <span class="mr-artist">${esc(f.artist || "")}</span>
+        <button class="mr-del" data-i="${i}" title="取消收藏">✕</button>
       </div>`).join("")
     : `<div class="dash-empty">暂无喜欢的音乐，播放时点 ♡ 收藏</div>`;
   el.querySelectorAll(".online-result").forEach((row, idx) => {
     row.addEventListener("click", () => playFavorites(idx));
+  });
+  // 删除（取消收藏）：不触发整列表播放
+  el.querySelectorAll(".mr-del").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const i = Number(btn.dataset.i);
+      const favs = state.favorites || [];
+      if (i >= 0 && i < favs.length) favs.splice(i, 1);
+      state.favorites = favs;
+      saveState();
+      renderFavoritesInto(el);
+      // 若当前播放的正是被取消收藏的歌，同步底部按键的收藏态
+      const likeBtn = document.getElementById("mc-like");
+      if (likeBtn && currentSong && currentSong.url) {
+        const stillFav = favs.some((x) => x.url === currentSong.url);
+        likeBtn.classList.toggle("active", stillFav);
+      }
+    });
   });
 }
 

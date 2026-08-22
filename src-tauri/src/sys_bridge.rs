@@ -14,9 +14,8 @@ use windows::Win32::System::SystemInformation::GetTickCount64;
 use windows::Win32::UI::Input::KeyboardAndMouse::{GetLastInputInfo, LASTINPUTINFO};
 use windows::Win32::System::Power::SYSTEM_POWER_STATUS;
 use windows::Win32::System::Power::GetSystemPowerStatus;
-use windows::core::Interface;
 use windows::Win32::Media::Audio::{
-    IAudioSessionControl2, IAudioSessionEnumerator, IAudioSessionManager2, IMMDevice,
+    IAudioSessionEnumerator, IAudioSessionManager2, IMMDevice,
     IMMDeviceEnumerator, MMDeviceEnumerator, AudioSessionStateActive, eMultimedia, eRender,
 };
 use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_ALL, COINIT_MULTITHREADED};
@@ -199,9 +198,11 @@ fn is_audio_playing() -> bool {
             let count = sessions.GetCount()?;
             for i in 0..count {
                 let control = sessions.GetSession(i)?;
-                let ctrl2: IAudioSessionControl2 = control.cast()?;
-                // 系统音（按键提示音等）不算播放，异常即不是系统音
-                if ctrl2.IsSystemSoundsSession().is_ok() { continue; }
+                // 注意：不能依赖 IAudioSessionControl2::IsSystemSoundsSession().is_ok() 去排除
+                // “系统音”——windows-rs 对 S_FALSE（值 1，同样属于成功码，表示“非系统音”会话）
+                // 也会返回 Ok，导致普通视频/音乐会话被当成系统音全部跳过，is_audio_playing
+                // 恒为 false，看视频也会锁屏。因此只按会话是否 Active 判定即可
+                // （系统提示音极短，在默认 3s 采样 + 每秒判定的频率下影响可忽略）。
                 if control.GetState()? == AudioSessionStateActive {
                     return Ok(true);
                 }

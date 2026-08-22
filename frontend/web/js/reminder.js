@@ -42,6 +42,12 @@ if (TAURI && TAURI.event && typeof TAURI.event.listen === "function") {
       msgEl.textContent = message || "";
       show();
     })
+    .then(() => {
+      // listener 已就绪：通知后端取用暂存内容推送（规避 emit 早于注册导致的丢事件）
+      if (TAURI && TAURI.core && typeof TAURI.core.invoke === "function") {
+        TAURI.core.invoke("reminder_ready").catch(() => {});
+      }
+    })
     .catch((err) => console.warn("[reminder] 监听失败：", err));
 }
 

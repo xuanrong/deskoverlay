@@ -43,15 +43,20 @@ fn quit_app(app: tauri::AppHandle) {
 /// 待推送的提醒内容：按需创建 reminder 窗口时暂存，待页面加载完成后取用推送。
 static PENDING_REMINDER: Mutex<Option<serde_json::Value>> = Mutex::new(None);
 
-/// 将提醒定位到主屏右上角（预留 24px 边距）、置顶并显示，再向 reminder 窗口推送内容。
-fn show_reminder_win(win: &tauri::WebviewWindow, payload: serde_json::Value) {
+/// 将提醒定位到主屏右上角（预留 24px 边距）、置顶并显示。
+/// emit=true 时向 reminder 窗口推送内容（仅用于"复用已就绪窗口"的场景）；
+/// 新建窗口时 emit=false，改由提醒页 listener 就绪后经 reminder_ready 命令取用 PENDING 再推送，
+/// 消除"emit 早于前端 listener 注册完成"的竞态（事件偶发丢失 → 卡片不渲染 → 透明窗口常驻拦截）。
+fn show_reminder_win(win: &tauri::WebviewWindow, payload: serde_json::Value, emit: bool) {
     let size = win.outer_size().unwrap_or(tauri::PhysicalSize::new(380, 150));
     let screen_w = unsafe { GetSystemMetrics(SM_CXSCREEN) };
     let x = screen_w - size.width as i32 - 24;
     let _ = win.set_position(tauri::PhysicalPosition::new(x, 16));
     let _ = win.set_always_on_top(true);
     let _ = win.show();
-    let _ = win.emit("show-reminder", payload);
+    if emit {
+        let _ = win.emit("show-reminder", payload);
+    }
 }
 
 /// 显示置顶提醒窗口（系统级：盖住浏览器等其他应用）。
@@ -65,7 +70,7 @@ pub fn present_reminder(app: &tauri::AppHandle, icon: &str, title: &str, message
     tauri::async_runtime::spawn(async move {
         // 窗口已存在（如用户尚未点击关闭）→ 直接复用展示，避免重复创建
         if let Some(win) = app.get_webview_window("reminder") {
-            show_reminder_win(&win, payload);
+            show_reminder_win(&win, payload, true);
             return;
         }
 
@@ -81,21 +86,30 @@ pub fn present_reminder(app: &tauri::AppHandle, icon: &str, title: &str, message
             .always_on_top(true)
             .skip_taskbar(true)
             .visible(false)
+            // 首建窗口：页面加载完只负责定位+显示（不 emit），内容由前端 listener 就绪后经
+            // reminder_ready 取用 PENDING 再推送，规避事件先于监听注册的竞态。
             .on_page_load(|win, page| {
-                // 初始页加载完成后再推送（此时 reminder.js 的监听器已就绪）
                 if page.event() == PageLoadEvent::Finished {
-                    if let Some(p) = PENDING_REMINDER.lock().unwrap().take() {
-                        show_reminder_win(&win, p);
-                    }
+                    show_reminder_win(&win, serde_json::Value::Null, false);
                 }
             })
             .build();
-
         // 创建失败（如极端并发下窗口已存在）：清空暂存，等待下次触发
         if result.is_err() {
             *PENDING_REMINDER.lock().unwrap() = None;
         }
     });
+}
+
+/// 置顶提醒页 listener 就绪后调用：取用暂存的待推送内容并 emit。
+/// 规避"窗口 on_page_load 后立即 emit，但前端 listener 尚未注册完成"的事件丢竞争态。
+#[tauri::command]
+fn reminder_ready(app: tauri::AppHandle) {
+    if let Some(p) = PENDING_REMINDER.lock().unwrap().take() {
+        if let Some(win) = app.get_webview_window("reminder") {
+            let _ = win.emit("show-reminder", p);
+        }
+    }
 }
 
 /// 显示置顶提醒命令（前端可调用；参数与 present_reminder 对应）。
@@ -182,10 +196,22 @@ fn read_json(file: &std::path::Path) -> Result<serde_json::Value, String> {
     serde_json::from_str(&data).map_err(|e| e.to_string())
 }
 
+/// 通用插件机制：读取外部插件模块文件的原始文本（UTF-8）。
+/// 前端用 Blob + import() 动态执行并注册为工作台模块，实现「工作台不含插件业务代码」。
+#[tauri::command]
+fn read_text_file(path: String) -> Result<String, String> {
+    let p = path.trim();
+    if p.is_empty() {
+        return Err("路径不能为空".to_string());
+    }
+    let data = fs::read_to_string(p).map_err(|e| e.to_string())?;
+    Ok(data)
+}
+
 /// 读取持久化状态。
-/// state.json 存业务数据；musicSources（音源插件脚本，大字段）独立存 sources.json；
-/// workLogs（工作记录，持续增长的用户数据）独立存 worklogs.json。
-/// 老数据迁移：state.json 中残留的 musicSources / workLogs 会保留返回，下次保存自动分流到独立文件。
+/// state.json 存业务数据；音乐相关（音源插件脚本 musicSources / 收藏 favorites / 播放状态 playback）
+/// 统一独立存 music.json；workLogs（工作记录，持续增长的用户数据）独立存 worklogs.json。
+/// 老数据迁移：state.json 中残留的这几个字段会保留返回，下次保存自动分流；旧版 sources.json 作兜底。
 #[tauri::command]
 fn load_state(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
@@ -199,11 +225,25 @@ fn load_state(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
     } else {
         read_json(&file)?
     };
-    // 音源独立文件（存在则覆盖合并）
-    let sources_file = dir.join("sources.json");
-    if sources_file.exists() {
-        if let Ok(sv) = read_json(&sources_file) {
-            state["musicSources"] = sv;
+
+    // 音乐数据统一文件（存在则覆盖合并）
+    let music_file = dir.join("music.json");
+    if music_file.exists() {
+        if let Ok(mv) = read_json(&music_file) {
+            if let Some(m) = mv.as_object() {
+                if let Some(s) = m.get("musicSources") { state["musicSources"] = s.clone(); }
+                if let Some(f) = m.get("favorites") { state["favorites"] = f.clone(); }
+                if let Some(p) = m.get("playback") { state["playback"] = p.clone(); }
+            }
+        }
+    }
+    // 旧版音源独立文件迁移兜底：music.json 未提供 musicSources 时，读 sources.json 保留旧数据
+    if state.get("musicSources").is_none() {
+        let sources_file = dir.join("sources.json");
+        if sources_file.exists() {
+            if let Ok(sv) = read_json(&sources_file) {
+                state["musicSources"] = sv;
+            }
         }
     }
     // 工作记录独立文件（存在则覆盖合并）
@@ -216,15 +256,20 @@ fn load_state(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
     Ok(state)
 }
 
-/// 写入持久化状态：musicSources 分流到 sources.json、workLogs 分流到 worklogs.json，其余写 state.json。
+/// 写入持久化状态：音乐字段分流到 music.json、workLogs 分流到 worklogs.json，其余写 state.json。
 #[tauri::command]
 fn save_state(app: tauri::AppHandle, state: serde_json::Value) -> Result<(), String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
 
     let mut state = state;
-    let (sources, logs) = if let Some(obj) = state.as_object_mut() {
-        (obj.remove("musicSources"), obj.remove("workLogs"))
+    let (music_file_val, logs) = if let Some(obj) = state.as_object_mut() {
+        let music = serde_json::json!({
+            "musicSources": obj.remove("musicSources").unwrap_or(serde_json::json!([])),
+            "favorites": obj.remove("favorites").unwrap_or(serde_json::json!([])),
+            "playback": obj.remove("playback").unwrap_or(serde_json::json!({})),
+        });
+        (Some(music), obj.remove("workLogs"))
     } else {
         (None, None)
     };
@@ -234,11 +279,12 @@ fn save_state(app: tauri::AppHandle, state: serde_json::Value) -> Result<(), Str
     let data = serde_json::to_string_pretty(&state).map_err(|e| e.to_string())?;
     fs::write(&file, data).map_err(|e| e.to_string())?;
 
-    // 音源脚本（大字段独立文件，避免每次全量重写）
-    let sources_file = dir.join("sources.json");
-    let sdata = serde_json::to_string_pretty(&sources.unwrap_or_else(|| serde_json::json!([])))
-        .map_err(|e| e.to_string())?;
-    fs::write(&sources_file, sdata).map_err(|e| e.to_string())?;
+    // 音乐数据（统一文件，避免频繁收藏/播放变化重写 state.json）
+    if let Some(music) = music_file_val {
+        let music_file = dir.join("music.json");
+        let mdata = serde_json::to_string_pretty(&music).map_err(|e| e.to_string())?;
+        fs::write(&music_file, mdata).map_err(|e| e.to_string())?;
+    }
 
     // 工作记录（持续增长的用户数据独立文件，便于单独备份/导出）
     let logs_file = dir.join("worklogs.json");
@@ -445,7 +491,7 @@ fn main() {
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![quit_app, show_reminder, hide_reminder, http_get, http_post, load_state, save_state, list_desktop_files, image_thumbnail, open_file, reveal_file, delete_file, rename_file, show_lock, hide_lock, sys_bridge::start_system_sampling, sys_bridge::stop_system_sampling, sedentary::set_sedentary_config])
+        .invoke_handler(tauri::generate_handler![quit_app, show_reminder, hide_reminder, reminder_ready, read_text_file, http_get, http_post, load_state, save_state, list_desktop_files, image_thumbnail, open_file, reveal_file, delete_file, rename_file, show_lock, hide_lock, sys_bridge::start_system_sampling, sys_bridge::stop_system_sampling, sedentary::set_sedentary_config])
         .run(tauri::generate_context!())
         .expect("DeskOverlay 运行失败");
 }

@@ -1,5 +1,6 @@
 // 系统设置视图：面向应用偏好设置 + 隐私锁定 + 关于信息。持久化到 state.settings / state.lock。
 import { state, saveState } from "../state.js";
+import { esc } from "./common.js";
 
 export function renderSettings(view) {
   view.header.style.display = "none";
@@ -13,6 +14,19 @@ export function renderSettings(view) {
           <div class="set-desc">每次启动时回到上次浏览的模块；关闭则始终从「今日概览」开始</div>
         </div>
         <label class="set-toggle"><input type="checkbox" id="set-remember" ${state.settings?.rememberModule ? "checked" : ""} /><span></span></label>
+      </div>
+    </div>
+
+    <div class="set-panel">
+      <div class="set-group-title">微信读书</div>
+      <div class="set-row">
+        <div class="set-info">
+          <div class="set-name">API Key</div>
+          <div class="set-desc">在 weread.qq.com/r/weread-skills 获取的 wrk- 开头密钥，用于「微信读书·书架」同步书架</div>
+        </div>
+        <div class="set-input set-key">
+          <input type="password" id="set-weread-key" value="${esc(state.settings?.wereadKey || "")}" placeholder="wrk-" />
+        </div>
       </div>
     </div>
 
@@ -59,6 +73,11 @@ export function renderSettings(view) {
     if (!state.lock) state.lock = {};
     state.lock.minutes = Math.max(1, Math.min(120, Math.round(+e.target.value) || 5));
     e.target.value = state.lock.minutes;
+    saveState();
+  });
+  body.querySelector("#set-weread-key").addEventListener("change", (e) => {
+    if (!state.settings) state.settings = {};
+    state.settings.wereadKey = (e.target.value || "").trim();
     saveState();
   });
 }
