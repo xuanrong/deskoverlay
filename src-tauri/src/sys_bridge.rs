@@ -187,7 +187,7 @@ fn last_input_idle_ms() -> u64 {
 
 /// 检测是否有音频会话正在播放（用于"看视频/听音乐不锁屏"）。
 /// 遍历默认多媒体播放设备的音频会话，只要存在非"系统音"且状态为 Active 即视为播放。
-fn is_audio_playing() -> bool {
+pub fn is_audio_playing() -> bool {
     unsafe {
         let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
         let r = (|| -> windows::core::Result<bool> {
@@ -212,6 +212,13 @@ fn is_audio_playing() -> bool {
         CoUninitialize();
         r.unwrap_or(false)
     }
+}
+
+/// 手动检测当前是否有媒体在播放（设置页测试用）。
+/// 复用锁屏判定的音频会话逻辑：视频/音乐等有声音的输出会被识别为“正在播放”。
+#[tauri::command]
+pub fn check_media_playing() -> bool {
+    is_audio_playing()
 }
 
 /// 全局空闲监控：每秒把"距上次输入的毫秒数"与"是否有音频播放"推送给前端

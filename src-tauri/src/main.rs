@@ -517,7 +517,7 @@ fn main() {
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![quit_app, show_reminder, hide_reminder, reminder_ready, read_text_file, run_wasm_backend, install_plugin_package, build_wasm_backend, http_get, http_post, load_state, save_state, list_desktop_files, image_thumbnail, open_file, reveal_file, delete_file, rename_file, show_lock, hide_lock, sys_bridge::start_system_sampling, sys_bridge::stop_system_sampling, sedentary::set_sedentary_config])
+        .invoke_handler(tauri::generate_handler![quit_app, show_reminder, hide_reminder, reminder_ready, read_text_file, run_wasm_backend, install_plugin_package, build_wasm_backend, http_get, http_post, load_state, save_state, list_desktop_files, image_thumbnail, open_file, reveal_file, delete_file, rename_file, show_lock, hide_lock, sys_bridge::start_system_sampling, sys_bridge::stop_system_sampling, sys_bridge::check_media_playing, sedentary::set_sedentary_config])
         .run(tauri::generate_context!())
         .expect("DeskOverlay 运行失败");
 }

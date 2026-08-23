@@ -65,6 +65,13 @@ export function renderSettings(view) {
             <span class="set-unit">分钟</span>
           </div>
         </div>
+        <div class="set-row">
+          <div class="set-info">
+            <div class="set-name">检测媒体播放</div>
+            <div class="set-desc">测试当前是否有视频/音乐在播放（与“播放时不锁屏”同一判定逻辑）</div>
+          </div>
+          <button class="btn-ghost" id="set-media-test">测试</button>
+        </div>
       </div>
 
       <div class="set-panel">
@@ -102,6 +109,29 @@ export function renderSettings(view) {
       if (!path) return; // 取消选择
       await importPluginZip(path);
     });
+
+    // 测试媒体播放检测
+    const mediaBtn = body.querySelector("#set-media-test");
+    if (mediaBtn) {
+      mediaBtn.addEventListener("click", async () => {
+        mediaBtn.textContent = "检测中…";
+        mediaBtn.disabled = true;
+        try {
+          const playing = await invoke("check_media_playing").catch((e) => { console.error(e); return null; });
+          if (playing === null) {
+            showDialog({ title: "检测失败", message: "无法读取音频会话（可能是系统/权限问题）" });
+          } else {
+            showDialog({
+              title: "检测结果",
+              message: playing ? "✅ 检测到当前有视频/音乐在播放（不会锁屏）" : "未检测到正在播放的媒体（空闲时才会触发锁定）",
+            });
+          }
+        } finally {
+          mediaBtn.textContent = "测试";
+          mediaBtn.disabled = false;
+        }
+      });
+    }
 
     // 移除插件
     body.querySelectorAll(".plugin-rm").forEach((btn) => {
