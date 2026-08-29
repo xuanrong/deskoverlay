@@ -2,11 +2,12 @@
 // Tauri 正式环境使用系统级置顶窗口（lock.html）显示旋转星空；
 // 浏览器开发态回退到页面内浮层，视觉与 lock.html 保持一致。
 import { state } from "./state.js";
-import { Heartbeat } from "./bus.js";
+import { Heartbeat, invoke } from "./bus.js";
 
 let lastActive = Date.now();
 let globalIdleMs = -1; // 由后端 system-idle 提供全局空闲毫秒（Tauri）
 let audioPlaying = false; // 是否有音频/视频正在播放
+let audioProbeTick = 0;   // 每 3 秒采样一次，与后端锁屏采样频率一致
 let intervalId = null;
 let locked = false;
 
@@ -233,6 +234,13 @@ function unlock() {
 
 function tick() {
   if (locked) return;
+  // 每 3 秒采样一次"是否有视频/音乐在播放"，与设置页检测同源（直接查音频会话，不依赖事件）
+  audioProbeTick++;
+  if (audioProbeTick % 3 === 0) {
+    invoke("check_media_playing")
+      .then((b) => { if (typeof b === "boolean") audioPlaying = b; })
+      .catch(() => {});
+  }
   const cfg = state.lock;
   if (!cfg || !cfg.enabled) return;
   const minutes = Math.min(120, Math.max(1, cfg.minutes || 5));
@@ -254,8 +262,8 @@ export function startLockController() {
   if ((window.__TAURI__ || window.__TAURI_INTERNALS__) && window.__TAURI__?.event?.listen) {
     window.__TAURI__.event.listen("system-idle", (e) => {
       const p = e?.payload || {};
+      // 只消费全局空闲时长；audioPlaying 由 tick 内 direct invoke 采样（更可靠、同源于设置页检测）
       if (typeof p.idleMs === "number") globalIdleMs = p.idleMs;
-      if (typeof p.audioPlaying === "boolean") audioPlaying = p.audioPlaying;
     }).catch(() => {});
     // 系统级锁屏窗口解锁后，重置主窗口的锁定状态
     window.__TAURI__.event.listen("lock-hide", () => {

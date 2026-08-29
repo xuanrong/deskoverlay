@@ -110,6 +110,9 @@ pub fn present_reminder(app: &tauri::AppHandle, icon: &str, title: &str, message
             .shadow(false)
             .always_on_top(true)
             .skip_taskbar(true)
+            // 提醒窗口抢焦点会打断用户正在进行的输入，故设置为不可聚焦：
+            // 显示时不会激活窗口，主窗口保持键盘/输入焦点。
+            .focusable(false)
             .visible(false)
             // 首建窗口：页面加载完只负责定位+显示（不 emit），内容由前端 listener 就绪后经
             // reminder_ready 取用 PENDING 再推送，规避事件先于监听注册的竞态。

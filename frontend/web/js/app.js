@@ -185,9 +185,34 @@ document.getElementById("help-close").addEventListener("click", () => {
   document.getElementById("help-overlay").hidden = true;
 });
 
+// -------------------- 导航栏折叠/展开 --------------------
+const navToggle = document.getElementById("nav-toggle");
+function applyNavCollapsed(collapsed) {
+  document.body.classList.toggle("nav-collapsed", collapsed);
+  if (!navToggle) return;
+  navToggle.title = collapsed ? "展开导航" : "折叠导航";
+  const label = navToggle.querySelector("span");
+  if (label) label.textContent = collapsed ? "展开" : "收起";
+  const svg = navToggle.querySelector("svg");
+  if (svg) {
+    svg.innerHTML = collapsed
+      ? '<path d="M10 5l7 7-7 7"/>'
+      : '<path d="M14 5l-7 7 7 7"/><path d="M20 5l-7 7 7 7"/>';
+  }
+}
+navToggle.addEventListener("click", () => {
+  const collapsed = !document.body.classList.contains("nav-collapsed");
+  if (!state.settings) state.settings = {};
+  state.settings.navCollapsed = collapsed;
+  saveState();
+  applyNavCollapsed(collapsed);
+});
+
 // -------------------- 启动 --------------------
 // 异步初始化状态，就绪后加载外部插件、渲染导航与当前模块
 loadState().then(async () => {
+  // 恢复导航栏折叠状态
+  applyNavCollapsed(!!state.settings?.navCollapsed);
   // 先加载启用的外部插件（如微信读书），使插件模块注册进导航，再切初始模块（否则初始模块若是插件会找不到）
   await initPlugins();
   renderNav();
