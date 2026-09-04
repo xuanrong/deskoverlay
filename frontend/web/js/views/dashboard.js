@@ -3,7 +3,8 @@ import { Bus, invoke } from "../bus.js";
 import { Tasks } from "../tasks.js";
 import { state, saveState, pushRecentOp, onRecentOp } from "../state.js";
 import { STATUS_LABEL, TASK_STATUSES, PRIORITY_LABEL } from "../config.js";
-import { ICON_EXTERNAL, ICON_SEARCH, ICON_EDIT, ICON_TRASH, ICON_CHECK, ICON_FOLDER, ICON_IMAGE, ICON_DOC, ICON_CODE, ICON_ARCHIVE, ICON_VIDEO, ICON_MUSIC, ICON_PAPERCLIP } from "../icons.js";
+import { ICON_EXTERNAL, ICON_SEARCH, ICON_EDIT, ICON_TRASH, ICON_CHECK, ICON_BELL } from "../icons.js";
+import { FILE_CATEGORIES, FILE_ICONS } from "../filetypes.js";
 import { esc, showDialog } from "./common.js";
 import { createDatePicker } from "../datepicker.js";
 import { createSelect } from "../selectbox.js";
@@ -25,6 +26,7 @@ const OP_META = {
   task_create: { icon: ICON_CHECK, type: "任务" },
   task_update: { icon: ICON_EDIT, type: "任务" },
   task_delete: { icon: ICON_TRASH, type: "任务" },
+  reminder:    { icon: ICON_BELL, type: "提醒" },
 };
 
 // 相对时间：刚刚 / X 分钟前 / X 小时前 / 今天 HH:MM / 昨天 HH:MM / MM-DD
@@ -50,7 +52,7 @@ const OP_VERB = {
   task_create: "创建", task_update: "修改", task_delete: "删除",
 };
 function recentOpRow(op) {
-  const m = OP_META[op.kind] || { icon: "•", type: "" };
+  const m = OP_META[op.kind] || (op.type === "sedentary" ? OP_META.reminder : { icon: "•", type: "" });
   const verb = OP_VERB[op.kind] || op.action || "操作";
   const name = op.name || op.text || "";
   return `
@@ -58,7 +60,7 @@ function recentOpRow(op) {
       <span class="ro-icon">${m.icon}</span>
       <span class="ro-text">${esc(verb)}了 <b>${esc(name)}</b></span>
       <span class="ro-time">${relTime(op.ts)}</span>
-      <span class="ro-type${m.type === "任务" ? " task" : m.type === "系统" ? " system" : ""}">${esc(m.type)}</span>
+      <span class="ro-type${m.type === "任务" ? " task" : m.type === "系统" ? " system" : m.type === "提醒" ? " reminder" : ""}">${esc(m.type)}</span>
     </div>`;
 }
 
@@ -96,20 +98,6 @@ onRecentOp(() => {
   const list = document.getElementById("d-recent-ops-list");
   if (list) list.innerHTML = renderRecentOps();
 });
-
-const FILE_CATEGORIES = {
-  图片: ["jpg", "jpeg", "png", "gif", "webp", "bmp", "svg", "ico"],
-  文档: ["doc", "docx", "pdf", "txt", "md", "xlsx", "xls", "pptx", "ppt", "csv"],
-  代码: ["js", "ts", "rs", "py", "go", "java", "cpp", "c", "h", "html", "css", "json", "xml", "sh"],
-  压缩: ["zip", "rar", "7z", "tar", "gz", "bz2"],
-  视频: ["mp4", "avi", "mkv", "mov", "wmv", "flv", "webm"],
-  音频: ["mp3", "wav", "flac", "aac", "ogg", "m4a"],
-};
-
-const FILE_ICONS = {
-  文件夹: ICON_FOLDER, 图片: ICON_IMAGE, 文档: ICON_DOC, 代码: ICON_CODE,
-  压缩: ICON_ARCHIVE, 视频: ICON_VIDEO, 音频: ICON_MUSIC, 其他: ICON_PAPERCLIP,
-};
 
 // 待办状态 SVG 图标（虚线圆 / 蓝色半圆 / 橙色实心圆 / 绿色对勾圆）
 const STATUS_ICONS = {

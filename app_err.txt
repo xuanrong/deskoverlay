@@ -1,0 +1,1 @@
+[debug] winw=1440 winh=870 scale=2 logical=LogicalSize { width: 1440.0, height: 870.0 }

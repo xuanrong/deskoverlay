@@ -34,6 +34,7 @@ export const ICON_WATER = `<svg viewBox="0 0 24 24"><path d="M12 3s6 6.5 6 11a6 
 export const ICON_CALENDAR = `<svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4M16 3v4M3 10h18"/></svg>`;
 export const ICON_BUILDING = `<svg viewBox="0 0 24 24"><path d="M4 21V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v16"/><path d="M16 9h4v12"/><path d="M4 21h16"/><path d="M8 8h2M8 12h2M8 16h2"/></svg>`;
 export const ICON_CLOCK = `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>`;
+export const ICON_BELL = `<svg viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>`;
 
 // 音乐播放模式
 export const ICON_SHUFFLE = `<svg viewBox="0 0 24 24"><path d="M16 3h5v5"/><path d="M4 20 20 4"/><path d="M21 15v6h-6"/><path d="M4 4l5 5"/></svg>`;

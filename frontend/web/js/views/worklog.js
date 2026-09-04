@@ -44,7 +44,7 @@ function logItem(log) {
         </div>
       </div>
       <div class="wl-actions">
-        <button class="wl-edit" data-id="${esc(log.id)}" title="编辑">编辑</button>
+        <button class="wl-edit" data-id="${esc(log.id)}" title="编辑">✎</button>
         <button class="wl-del" data-id="${esc(log.id)}" title="删除">✕</button>
       </div>
     </div>`;

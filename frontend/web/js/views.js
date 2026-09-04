@@ -8,9 +8,11 @@ import { renderNotes } from "./views/notes.js";
 import { renderWorkLog } from "./views/worklog.js";
 import { renderIdeabox } from "./views/ideabox.js";
 import { renderSettings } from "./views/settings.js";
+import { renderQuickAccess } from "./views/quickaccess.js";
 
 export const VIEW_RENDERERS = {
   dashboard: renderDashboard,
+  quickaccess: renderQuickAccess,
   worklog: renderWorkLog,
   ideabox: renderIdeabox,
   system: renderSystem,

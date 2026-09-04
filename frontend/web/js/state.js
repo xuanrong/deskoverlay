@@ -22,6 +22,8 @@ export const state = {
   settings: { rememberModule: true }, // 应用设置：rememberModule=启动时回到上次模块
   plugins: [], // 外部插件配置：{ id, title, path, enabled }（通过「设置 → 插件」导入）
   lock: { enabled: false, minutes: 5 }, // 隐私锁定：离开 enabled 分钟自动锁定全屏
+  quickAccess: [], // 快捷访问：{ id, type:"url"|"folder"|"file", title, target, groupId }
+  qaGroups: [], // 快捷访问分组：{ id, name }
 };
 
 let ready = false;
@@ -98,6 +100,14 @@ export async function loadState() {
   if (typeof state.playback.index !== "number") state.playback.index = -1;
   if (typeof state.playback.volume !== "number") state.playback.volume = 0.8;
   state.playback.volume = Math.max(0, Math.min(1, state.playback.volume));
+  // 快捷访问分组：结构校验
+  if (!Array.isArray(state.qaGroups)) state.qaGroups = [];
+  state.qaGroups = state.qaGroups.filter((g) => g && typeof g === "object" && typeof g.id === "string" && typeof g.name === "string");
+  // 快捷访问：结构校验（缺失 id / target 的丢弃）
+  if (!Array.isArray(state.quickAccess)) state.quickAccess = [];
+  state.quickAccess = state.quickAccess.filter(
+    (q) => q && typeof q === "object" && typeof q.id === "string" && typeof q.target === "string" && q.target.trim()
+  );
   ready = true;
   readyQueue.forEach((fn) => fn());
   readyQueue.length = 0;

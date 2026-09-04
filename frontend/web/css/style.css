@@ -476,7 +476,7 @@ body.nav-collapsed .nav-btn { width: 100%; }
   user-select: text;
 }
 html {
-  scrollbar-color: rgba(120,130,150,0.3) transparent;
+  scrollbar-color: transparent transparent;
   scrollbar-width: thin;
 }
 
@@ -594,22 +594,22 @@ html {
   text-align: center;
 }
 
-/* ---------- 滚动条（全局统一 · 暗色） ---------- */
-* { scrollbar-width: thin; scrollbar-color: rgba(130, 140, 155, 0.32) transparent; }
+/* ---------- 滚动条（全局统一 · 暗色，默认隐藏，滚动时显示） ---------- */
+* { scrollbar-width: thin; scrollbar-color: transparent transparent; }
 ::-webkit-scrollbar { width: 9px; height: 9px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-corner { background: transparent; }
 ::-webkit-scrollbar-thumb {
-  background: rgba(130, 140, 155, 0.32);
+  background: transparent;
   border: 2px solid transparent;
   border-radius: 999px;
   background-clip: content-box;
 }
-::-webkit-scrollbar-thumb:hover {
-  background: rgba(130, 140, 155, 0.55);
-  background-clip: content-box;
-}
-::-webkit-scrollbar-thumb:active { background: rgba(130, 140, 155, 0.7); background-clip: content-box; }
+/* .scrolling 由全局 scroll 监听临时添加，滚动中才显示滚动条 */
+.scrolling { scrollbar-color: rgba(130, 140, 155, 0.32) transparent; }
+.scrolling::-webkit-scrollbar-thumb { background: rgba(140, 150, 165, 0.5); background-clip: content-box; }
+.scrolling::-webkit-scrollbar-thumb:hover { background: rgba(140, 150, 165, 0.62); background-clip: content-box; }
+.scrolling::-webkit-scrollbar-thumb:active { background: rgba(140, 150, 165, 0.75); background-clip: content-box; }
 
 
 .metric {
@@ -1176,7 +1176,7 @@ html {
 .dash-count { font-size: 11px; color: var(--text-faint); font-weight: 500; }
 .dash-add-btn {
   width: 26px; height: 26px; border-radius: 8px;
-  border: 1px solid transparent;
+  border: 1px solid var(--border);
   background: transparent;
   color: var(--text-dim); font-size: 16px; line-height: 1; cursor: pointer;
   display: flex; align-items: center; justify-content: center;
@@ -1514,8 +1514,8 @@ body.no-select { user-select: none; }
 .recent-ops { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
 .recent-ops-head {
   display: flex; justify-content: space-between; align-items: baseline;
-  font-size: 13px; font-weight: 600; color: var(--text);
-  margin-bottom: 8px;
+  font-size: 13px; font-weight: 600; color: var(--text-dim);
+  letter-spacing: 0.4px; margin-bottom: 8px;
 }
 .recent-ops-head .recent-ops-all {
   font-size: 11px; color: var(--blue); cursor: pointer; font-weight: 500;
@@ -1531,12 +1531,92 @@ body.no-select { user-select: none; }
 .recent-op .ro-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
 .recent-op .ro-time { color: var(--text-faint); font-size: 11.5px; flex: 0 0 auto; font-variant-numeric: tabular-nums; }
 .recent-op .ro-type {
-  font-size: 10.5px; padding: 1px 7px; border-radius: 999px; font-weight: 600;
+  font-size: 10.5px; padding: 2px 7px; border-radius: 6px; font-weight: 500;
   background: rgba(88,166,255,0.16); color: var(--blue); flex: 0 0 auto;
 }
-.recent-op .ro-type.system { background: rgba(154,167,180,0.16); color: var(--text-dim); }
-.recent-op .ro-type.task { background: rgba(63,185,80,0.16); color: var(--green); }
+.recent-op .ro-type.system { background: rgba(154,167,180,0.12); color: var(--text-dim); }
+.recent-op .ro-type.task { background: rgba(63,185,80,0.18); color: var(--green); }
+.recent-op .ro-type.reminder { background: rgba(210,153,34,0.18); color: var(--amber); }
 .recent-empty { padding: 12px 0; }
+
+/* ====================== 快捷访问（独立导航模块） ====================== */
+.qa-title-row { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; }
+.qa-title-row .view-title { margin: 0; }
+.qa-title-row .qa-tools { margin-left: auto; }
+.qa-tools { display: inline-flex; align-items: center; gap: 6px; }
+.qa-btn {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 4px 10px; border-radius: 7px; font-size: 12px; font-family: var(--font);
+  background: transparent; border: 1px solid var(--border); color: var(--text-dim);
+  cursor: pointer; transition: all var(--t-fast);
+}
+.qa-btn:hover { background: var(--bg-hover); color: var(--text); border-color: rgba(88,166,255,0.35); }
+.qa-btn-primary {
+  background: rgba(88,166,255,0.14); border-color: rgba(88,166,255,0.3); color: var(--text);
+}
+.qa-btn-primary:hover { background: rgba(88,166,255,0.22); color: var(--text); }
+
+.qa-groups { display: flex; flex-direction: column; gap: 10px; }
+.qa-group-head {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 11.5px; font-weight: 600; color: var(--text-dim);
+  margin-bottom: 6px; letter-spacing: 0.3px;
+}
+.qa-count {
+  font-size: 10px; color: var(--text-faint);
+  background: rgba(255,255,255,0.08); padding: 1px 6px; border-radius: 8px;
+  font-variant-numeric: tabular-nums;
+}
+.qa-row { display: flex; flex-wrap: wrap; gap: 8px; min-height: 66px; align-content: flex-start; }
+
+.qa-card {
+  position: relative;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+  width: 118px; min-height: 64px; padding: 10px 6px;
+  border-radius: 10px; background: var(--bg-panel-2); border: 1px solid var(--border);
+  cursor: pointer; user-select: none; text-align: center; box-sizing: border-box;
+  transition: border-color var(--t-fast), background var(--t-fast);
+}
+.qa-card:hover { background: var(--bg-hover); border-color: rgba(88,166,255,0.35); }
+.qa-card .qa-icon { color: var(--text-dim); }
+.qa-card .qa-icon svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.qa-card .qa-title {
+  font-size: 11.5px; color: var(--text); max-width: 100%;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.qa-card .qa-actions {
+  position: absolute; top: 5px; right: 5px;
+  display: inline-flex; gap: 2px; opacity: 0; transition: opacity var(--t-fast);
+}
+.qa-card:hover .qa-actions { opacity: 1; }
+.qa-act {
+  width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center;
+  border: none; background: var(--bg-panel-2); border-radius: 6px; color: var(--text-dim);
+  cursor: pointer; padding: 0; transition: all var(--t-fast);
+}
+.qa-act svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.qa-act:hover { background: var(--bg-hover); color: var(--text); }
+.qa-act.danger:hover { background: rgba(255,123,114,0.16); color: var(--danger); }
+
+.qa-card.dragging { opacity: 0.3; }
+.qa-card.qa-ghost {
+  position: fixed; z-index: 9999; margin: 0;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-elevated); box-shadow: 0 10px 28px rgba(0,0,0,0.4);
+  opacity: 0.95; pointer-events: none; will-change: transform;
+}
+.qa-card.qa-insert-before { box-shadow: inset 3px 0 0 var(--blue); }
+.qa-card.qa-insert-after { box-shadow: inset -3px 0 0 var(--blue); }
+.qa-empty { font-size: 11.5px; color: var(--text-faint); padding: 8px 2px; }
+
+/* 分组管理 */
+.qa-glist { display: flex; flex-direction: column; gap: 4px; max-height: 40vh; overflow-y: auto; }
+.qa-gitem {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 7px 9px; border-radius: 8px; background: var(--bg-panel-2); border: 1px solid var(--border);
+}
+.qa-gitem .qa-actions { position: static; opacity: 1; }
+.qa-gname { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text); }
 
 /* 文件右键菜单 */
 .file-menu {
@@ -1788,11 +1868,11 @@ body.no-select { user-select: none; }
 
 /* ====================== 工作记录（按天时间线） ====================== */
 .wl-form {
-  background: var(--bg-panel);
+  background: var(--bg-panel-2);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 14px 16px;
-  margin-bottom: 18px;
+  padding: 14px 16px 12px;
+  margin-bottom: 16px;
   display: flex; flex-direction: column; gap: 10px;
 }
 .wl-form-row {
@@ -1844,13 +1924,13 @@ body.no-select { user-select: none; }
 }
 .wl-item {
   position: relative; display: flex; align-items: flex-start; gap: 10px;
-  background: var(--bg-panel);
+  background: var(--bg-panel-2);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: 9px 12px;
   transition: border-color var(--t-fast), background var(--t-fast);
 }
-.wl-item:hover { border-color: var(--border-strong); background: var(--bg-panel-2); }
+.wl-item:hover { border-color: var(--border-strong); background: var(--bg-hover); }
 /* 时间线圆点 */
 .wl-dot {
   position: absolute; left: -25px; top: 15px;
@@ -1867,7 +1947,7 @@ body.no-select { user-select: none; }
 .wl-text { font-size: 13.5px; line-height: 1.55; color: var(--text); word-break: break-word; white-space: pre-wrap; }
 .wl-meta { display: flex; align-items: center; gap: 8px; margin-top: 5px; flex-wrap: wrap; }
 .wl-type {
-  font-size: 10.5px; padding: 1px 8px; border-radius: 999px;
+  font-size: 10.5px; font-weight: 600; padding: 2px 8px; border-radius: 11px;
   flex: 0 0 auto;
 }
 .wl-type-work { background: rgba(95,168,211,0.15); color: #5fa8d3; }
@@ -1879,13 +1959,13 @@ body.no-select { user-select: none; }
 .wl-actions { flex: 0 0 auto; display: flex; gap: 4px; opacity: 0; transition: opacity var(--t-fast); }
 .wl-item:hover .wl-actions { opacity: 1; }
 .wl-actions button {
-  background: transparent; border: 1px solid var(--border);
-  color: var(--text-dim); font-size: 11px; border-radius: var(--radius-xs);
-  padding: 3px 8px; cursor: pointer; font-family: var(--font);
+  width: 22px; height: 22px; display: flex; align-items: center; justify-content: center;
+  background: transparent; border: 0; color: var(--text-faint);
+  border-radius: 6px; cursor: pointer; font-size: 13px; padding: 0;
+  font-family: var(--font); transition: all var(--t-fast);
 }
-.wl-actions .wl-edit:hover { color: var(--blue); border-color: var(--blue); }
-.wl-actions .wl-del { border-color: transparent; }
-.wl-actions .wl-del:hover { color: var(--danger); background: rgba(255,123,114,0.12); }
+.wl-actions .wl-edit:hover { background: var(--bg-hover); color: var(--blue); }
+.wl-actions .wl-del:hover { background: rgba(255,123,114,0.16); color: var(--danger); }
 .wl-edit-modal { width: min(600px, 94vw); }
 .wl-edit-modal #wl-e-text {
   font-size: 14.5px; line-height: 1.7; min-height: 160px; padding: 12px 14px;

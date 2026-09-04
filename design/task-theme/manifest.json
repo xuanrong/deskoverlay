@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "primitives": "./primitives.json",
+  "defaultUiTheme": "warm-gray",
+  "defaultDiagramTheme": "desk-dash",
+  "uiThemes": {
+    "warm-gray": "./ui-theme.json"
+  },
+  "diagramThemes": {
+    "desk-dash": "./diagram-theme.json"
+  }
+}

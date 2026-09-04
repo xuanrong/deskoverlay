@@ -22,6 +22,7 @@ use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 use tauri::webview::PageLoadEvent;
 use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri_plugin_dialog::DialogExt;
 use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CXSCREEN};
 
 /// 通用 Wasm 插件命令：读取外部 .wasm 后端文件并在宿主内沙箱执行（返回插件结果串）。
@@ -373,6 +374,42 @@ fn open_file(name: String) -> Result<(), String> {
     Ok(())
 }
 
+/// 用默认程序打开任意目标：http(s) 链接 → 默认浏览器；本地路径 → 默认程序。
+#[tauri::command]
+fn open_path(target: String) -> Result<(), String> {
+    let t = target.trim();
+    if t.is_empty() {
+        return Err("目标不能为空".to_string());
+    }
+    std::process::Command::new("cmd")
+        .args(["/C", "start", "", t])
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// 弹出系统文件夹选择对话框，返回所选目录路径（取消则返回 None）。
+#[tauri::command]
+fn pick_folder(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    let picked = app
+        .dialog()
+        .file()
+        .blocking_pick_folder()
+        .map(|p| p.to_string());
+    Ok(picked)
+}
+
+/// 弹出系统文件选择对话框，返回所选文件路径（取消则返回 None）。
+#[tauri::command]
+fn pick_file(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    let picked = app
+        .dialog()
+        .file()
+        .blocking_pick_file()
+        .map(|p| p.to_string());
+    Ok(picked)
+}
+
 /// 在资源管理器中定位文件。
 #[tauri::command]
 fn reveal_file(name: String) -> Result<(), String> {
@@ -520,7 +557,7 @@ fn main() {
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![quit_app, show_reminder, hide_reminder, reminder_ready, read_text_file, run_wasm_backend, install_plugin_package, build_wasm_backend, http_get, http_post, load_state, save_state, list_desktop_files, image_thumbnail, open_file, reveal_file, delete_file, rename_file, show_lock, hide_lock, sys_bridge::start_system_sampling, sys_bridge::stop_system_sampling, sys_bridge::check_media_playing, sedentary::set_sedentary_config])
+        .invoke_handler(tauri::generate_handler![quit_app, show_reminder, hide_reminder, reminder_ready, read_text_file, run_wasm_backend, install_plugin_package, build_wasm_backend, http_get, http_post, load_state, save_state, list_desktop_files, image_thumbnail, open_file, open_path, pick_folder, pick_file, reveal_file, delete_file, rename_file, show_lock, hide_lock, sys_bridge::start_system_sampling, sys_bridge::stop_system_sampling, sys_bridge::check_media_playing, sedentary::set_sedentary_config])
         .run(tauri::generate_context!())
         .expect("DeskOverlay 运行失败");
 }

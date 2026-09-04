@@ -169,10 +169,7 @@ window.addEventListener("keydown", (e) => {
 window.addEventListener("keydown", (e) => {
   if (e.key !== "Escape") return;
   const help = document.getElementById("help-overlay");
-  if (help && !help.hidden) { help.hidden = true; return; }
-  if (window.__TAURI__ || window.__TAURI_INTERNALS__) {
-    invoke("quit_app").catch(() => { try { window.close(); } catch (_) {} });
-  }
+  if (help && !help.hidden) help.hidden = true;
 });
 document.getElementById("nav-quit").addEventListener("click", () => {
   if (window.__TAURI__ || window.__TAURI_INTERNALS__) {
@@ -184,6 +181,18 @@ document.getElementById("nav-quit").addEventListener("click", () => {
 document.getElementById("help-close").addEventListener("click", () => {
   document.getElementById("help-overlay").hidden = true;
 });
+
+// -------------------- 滚动条自动隐藏（滚动时显示，停止后隐藏） --------------------
+let scrollHideTimer = null;
+document.addEventListener("scroll", (e) => {
+  const el = e.target === document ? document.documentElement : e.target;
+  if (!el || !el.classList) return;
+  el.classList.add("scrolling");
+  clearTimeout(scrollHideTimer);
+  scrollHideTimer = setTimeout(() => {
+    document.querySelectorAll(".scrolling").forEach((n) => n.classList.remove("scrolling"));
+  }, 500);
+}, true);
 
 // -------------------- 导航栏折叠/展开 --------------------
 const navToggle = document.getElementById("nav-toggle");

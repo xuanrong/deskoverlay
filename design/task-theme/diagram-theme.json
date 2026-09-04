@@ -1,0 +1,178 @@
+{
+  "id": "desk-dash",
+  "version": 1,
+  "tags": [
+    "task",
+    "evidence-backed"
+  ],
+  "brandEvidence": {
+    "name": "DeskOverlay 今日概览 · 界面视觉稿",
+    "checkedAt": "2026-08-30",
+    "sources": [
+      {
+        "kind": "scene-derived",
+        "reference": "深色玻璃工作台桌面应用界面设计稿。沿用应用既有设计系统：深色底 + 蓝色主色 #58a6ff + 青色渐变 #39c5cf；待办/灵感等状态语义色 绿 #3fb950 / 琥珀 #d29922 / 紫 #bc8cff。"
+      }
+    ],
+    "derivations": [
+      {
+        "role": "data.labelRoles[0].text",
+        "method": "wcag-contrast-choice",
+        "fill": "#3FB950",
+        "basis": "Compared #FFFFFF and #0A0A0A on #3FB950; chose #0A0A0A."
+      },
+      {
+        "role": "data.labelRoles[1].text",
+        "method": "wcag-contrast-choice",
+        "fill": "#D29922",
+        "basis": "Compared #FFFFFF and #0A0A0A on #D29922; chose #0A0A0A."
+      },
+      {
+        "role": "data.labelRoles[2].text",
+        "method": "wcag-contrast-choice",
+        "fill": "#BC8CFF",
+        "basis": "Compared #FFFFFF and #0A0A0A on #BC8CFF; chose #0A0A0A."
+      },
+      {
+        "role": "data.labelRoles[3].text",
+        "method": "wcag-contrast-choice",
+        "fill": "#859EAB",
+        "basis": "Compared #FFFFFF and #0A0A0A on #859EAB; chose #0A0A0A."
+      },
+      {
+        "role": "data.labelRoles[4].text",
+        "method": "wcag-contrast-choice",
+        "fill": "#FF7B72",
+        "basis": "Compared #FFFFFF and #0A0A0A on #FF7B72; chose #0A0A0A."
+      }
+    ]
+  },
+  "document": {
+    "background": "#0D1322",
+    "text": "#E6EDF3",
+    "mutedText": "#9AA7B4",
+    "connector": "#5B6675",
+    "primaryConnector": "#58A6FF"
+  },
+  "node": {
+    "neutral": {
+      "fill": "#161C2C",
+      "stroke": "#2A3346",
+      "text": "#E6EDF3"
+    },
+    "primary": {
+      "fill": "#58A6FF",
+      "stroke": "#58A6FF",
+      "text": "#0A0E15"
+    },
+    "emphasis": {
+      "fill": "#1A2E4A",
+      "stroke": "#58A6FF",
+      "text": "#E6EDF3"
+    },
+    "secondary": {
+      "fill": "#111820",
+      "stroke": "#2A3346",
+      "text": "#E6EDF3"
+    }
+  },
+  "style": {
+    "shape": {
+      "roughness": 0,
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "fillStyle": "solid",
+      "opacity": 100,
+      "roundness": {
+        "type": 3
+      }
+    },
+    "text": {
+      "fontFamily": "helvetica",
+      "fontFamilyAliases": [
+        2,
+        "2"
+      ],
+      "codeFontFamily": "cascadia",
+      "codeFontFamilyAliases": [
+        3,
+        "3"
+      ],
+      "fontSize": 16,
+      "groupTitleFontSize": 20,
+      "titleFontSize": 28
+    },
+    "arrow": {
+      "roughness": 0,
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "opacity": 100,
+      "route": "straight",
+      "startArrowhead": null,
+      "endArrowhead": "triangle",
+      "roundness": null,
+      "elbowed": false
+    },
+    "allowed": {
+      "strokeWidths": [
+        1,
+        2
+      ],
+      "strokeStyles": [
+        "solid",
+        "dashed"
+      ],
+      "rectangleRoundnessTypes": [
+        null,
+        3
+      ],
+      "arrowRoutes": [
+        "straight",
+        "elbowed",
+        "curved"
+      ],
+      "arrowheads": [
+        null,
+        "triangle"
+      ]
+    }
+  },
+  "data": {
+    "accents": [],
+    "other": "#859EAB",
+    "labelRoles": [
+      {
+        "fill": "#3FB950",
+        "text": "#0A0A0A"
+      },
+      {
+        "fill": "#D29922",
+        "text": "#0A0A0A"
+      },
+      {
+        "fill": "#BC8CFF",
+        "text": "#0A0A0A"
+      },
+      {
+        "fill": "#859EAB",
+        "text": "#0A0A0A"
+      },
+      {
+        "fill": "#FF7B72",
+        "text": "#0A0A0A"
+      }
+    ]
+  },
+  "semantic": {
+    "info": "#58A6FF",
+    "success": "#3FB950",
+    "warning": "#D29922",
+    "error": "#FF7B72"
+  },
+  "series": [
+    "#58A6FF",
+    "#3FB950",
+    "#D29922",
+    "#BC8CFF"
+  ]
+}
