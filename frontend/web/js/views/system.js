@@ -42,7 +42,7 @@ export function renderSystem(view) {
       <div class="sys-info-row"><span>运行时长</span><b id="s-uptime">--</b></div>
     </div>
     <div class="sys-disks">
-      <div class="sys-disks-head">磁盘</div>
+      <div class="sec-title">磁盘</div>
       <div class="sys-disks-list" id="s-disks"></div>
     </div>`;
 

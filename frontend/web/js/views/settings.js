@@ -13,7 +13,7 @@ export function renderSettings(view) {
     const plugins = getPlugins();
     body.innerHTML = `
       <div class="set-panel">
-        <div class="set-group-title">通用</div>
+        <div class="sec-title">通用</div>
         <div class="set-row">
           <div class="set-info">
             <div class="set-name">记住上次所在模块</div>
@@ -24,7 +24,7 @@ export function renderSettings(view) {
       </div>
 
       <div class="set-panel">
-        <div class="set-group-title">插件</div>
+        <div class="sec-title">插件</div>
         <div class="set-desc" style="padding:4px 0">通过 .zip 插件包扩展工作台模块（内含前端与后端源码/预编译 wasm），插件不内置于应用。</div>
         ${
           plugins.length
@@ -47,7 +47,7 @@ export function renderSettings(view) {
       </div>
 
       <div class="set-panel">
-        <div class="set-group-title">隐私</div>
+        <div class="sec-title">隐私</div>
         <div class="set-row">
           <div class="set-info">
             <div class="set-name">离开后自动锁定</div>
@@ -75,7 +75,7 @@ export function renderSettings(view) {
       </div>
 
       <div class="set-panel">
-        <div class="set-group-title">关于</div>
+        <div class="sec-title">关于</div>
         <div class="set-row">
           <div class="set-info"><div class="set-name">DeskOverlay</div><div class="set-desc">Windows 桌面工作台 · 数据本地持久化</div></div>
           <div class="set-value">v0.3.0</div>

@@ -63,9 +63,11 @@ function startClock() {
     else if (h < 11) greet = "早上好";
     else if (h < 14) greet = "中午好";
     else if (h < 18) greet = "下午好";
+    const dateMain = now.toLocaleDateString("zh-CN", { year: "numeric", month: "long", day: "numeric" });
+    const dateWeek = now.toLocaleDateString("zh-CN", { weekday: "long" });
     emit("clock", {
       time: now.toLocaleTimeString("zh-CN", { hour12: false }),
-      date: now.toLocaleDateString("zh-CN", { year: "numeric", month: "long", day: "numeric", weekday: "long" }),
+      date: `${dateMain} · ${dateWeek}`,
       weekday: now.getDay(),
       day: now.getDate(),
       month: now.getMonth(),

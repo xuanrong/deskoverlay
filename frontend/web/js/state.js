@@ -11,6 +11,20 @@ export const state = {
   reminders: [], // 提醒配置：{ id, label, icon, type, time/intervalMin, enabled, ... }
   sedentary: { enabled: false, intervalMin: 45 }, // 久坐提醒：开关 + 连续使用间隔（分钟）
   water: { enabled: false, intervalMin: 90 }, // 喝水提醒：开关 + 间隔（分钟）
+  pomodoro: {
+    mode: "focus", // focus | short | long（当前会话模式）
+    running: false, // 是否正在倒计时
+    endsAt: 0, // 本轮结束时间戳（running 时有效，重启后据此续跑）
+    pausedRemain: 0, // 暂停时剩余毫秒（未开始则为 0，代表整段时长）
+    focusMin: 25, shortMin: 5, longMin: 15, // 各模式时长（分钟）
+    cycleCount: 0, // 本轮长周期内已完成的专注数（0-3，第 4 个进入长休息）
+    goal: 8, // 每日专注目标（轮）
+    autoNext: false, // 阶段自然结束时是否自动开始下一阶段
+    date: "", // 统计归属日期 YYYY-MM-DD
+    done: 0, // 今日已完成专注轮数
+    minutes: 0, // 今日累计专注分钟
+    totalDone: 0, // 历史累计专注轮数
+  }, // 番茄钟（顶部时钟区小组件）
   workLogs: [], // 工作记录：{ id, date:"YYYY-MM-DD", time:"HH:MM", text, type, tags }
   ideabox: [], // 灵感碎片：{ id, text, tag, ts }（按添加顺序排列）
   ideaTags: [], // 灵感碎片自定义标签（内置标签之外的扩展）
@@ -61,6 +75,32 @@ export async function loadState() {
   }
   // 喝水倒计时时间戳：恢复时若为数字则保留
   if (typeof state.waterLastAt !== "number") state.waterLastAt = 0;
+  // 番茄钟：结构校验 + 跨日清零今日统计
+  if (!state.pomodoro || typeof state.pomodoro !== "object" || Array.isArray(state.pomodoro)) {
+    state.pomodoro = {};
+  }
+  const pm = state.pomodoro;
+  if (!["focus", "short", "long"].includes(pm.mode)) pm.mode = "focus";
+  if (typeof pm.running !== "boolean") pm.running = false;
+  if (typeof pm.endsAt !== "number" || !isFinite(pm.endsAt)) pm.endsAt = 0;
+  if (typeof pm.pausedRemain !== "number" || !isFinite(pm.pausedRemain) || pm.pausedRemain < 0) pm.pausedRemain = 0;
+  const clampMin = (v, lo, hi, dflt) => {
+    const n = Math.round(Number(v));
+    return Number.isFinite(n) && n >= lo && n <= hi ? n : dflt;
+  };
+  pm.focusMin = clampMin(pm.focusMin, 1, 120, 25);
+  pm.shortMin = clampMin(pm.shortMin, 1, 60, 5);
+  pm.longMin = clampMin(pm.longMin, 1, 120, 15);
+  pm.cycleCount = Math.max(0, Math.min(3, Math.round(Number(pm.cycleCount)) || 0));
+  pm.goal = Math.max(1, Math.min(30, Math.round(Number(pm.goal)) || 8));
+  if (typeof pm.autoNext !== "boolean") pm.autoNext = false;
+  pm.totalDone = Math.max(0, Math.round(Number(pm.totalDone)) || 0);
+  pm.done = Math.max(0, Math.round(Number(pm.done)) || 0);
+  pm.minutes = Math.max(0, Math.round(Number(pm.minutes)) || 0);
+  // 跨日：统计归零（避免昨日数字带到今天）
+  const nowD = new Date();
+  const todayKey = `${nowD.getFullYear()}-${String(nowD.getMonth() + 1).padStart(2, "0")}-${String(nowD.getDate()).padStart(2, "0")}`;
+  if (pm.date !== todayKey) { pm.date = todayKey; pm.done = 0; pm.minutes = 0; }
   if (!Array.isArray(state.musicSources)) state.musicSources = [];
   if (!Array.isArray(state.favorites)) state.favorites = [];
   // 工作记录：结构校验

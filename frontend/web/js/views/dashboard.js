@@ -1,9 +1,10 @@
-// 今日概览视图：待办事项（左）+ 文件中心/最近操作（右）。
+﻿// 今日概览视图：待办事项（左）+ 文件中心/最近操作（右）。
 import { Bus, invoke } from "../bus.js";
 import { Tasks } from "../tasks.js";
 import { state, saveState, pushRecentOp, onRecentOp } from "../state.js";
 import { STATUS_LABEL, TASK_STATUSES, PRIORITY_LABEL } from "../config.js";
 import { ICON_EXTERNAL, ICON_SEARCH, ICON_EDIT, ICON_TRASH, ICON_CHECK, ICON_BELL } from "../icons.js";
+import { ICON_TOMATO } from "../pomodoro.js";
 import { FILE_CATEGORIES, FILE_ICONS } from "../filetypes.js";
 import { esc, showDialog } from "./common.js";
 import { createDatePicker } from "../datepicker.js";
@@ -27,6 +28,7 @@ const OP_META = {
   task_update: { icon: ICON_EDIT, type: "任务" },
   task_delete: { icon: ICON_TRASH, type: "任务" },
   reminder:    { icon: ICON_BELL, type: "提醒" },
+  pomodoro:    { icon: ICON_TOMATO, type: "专注" },
 };
 
 // 相对时间：刚刚 / X 分钟前 / X 小时前 / 今天 HH:MM / 昨天 HH:MM / MM-DD
@@ -52,15 +54,19 @@ const OP_VERB = {
   task_create: "创建", task_update: "修改", task_delete: "删除",
 };
 function recentOpRow(op) {
-  const m = OP_META[op.kind] || (op.type === "sedentary" ? OP_META.reminder : { icon: "•", type: "" });
+  // kind 优先（文件/任务类）；其余按 type 命中（sedentary→提醒，pomodoro→专注）；未知类型兜底圆点
+  const m = OP_META[op.kind]
+    || (op.type === "sedentary" ? OP_META.reminder : OP_META[op.type])
+    || { icon: "•", type: "" };
   const verb = OP_VERB[op.kind] || op.action || "操作";
   const name = op.name || op.text || "";
+  const typeCls = m.type === "任务" ? " task" : m.type === "系统" ? " system" : m.type === "提醒" ? " reminder" : m.type === "专注" ? " pomodoro" : "";
   return `
     <div class="recent-op">
       <span class="ro-icon">${m.icon}</span>
       <span class="ro-text">${esc(verb)}了 <b>${esc(name)}</b></span>
       <span class="ro-time">${relTime(op.ts)}</span>
-      <span class="ro-type${m.type === "任务" ? " task" : m.type === "系统" ? " system" : m.type === "提醒" ? " reminder" : ""}">${esc(m.type)}</span>
+      <span class="ro-type${typeCls}">${esc(m.type)}</span>
     </div>`;
 }
 
@@ -122,9 +128,9 @@ export function renderDashboard(view) {
 // -------------------- 待办事项（左侧） --------------------
 function renderTasksMini(el, view) {
   el.innerHTML = `
-    <div class="dash-section-title">
+    <div class="sec-title">
       <span>待办事项</span>
-      <button class="dash-add-btn" id="d-task-add" title="添加待办" aria-label="添加待办">＋</button>
+      <button class="file-layout-toggle" id="d-task-add" title="添加待办" aria-label="添加待办">＋</button>
     </div>
     <div class="dash-task-list" id="d-task-list"></div>`;
 
@@ -365,7 +371,7 @@ async function renderFilesBlock(el, view) {
     try {
       files = await invoke("list_desktop_files");
     } catch (e) {
-      el.innerHTML = `<div class="dash-section-title">文件中心</div><div class="dash-empty">无法读取（dev 态不可用或未授权）</div>`;
+      el.innerHTML = `<div class="sec-title">文件中心</div><div class="dash-empty">无法读取（dev 态不可用或未授权）</div>`;
       return;
     }
 
@@ -382,19 +388,19 @@ async function renderFilesBlock(el, view) {
 
     const tabs = CATS.filter((k) => groups[k].length);
     if (!tabs.length) {
-      el.innerHTML = `<div class="dash-section-title">文件中心</div><div class="dash-empty">桌面无文件</div>`;
+      el.innerHTML = `<div class="sec-title">文件中心</div><div class="dash-empty">桌面无文件</div>`;
       return;
     }
     // 保留当前 tab；若该分类已无文件（删光/改名），回退到首个 tab
     if (!tabs.includes(currentTab)) currentTab = tabs[0];
     el.innerHTML = `
-    <div class="dash-section-title">文件中心
+    <div class="sec-title">文件中心
       <button class="file-layout-toggle" id="d-file-layout" title="切换布局">${layout === "grid" ? LAYOUT_LIST_ICON : LAYOUT_GRID_ICON}</button>
     </div>
     <div class="file-tabs" id="d-file-tabs"></div>
     <div class="file-tab-content" id="d-file-content"></div>
     <div class="recent-ops">
-      <div class="recent-ops-head"><span>最近操作</span><a class="recent-ops-all">全部记录 →</a></div>
+      <div class="sec-title"><span>最近操作</span><a class="recent-ops-all">全部记录 →</a></div>
       <div class="recent-ops-list" id="d-recent-ops-list">${renderRecentOps()}</div>
     </div>`;
 
@@ -535,3 +541,4 @@ function showFileMenu(x, y, name, view, onChange) {
 function hideFileMenu() {
   if (fileMenuEl) { fileMenuEl.remove(); fileMenuEl = null; }
 }
+

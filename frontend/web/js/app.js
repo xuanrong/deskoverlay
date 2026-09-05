@@ -10,6 +10,7 @@ import { initPlayback } from "./views/music.js";
 import { Tasks } from "./tasks.js";
 import { CommandBar } from "./commandbar.js";
 import { initReminders } from "./reminders.js";
+import { initPomodoro, startPomodoroNow, ICON_TOMATO } from "./pomodoro.js";
 import { startLockController } from "./lock.js";
 import { initPlugins, onPluginsChanged } from "./plugins.js";
 import { ICON_CHECK, ICON_EXTERNAL } from "./icons.js";
@@ -89,6 +90,14 @@ function buildCommands() {
     });
   }
   cmds.push({
+    id: "pomo-start",
+    icon: ICON_TOMATO,
+    title: "番茄钟：开始一轮专注",
+    sub: "25 分钟专注倒计时 · 顶栏胶囊可暂停",
+    keywords: "pomodoro 番茄钟 专注 focus timer 计时",
+    run: () => { if (startPomodoroNow()) toast("番茄钟已开始"); else toast("番茄钟正在进行中"); },
+  });
+  cmds.push({
     id: "add-task",
     icon: ICON_CHECK,
     title: "添加待办",
@@ -144,14 +153,38 @@ Providers.startAll();
 // -------------------- 主区域顶部时钟块（固定，所有模块之上） --------------------
 const mcTime = document.getElementById("mc-time");
 const mcDate = document.getElementById("mc-date");
+const mcWeek = document.getElementById("mc-week");
+
+// ISO 8601 周次（周一为一周之始）：用于日期行右侧的“第 N 周”药丸
+function getISOWeek(d) {
+  const date = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  const dayNum = (date.getUTCDay() + 6) % 7; // Mon=0 … Sun=6
+  date.setUTCDate(date.getUTCDate() - dayNum + 3); // 本周四
+  const firstThursday = new Date(Date.UTC(date.getUTCFullYear(), 0, 4));
+  const firstDayNum = (firstThursday.getUTCDay() + 6) % 7;
+  firstThursday.setUTCDate(firstThursday.getUTCDate() - firstDayNum + 3);
+  return 1 + Math.round((date - firstThursday) / (7 * 24 * 3600 * 1000));
+}
+
+function refreshWeek() {
+  if (!mcWeek) return;
+  const txt = `第 ${getISOWeek(new Date())} 周`;
+  if (mcWeek.textContent !== txt) mcWeek.textContent = txt;
+}
+
 Bus.on("provider-emit", ({ config_hash, output }) => {
   if (config_hash !== "clock") return;
   // 仅在值变化时写 DOM，避免每秒无条件赋值触发多余重排
   const time = output.time || "--:--:--";
   const date = output.date || "";
   if (mcTime.textContent !== time) mcTime.textContent = time;
-  if (mcDate.textContent !== date) mcDate.textContent = date;
+  if (mcDate.textContent !== date) {
+    mcDate.textContent = date;
+    refreshWeek(); // 日期进入新一天时同步刷新周次药丸
+  }
 });
+
+refreshWeek(); // 启动即填充周次药丸（跨零点由上面 date 变化分支兜底）
 
 // 久坐提醒弹出：记入最近操作，便于回溯。
 Bus.on("sedentary-fire", () => {
@@ -236,6 +269,9 @@ loadState().then(async () => {
 
   // 提醒：渲染时钟块倒计时 + 每秒检查
   initReminders();
+
+  // 番茄钟：时钟条胶囊常驻 + 秒级倒计时/到期推进
+  initPomodoro();
 
   // 隐私锁定：离开设定时长后全屏遮罩
   startLockController();

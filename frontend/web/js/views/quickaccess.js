@@ -28,11 +28,10 @@ export function renderQuickAccess(view) {
   view.header.style.display = "none";
   const el = view.body;
   el.innerHTML = `
-    <div class="qa-title-row">
-      <span class="view-title">快捷访问</span>
+    <div class="sec-title">快捷访问
       <span class="qa-tools">
-        <button class="qa-btn" id="qa-manage" title="管理分组">管理分组</button>
-        <button class="qa-btn qa-btn-primary" id="qa-add" title="添加快捷访问">＋ 添加</button>
+        <button class="btn-ghost" id="qa-manage" title="管理分组">管理分组</button>
+        <button class="btn-primary" id="qa-add" title="添加快捷访问">＋ 添加</button>
       </span>
     </div>
     <div class="qa-groups" id="qa-groups"></div>`;
@@ -103,7 +102,7 @@ export function renderQuickAccess(view) {
           return `
         <div class="qa-group" data-gid="${g.id}">
           <div class="qa-group-head">${esc(g.name || "")}<span class="qa-count">${items.length}</span></div>
-          <div class="qa-row" data-group="${g.id}">${items.map(qaCardHtml).join("") || `<div class="qa-empty">＋ 点击右上角"添加"加入此分组</div>`}</div>
+          <div class="qa-row" data-group="${g.id}">${items.map(qaCardHtml).join("") || `<div class="dash-empty">＋ 点击右上角"添加"加入此分组</div>`}</div>
         </div>`;
         }).join("")
       : `<div class="dash-empty">暂无分组，点「管理分组」新建</div>`;
