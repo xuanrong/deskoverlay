@@ -163,23 +163,35 @@ function checkReminders() {
 function showReminderToast(r) {
   const isWater = r.label === "喝水";
   const msg = isWater
-    ? "辛苦啦，起身喝杯温水，润润嗓子吧"
+    ? "该喝水啦，补充一下水分吧"
     : r.type === "interval"
-    ? `已到「${r.label}」的间隔时间，休息一下再去处理吧`
-    : `「${r.label}」时间到了，去准备一下吧`;
+    ? `「${r.label}」时间到了，休息一下吧`
+    : `「${r.label}」快到了，准备一下吧`;
   if (window.__TAURI__) {
     invoke("show_reminder", { icon: r.icon, title: `${r.label}提醒`, message: msg });
     return;
   }
+  const type = isWater ? "water" : r.type === "interval" ? "sedentary" : "general";
+  const now = new Date();
+  const timeStr = String(now.getHours()).padStart(2, "0") + ":" + String(now.getMinutes()).padStart(2, "0");
   const t = document.createElement("div");
-  t.className = "rm-toast";
+  t.className = "rm-toast timing";
+  t.setAttribute("data-type", type);
   t.innerHTML = `
-    <span class="rm-toast-icon">${r.icon}</span>
-    <div class="rm-toast-body">
-      <b>${esc(r.label)}提醒</b>
-      <span>${esc(msg)}</span>
+    <div class="rm-toast-inner">
+      <div class="rm-toast-top">
+        <span class="rm-toast-icon">${r.icon}</span>
+        <div class="rm-toast-body">
+          <b>${esc(r.label)}提醒</b>
+          <span>${esc(msg)}</span>
+        </div>
+      </div>
+      <div class="rm-toast-foot">
+        <span class="rm-toast-time">${timeStr}</span>
+        <button class="rm-toast-ok">知道了</button>
+      </div>
     </div>
-    <button class="rm-toast-ok">知道了</button>`;
+    <div class="rm-toast-progress"></div>`;
   document.body.appendChild(t);
   requestAnimationFrame(() => t.classList.add("show"));
   const close = () => { t.classList.remove("show"); setTimeout(() => t.remove(), 300); };

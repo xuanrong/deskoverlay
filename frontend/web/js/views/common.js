@@ -36,6 +36,22 @@ export function showDialog({ title, message = "", okText = "确定", cancelText 
   });
 }
 
+// 在 textarea 光标处插入一个换行，并保持焦点与光标位置（Ctrl/Cmd+Enter 换行统一入口）
+export function insertBreak(el) {
+  const s = el.selectionStart ?? el.value.length;
+  const e = el.selectionEnd ?? el.value.length;
+  el.value = el.value.slice(0, s) + "\n" + el.value.slice(e);
+  const pos = s + 1;
+  el.focus();
+  el.setSelectionRange(pos, pos);
+}
+
+// textarea 自适应高度：随内容增高，超过 maxPx 后内部滚动（空内容回到 CSS min-height）
+export function fitTextarea(el, maxPx = 200) {
+  el.style.height = "auto";
+  el.style.height = Math.min(el.scrollHeight, maxPx) + "px";
+}
+
 // 规范化音源插件返回的歌曲列表（兼容 MusicFree 各种返回结构）
 export function normalizeSongs(res) {
   if (Array.isArray(res)) return res;

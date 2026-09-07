@@ -74,7 +74,7 @@ static PENDING_REMINDER: Mutex<Option<serde_json::Value>> = Mutex::new(None);
 /// 新建窗口时 emit=false，改由提醒页 listener 就绪后经 reminder_ready 命令取用 PENDING 再推送，
 /// 消除"emit 早于前端 listener 注册完成"的竞态（事件偶发丢失 → 卡片不渲染 → 透明窗口常驻拦截）。
 fn show_reminder_win(win: &tauri::WebviewWindow, payload: serde_json::Value, emit: bool) {
-    let size = win.outer_size().unwrap_or(tauri::PhysicalSize::new(380, 150));
+    let size = win.outer_size().unwrap_or(tauri::PhysicalSize::new(340, 130));
     let screen_w = unsafe { GetSystemMetrics(SM_CXSCREEN) };
     let x = screen_w - size.width as i32 - 24;
     let _ = win.set_position(tauri::PhysicalPosition::new(x, 16));
@@ -104,7 +104,7 @@ pub fn present_reminder(app: &tauri::AppHandle, icon: &str, title: &str, message
         *PENDING_REMINDER.lock().unwrap() = Some(payload);
         let result = WebviewWindowBuilder::new(&app, "reminder", WebviewUrl::App("reminder.html".into()))
             .title("提醒")
-            .inner_size(380.0, 150.0)
+            .inner_size(340.0, 130.0)
             .decorations(false)
             .transparent(true)
             .resizable(false)

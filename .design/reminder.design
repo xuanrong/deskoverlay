@@ -1,0 +1,41 @@
+{
+  "data": [
+    {
+      "id": "page-reminder",
+      "title": "提醒弹窗",
+      "type": "page",
+      "version": 1,
+      "createdAt": 1788764160000,
+      "canvasData": {
+        "x": 0,
+        "y": 0,
+        "group": 0,
+        "layoutSnapshot": {
+          "version": 1,
+          "contentHeight": 600,
+          "viewportWidth": 800,
+          "sourceHash": "fnv1a-809d2d01",
+          "measuredAt": 1788790848060
+        }
+      },
+      "devMetadata": {
+        "htmlSrc": "pages/reminder.html",
+        "interactions": []
+      }
+    }
+  ],
+  "config": {
+    "autoLayout": true,
+    "deviceType": "freeSize",
+    "designLibrary": {
+      "name": "TraeCode",
+      "id": "dl_builtin_trae",
+      "version": 0,
+      "scope": null,
+      "path": "c:\\Users\\qiuxr\\.trae-cn\\design_libraries\\TraeCode",
+      "versionSource": null
+    },
+    "visualEditorEnabled": false,
+    "showEdge": false
+  }
+}

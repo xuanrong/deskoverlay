@@ -256,12 +256,23 @@ function notify(msg, kind) {
     invoke("show_reminder", { icon, title: `番茄钟 · ${title}`, message: msg }).catch(() => {});
     return;
   }
+  const now = new Date();
+  const timeStr = String(now.getHours()).padStart(2, "0") + ":" + String(now.getMinutes()).padStart(2, "0");
   const t = document.createElement("div");
-  t.className = "rm-toast";
+  t.className = "rm-toast timing";
+  t.setAttribute("data-type", "pomodoro");
   t.innerHTML = `
-    <span class="rm-toast-icon">${icon}</span>
-    <div class="rm-toast-body"><b>${esc(title)}</b><span>${esc(msg)}</span></div>
-    <button class="rm-toast-ok">知道了</button>`;
+    <div class="rm-toast-inner">
+      <div class="rm-toast-top">
+        <span class="rm-toast-icon">${icon}</span>
+        <div class="rm-toast-body"><b>${esc(title)}</b><span>${esc(msg)}</span></div>
+      </div>
+      <div class="rm-toast-foot">
+        <span class="rm-toast-time">${timeStr}</span>
+        <button class="rm-toast-ok">知道了</button>
+      </div>
+    </div>
+    <div class="rm-toast-progress"></div>`;
   document.body.appendChild(t);
   requestAnimationFrame(() => t.classList.add("show"));
   const close = () => { t.classList.remove("show"); setTimeout(() => t.remove(), 300); };

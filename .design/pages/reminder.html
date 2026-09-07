@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>提醒弹窗</title>
+  <style id="theme-vars">
+    /* TraeCode Design Library — tokens inlined (read-only reference) */
+    :root {
+      --radius-2: 2px; --radius-4: 4px; --radius-6: 6px; --radius-8: 8px; --radius-10: 10px; --radius-full: 9999px;
+      --spacer-0: 0px; --spacer-4: 4px; --spacer-6: 6px; --spacer-8: 8px; --spacer-12: 12px; --spacer-16: 16px; --spacer-24: 24px; --spacer-32: 32px; --spacer-40: 40px;
+      --font-family-default: "SF Pro Text", system-ui, -apple-system, sans-serif;
+      --font-family-heading: "SF Pro", system-ui, -apple-system, sans-serif;
+      --font-family-mono: "JetBrains Mono", system-ui, -apple-system, sans-serif;
+      --font-weight-default: 400; --font-weight-code: 450; --font-weight-medium: 500; --font-weight-strong: 600;
+      --body-xs-font-size: 10px; --body-xs-line-height: 14px;
+      --body-sm-font-size: 11px; --body-sm-line-height: 16px;
+      --body-md-font-size: 12px; --body-md-line-height: 18px;
+      --body-base-font-size: 13px; --body-base-line-height: 20px;
+      --heading-3xs-font-size: 11px; --heading-3xs-line-height: 16px;
+      --heading-2xs-font-size: 12px; --heading-2xs-line-height: 18px;
+      --heading-xs-font-size: 13px; --heading-xs-line-height: 20px;
+      --heading-sm-font-size: 16px; --heading-sm-line-height: 24px;
+      --bg-base-default: #1A1B1D; --bg-base-secondary: #222427; --bg-base-tertiary: #2A2D31;
+      --bg-overlay-l1: rgba(224,226,242,0.04); --bg-overlay-l2: rgba(224,226,242,0.06); --bg-overlay-l3: rgba(224,226,242,0.08); --bg-overlay-l4: rgba(224,226,242,0.12);
+      --bg-menu: #202123; --bg-tooltip: #1A1B1D; --bg-invert: #DADDE5; --bg-invert-hover: #EDEFF2; --bg-invert-active: #979AA4; --bg-invert-disabled: rgba(224,226,242,0.12);
+      --bg-brand: #32F08C; --bg-brand-hover: #0FDC78; --bg-brand-disabled: rgba(50,240,140,0.2); --bg-brand-popup: rgba(50,240,140,0.12);
+      --text-default: #D1D3DB; --text-default-hover: #F5F9FE; --text-default-active: #F5F9FE;
+      --text-secondary: #9599A6; --text-secondary-hover: #D1D3DB; --text-secondary-active: #D1D3DB;
+      --text-tertiary: #666B75; --text-disabled: #666B75; --text-onbrand: #0C0C0D; --text-onaccent: #0C0C0D;
+      --text-brand: #32F08C; --text-brand-hover: #0FDC78;
+      --icon-default: #D1D3DB; --icon-default-hover: #F5F9FE; --icon-default-active: #F5F9FE;
+      --icon-secondary: #9599A6; --icon-secondary-hover: #D1D3DB; --icon-secondary-active: #D1D3DB;
+      --icon-tertiary: #666B75; --icon-disabled: #666B75; --icon-onbrand: #0C0C0D; --icon-onaccent: #0C0C0D;
+      --icon-brand: #32F08C; --icon-brand-hover: #0FDC78;
+      --border-neutral-l1: rgba(224,226,242,0.1); --border-neutral-l2: rgba(224,226,242,0.16); --border-neutral-l3: rgba(224,226,242,0.2);
+      --border-contrast: #FFFFFF; --border-brand: #32F08C;
+      --status-primary-default: #387BFF; --status-primary-hover: #4C88FF; --status-primary-active: #1759DD;
+      --status-primary-surface-l1: rgba(53,121,255,0.18); --status-primary-surface-l2: rgba(53,121,255,0.28);
+      --status-success-default: #33C192; --status-success-hover: #5ED4AD; --status-success-active: #27B082;
+      --status-success-surface-l1: rgba(0,165,110,0.18);
+      --status-alert-default: #D29D00; --status-alert-hover: #DFB949; --status-alert-active: #AB8820;
+      --status-alert-surface-l1: rgba(210,157,0,0.16);
+      --status-warning-default: #D27E24; --status-warning-hover: #D78B28; --status-warning-active: #B46510;
+      --status-warning-surface-l1: rgba(210,126,36,0.16);
+      --status-error-default: #F65A5A; --status-error-hover: #F86262; --status-error-active: #B33636;
+      --status-error-surface-l1: rgba(246,70,70,0.18);
+      --accent-teal: #2DD288; --accent-coral: #FF9392; --accent-amber: #DCB364; --accent-lime: #8ACB3A;
+      --accent-cyan: #04CBE5; --accent-blue: #7BB8FF; --accent-magenta: #EC93FF; --accent-violet: #BFA5FF; --accent-slate: #AFB9CF;
+      --special-white: #FFFFFF; --special-black: #000000;
+      --color-background: var(--bg-base-default);
+      --color-foreground: var(--text-default);
+      --color-card: var(--bg-base-secondary);
+      --color-primary: var(--bg-brand);
+      --color-primary-hover: var(--bg-brand-hover);
+      --color-primary-soft: var(--bg-brand-popup);
+      --color-border: var(--border-neutral-l1);
+      --color-muted: var(--bg-overlay-l2);
+      --color-muted-foreground: var(--text-secondary);
+      --color-surface: var(--bg-base-secondary);
+      --color-surface-variant: var(--bg-base-tertiary);
+      --color-on-primary: var(--text-onbrand);
+      --color-error: var(--status-error-default);
+      --color-error-soft: var(--status-error-surface-l1);
+      --color-success: var(--status-success-default);
+      --color-warning: var(--status-warning-default);
+      --color-info: var(--status-primary-default);
+    }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.3.1/dist/index.global.js"></script>
+  <style type="text/tailwindcss">
+    @theme inline {
+      --color-background: var(--bg-base-default);
+      --color-foreground: var(--text-default);
+      --color-card: var(--bg-base-secondary);
+      --color-primary: var(--bg-brand);
+      --color-primary-hover: var(--bg-brand-hover);
+      --color-border: var(--border-neutral-l1);
+      --color-muted: var(--bg-overlay-l2);
+      --color-muted-foreground: var(--text-secondary);
+      --color-surface: var(--bg-base-secondary);
+      --color-on-primary: var(--text-onbrand);
+      --color-error: var(--status-error-default);
+      --color-success: var(--status-success-default);
+      --color-warning: var(--status-warning-default);
+      --color-info: var(--status-primary-default);
+      --radius-sm: var(--radius-4);
+      --radius-md: var(--radius-6);
+      --radius-lg: var(--radius-8);
+      --radius-xl: var(--radius-10);
+    }
+    @layer base {
+      body { background: var(--bg-base-default); color: var(--text-default); }
+    }
+  </style>
+  <style id="semantic-token-fallback">
+    .bg-background { background-color: var(--bg-base-default); }
+    .text-foreground { color: var(--text-default); }
+    .bg-card { background-color: var(--bg-base-secondary); }
+    .text-card-foreground { color: var(--text-default); }
+    .bg-primary { background-color: var(--bg-brand); }
+    .text-primary { color: var(--bg-brand); }
+    .text-primary-foreground { color: var(--text-onbrand); }
+    .border-border { border-color: var(--border-neutral-l1); }
+    .bg-muted { background-color: var(--bg-overlay-l2); }
+    .text-muted-foreground { color: var(--text-secondary); }
+    .bg-surface { background-color: var(--bg-base-secondary); }
+    .text-on-primary { color: var(--text-onbrand); }
+  </style>
+  <style>
+    .no-scrollbar::-webkit-scrollbar { display: none; }
+    .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+    [data-icon] {
+      display: inline-flex; align-items: center; justify-content: center;
+      -webkit-mask-size: contain; mask-size: contain;
+      -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
+      -webkit-mask-position: center; mask-position: center;
+      background-color: currentColor;
+    }
+  </style>
+  <style>
+    /* ═══ Page layout — simulated desktop ═══ */
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: var(--body-base-font-family);
+      font-size: var(--body-base-font-size);
+      line-height: var(--body-base-line-height);
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    .desktop-sim {
+      min-height: 100vh;
+      background:
+        radial-gradient(ellipse at 20% 0%, rgba(50,240,140,0.04) 0%, transparent 50%),
+        radial-gradient(ellipse at 80% 100%, rgba(56,123,255,0.03) 0%, transparent 50%),
+        linear-gradient(160deg, #161719 0%, #1A1B1D 40%, #1E1F22 100%);
+      display: flex; flex-direction: column;
+      align-items: center;
+      padding: var(--spacer-40) var(--spacer-24) var(--spacer-32);
+      gap: var(--spacer-32);
+    }
+
+    .page-header {
+      text-align: center;
+    }
+    .page-header h1 {
+      font-family: var(--heading-sm-font-family);
+      font-size: var(--heading-sm-font-size);
+      font-weight: var(--heading-sm-font-weight);
+      line-height: var(--heading-sm-line-height);
+      color: var(--text-default);
+    }
+    .page-header p {
+      font-size: var(--body-sm-font-size);
+      line-height: var(--body-sm-line-height);
+      color: var(--text-secondary);
+      margin-top: var(--spacer-4);
+    }
+
+    /* ═══ Reminder card — core redesign ═══ */
+    .rm-card {
+      position: relative;
+      width: 340px;
+      overflow: hidden;
+      border-radius: var(--radius-10);
+      background: rgba(34, 36, 39, 0.98);
+      border: 1px solid var(--border-neutral-l2);
+      box-shadow:
+        0 0 0 1px rgba(0,0,0,0.3),
+        0 8px 32px rgba(0,0,0,0.5),
+        0 2px 8px rgba(0,0,0,0.3),
+        inset 0 1px 0 rgba(255,255,255,0.05);
+      backdrop-filter: blur(28px) saturate(1.2);
+      -webkit-backdrop-filter: blur(28px) saturate(1.2);
+      opacity: 0;
+      transform: translateY(-12px) scale(0.98);
+      animation: rm-in 400ms cubic-bezier(0.22, 0.61, 0.36, 1) forwards;
+    }
+    @keyframes rm-in {
+      to { opacity: 1; transform: translateY(0) scale(1); }
+    }
+
+    .rm-inner {
+      padding: var(--spacer-14, 14px) var(--spacer-16) var(--spacer-12);
+    }
+
+    .rm-top {
+      display: flex;
+      align-items: center;
+      gap: var(--spacer-12);
+    }
+
+    /* Icon container — tinted circle */
+    .rm-icon {
+      flex: 0 0 auto;
+      width: 36px; height: 36px;
+      border-radius: var(--radius-8);
+      display: flex; align-items: center; justify-content: center;
+      line-height: 0;
+    }
+    .rm-card[data-type="water"] .rm-icon {
+      background: var(--bg-brand-popup);
+      box-shadow: inset 0 0 0 1px rgba(50,240,140,0.15);
+    }
+    .rm-card[data-type="water"] .rm-icon svg { color: var(--bg-brand); }
+    .rm-card[data-type="sedentary"] .rm-icon {
+      background: var(--status-alert-surface-l1);
+      box-shadow: inset 0 0 0 1px rgba(210,157,0,0.15);
+    }
+    .rm-card[data-type="sedentary"] .rm-icon svg { color: var(--status-alert-default); }
+    .rm-card[data-type="general"] .rm-icon {
+      background: var(--status-primary-surface-l1);
+      box-shadow: inset 0 0 0 1px rgba(56,123,255,0.15);
+    }
+    .rm-card[data-type="general"] .rm-icon svg { color: var(--status-primary-default); }
+    .rm-card[data-type="pomodoro"] .rm-icon {
+      background: rgba(210,126,36,0.16);
+      box-shadow: inset 0 0 0 1px rgba(210,126,36,0.15);
+    }
+    .rm-card[data-type="pomodoro"] .rm-icon svg { color: var(--status-warning-default); }
+    .rm-icon svg { display: block; width: 20px; height: 20px; }
+
+    .rm-text {
+      flex: 1 1 auto;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: var(--spacer-6);
+    }
+    .rm-title {
+      font-family: var(--heading-xs-font-family);
+      font-size: var(--heading-xs-font-size);
+      font-weight: var(--heading-xs-font-weight);
+      line-height: var(--heading-xs-line-height);
+      color: var(--text-default);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .rm-msg {
+      font-size: var(--body-sm-font-size);
+      line-height: var(--body-sm-line-height);
+      color: var(--text-secondary);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+    }
+
+    /* Footer row — timestamp + acknowledge button */
+    .rm-foot {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-top: var(--spacer-12);
+    }
+    .rm-time {
+      font-size: var(--body-xs-font-size);
+      line-height: var(--body-xs-line-height);
+      color: var(--text-tertiary);
+      font-variant-numeric: tabular-nums;
+      display: flex;
+      align-items: center;
+      gap: var(--spacer-4);
+    }
+    .rm-time::before {
+      content: "";
+      width: 4px; height: 4px;
+      border-radius: var(--radius-full);
+      background: var(--text-tertiary);
+    }
+
+    .rm-ok {
+      background: var(--bg-brand);
+      border: none;
+      color: var(--text-onbrand);
+      font-family: var(--body-sm-strong-font-family, var(--font-family-default));
+      font-size: var(--body-sm-strong-font-size, 11px);
+      font-weight: var(--font-weight-strong);
+      line-height: 1;
+      padding: 7px 14px;
+      border-radius: var(--radius-6);
+      cursor: pointer;
+      transition: background 120ms ease, transform 80ms ease;
+    }
+    .rm-ok:hover {
+      background: var(--bg-brand-hover);
+    }
+    .rm-ok:active {
+      transform: scale(0.96);
+    }
+
+    /* Auto-close progress bar */
+    .rm-progress {
+      position: absolute;
+      left: 0; right: 0; bottom: 0;
+      height: 2px;
+      background: var(--border-neutral-l1);
+      overflow: hidden;
+    }
+    .rm-progress::after {
+      content: "";
+      display: block;
+      height: 100%;
+      width: 100%;
+      border-radius: 0 0 0 0;
+    }
+    .rm-card[data-type="water"] .rm-progress::after { background: var(--bg-brand); }
+    .rm-card[data-type="sedentary"] .rm-progress::after { background: var(--status-alert-default); }
+    .rm-card[data-type="general"] .rm-progress::after { background: var(--status-primary-default); }
+    .rm-card[data-type="pomodoro"] .rm-progress::after { background: var(--status-warning-default); }
+    .rm-card.is-timing .rm-progress::after {
+      animation: rm-countdown 10s linear forwards;
+    }
+    @keyframes rm-countdown {
+      from { width: 100%; }
+      to { width: 0%; }
+    }
+
+    /* ═══ Showcase layout ═══ */
+    .showcase {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: var(--spacer-24);
+    }
+    .showcase-label {
+      font-size: var(--body-xs-font-size);
+      font-weight: var(--font-weight-strong);
+      color: var(--text-tertiary);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: var(--spacer-4);
+    }
+    .showcase-row {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: var(--spacer-16);
+    }
+    .showcase-col {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: var(--spacer-8);
+    }
+  </style>
+</head>
+<body class="min-h-screen antialiased">
+  <main>
+    <div class="desktop-sim">
+      <div class="page-header">
+        <h1>提醒弹窗</h1>
+        <p>置顶通知卡片 · 玻璃态 · 自动关闭</p>
+      </div>
+
+      <div class="showcase">
+        <!-- Primary showcase: water reminder (most common) -->
+        <div class="rm-card is-timing" data-type="water" data-dom-id="rm-card-water">
+          <div class="rm-inner">
+            <div class="rm-top">
+              <div class="rm-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M12 2.5C12 2.5 6 9 6 14a6 6 0 0 0 12 0c0-5-6-11.5-6-11.5z"/>
+                </svg>
+              </div>
+              <div class="rm-text">
+                <div class="rm-title">喝水提醒</div>
+                <div class="rm-msg">该喝水啦，补充一下水分吧</div>
+              </div>
+            </div>
+            <div class="rm-foot">
+              <span class="rm-time">14:30</span>
+              <button class="rm-ok">知道了</button>
+            </div>
+          </div>
+          <div class="rm-progress"></div>
+        </div>
+
+        <!-- Variant row -->
+        <div class="showcase-row">
+          <!-- Sedentary reminder -->
+          <div class="showcase-col">
+            <div class="showcase-label">久坐提醒</div>
+            <div class="rm-card" data-type="sedentary" data-dom-id="rm-card-sedentary">
+              <div class="rm-inner">
+                <div class="rm-top">
+                  <div class="rm-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <circle cx="12" cy="5" r="2"/>
+                      <path d="M12 7v5"/>
+                      <path d="M8 9.5 12 7l4 2.5"/>
+                      <path d="M12 12l-4 5"/>
+                      <path d="M12 12l4 4"/>
+                    </svg>
+                  </div>
+                  <div class="rm-text">
+                    <div class="rm-title">久坐提醒</div>
+                    <div class="rm-msg">已坐 45 分钟，起身活动活动吧</div>
+                  </div>
+                </div>
+                <div class="rm-foot">
+                  <span class="rm-time">10:15</span>
+                  <button class="rm-ok">知道了</button>
+                </div>
+              </div>
+              <div class="rm-progress"></div>
+            </div>
+          </div>
+
+          <!-- General daily reminder -->
+          <div class="showcase-col">
+            <div class="showcase-label">定时提醒</div>
+            <div class="rm-card" data-type="general" data-dom-id="rm-card-general">
+              <div class="rm-inner">
+                <div class="rm-top">
+                  <div class="rm-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <circle cx="12" cy="12" r="9"/>
+                      <path d="M12 7v5l3 2"/>
+                    </svg>
+                  </div>
+                  <div class="rm-text">
+                    <div class="rm-title">会议提醒</div>
+                    <div class="rm-msg">「项目周会」快开始了，准备一下吧</div>
+                  </div>
+                </div>
+                <div class="rm-foot">
+                  <span class="rm-time">09:00</span>
+                  <button class="rm-ok">知道了</button>
+                </div>
+              </div>
+              <div class="rm-progress"></div>
+            </div>
+          </div>
+
+          <!-- Pomodoro: focus complete -->
+          <div class="showcase-col">
+            <div class="showcase-label">番茄钟 · 专注完成</div>
+            <div class="rm-card" data-type="pomodoro" data-dom-id="rm-card-pomo-focus">
+              <div class="rm-inner">
+                <div class="rm-top">
+                  <div class="rm-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M9 11l3 3L22 4"/>
+                      <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
+                    </svg>
+                  </div>
+                  <div class="rm-text">
+                    <div class="rm-title">专注完成</div>
+                    <div class="rm-msg">坚持了 25 分钟，去休息一下吧</div>
+                  </div>
+                </div>
+                <div class="rm-foot">
+                  <span class="rm-time">10:25</span>
+                  <button class="rm-ok">知道了</button>
+                </div>
+              </div>
+              <div class="rm-progress"></div>
+            </div>
+          </div>
+
+          <!-- Pomodoro: break end -->
+          <div class="showcase-col">
+            <div class="showcase-label">番茄钟 · 休息结束</div>
+            <div class="rm-card" data-type="pomodoro" data-dom-id="rm-card-pomo-break">
+              <div class="rm-inner">
+                <div class="rm-top">
+                  <div class="rm-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <circle cx="12" cy="12" r="9"/>
+                      <path d="M12 7v5l3 2"/>
+                    </svg>
+                  </div>
+                  <div class="rm-text">
+                    <div class="rm-title">休息结束</div>
+                    <div class="rm-msg">休息好了，开始下一轮专注吧</div>
+                  </div>
+                </div>
+                <div class="rm-foot">
+                  <span class="rm-time">10:35</span>
+                  <button class="rm-ok">知道了</button>
+                </div>
+              </div>
+              <div class="rm-progress"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+  <script>lucide && lucide.createIcons();</script>
+</body>
+</html>
