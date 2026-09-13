@@ -3,7 +3,7 @@
 import { invoke } from "./bus.js";
 
 const KEY = "deskoverlay.state.v1";
-const DEFAULTS = { currentModule: "dashboard", tasks: [], notes: "" };
+const DEFAULTS = { currentModule: "dashboard", tasks: [], notes: [] };
 const TAURI = typeof window !== "undefined" && window.__TAURI__;
 
 export const Store = {

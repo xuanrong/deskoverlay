@@ -301,11 +301,19 @@ function closePopup() {
 }
 
 // ---------- 秒级心跳：到期检测 + 倒计时刷新 ----------
+let lastIdleKey = null;
 function tick() {
   const p = state.pomodoro;
   if (p.running && Date.now() >= p.endsAt) {
     advance(true);
     return;
+  }
+  // 运行中倒计时逐秒变化，需每秒重绘；空闲时显示内容不变，仅状态摘要变化才重绘，
+  // 避免每秒无谓的 querySelector + 样式写入（摘要覆盖影响胶囊显示的全部字段）
+  if (!p.running) {
+    const key = `${p.mode}|${p.pausedRemain}|${p.cycleCount}|${p.focusMin}|${p.shortMin}|${p.longMin}`;
+    if (key === lastIdleKey) return;
+    lastIdleKey = key;
   }
   renderCapsule();
 }

@@ -6,7 +6,7 @@ import { DEFAULT_REMINDERS } from "./config.js";
 export const state = {
   currentModule: "dashboard",
   tasks: [],
-  notes: "",
+  notes: [], // 笔记列表：{ id, title, content, pinned, createdAt, updatedAt }（按 updatedAt 降序）
   recentOps: [], // 最近操作记录：{ ts, type, action, name, ... }
   reminders: [], // 提醒配置：{ id, label, icon, type, time/intervalMin, enabled, ... }
   sedentary: { enabled: false, intervalMin: 45 }, // 久坐提醒：开关 + 连续使用间隔（分钟）
@@ -48,8 +48,21 @@ export async function loadState() {
   const loaded = await Store.load();
   Object.assign(state, loaded);
   if (!Array.isArray(state.tasks)) state.tasks = [];
-  if (typeof state.notes !== "string") state.notes = "";
   if (typeof state.currentModule !== "string") state.currentModule = "dashboard";
+  // 笔记列表：旧版 string → 包装为数组；数组则逐条校验
+  if (typeof state.notes === "string") {
+    const now = Date.now();
+    state.notes = [{ id: "migrated", title: "未命名", content: state.notes, pinned: false, createdAt: now, updatedAt: now }];
+  }
+  if (!Array.isArray(state.notes)) state.notes = [];
+  state.notes = state.notes.filter((n) => n && typeof n === "object" && typeof n.content === "string");
+  state.notes.forEach((n) => {
+    if (typeof n.id !== "string" || !n.id) n.id = "n_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8);
+    if (typeof n.title !== "string") n.title = "";
+    if (typeof n.pinned !== "boolean") n.pinned = false;
+    if (typeof n.createdAt !== "number") n.createdAt = Date.now();
+    if (typeof n.updatedAt !== "number") n.updatedAt = Date.now();
+  });
   if (!Array.isArray(state.recentOps)) state.recentOps = [];
   // 提醒：老数据无该字段时填充默认配置；为空数组则保留（用户可能删光）
   if (state.reminders === undefined) {
@@ -159,9 +172,15 @@ export function onReady(fn) {
   else readyQueue.push(fn);
 }
 
-/// 持久化当前 state（异步，调用方可不 await）。
+// 300ms 防抖：合并短时间内的连续保存（操作记录/播放状态/设置变更等），减少磁盘写入频率
+let saveTimer = 0;
+
+/// 持久化当前 state（异步，调用方可不 await；300ms 防抖合并连续调用）。
 export function saveState() {
-  Store.save(state).catch((e) => console.warn("[state] 保存失败", e));
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    Store.save(state).catch((e) => console.warn("[state] 保存失败", e));
+  }, 300);
 }
 
 /// 追加一条最近操作记录（最多 20 条），并持久化、通知订阅者刷新。

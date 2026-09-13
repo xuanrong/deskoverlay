@@ -17,29 +17,101 @@
   },
   "operatingMode": "free-explore",
   "renderBlockingErrorCount": 0,
-  "softWarningCount": 2,
+  "softWarningCount": 18,
   "renderBlockingErrors": [],
   "errorSignatures": [],
   "softWarnings": [
+    "[html-head-style] notes.html: found 2 custom <style> block(s) in <head>. The <head> is owned by apply-html-head-contract.mjs; move custom styles before </body> or re-run apply-html-head-contract.mjs <css-path> <html-file> --replace-head to relocate them.",
     "[html-head-style] reminder.html: found 1 custom <style> block(s) in <head>. The <head> is owned by apply-html-head-contract.mjs; move custom styles before </body> or re-run apply-html-head-contract.mjs <css-path> <html-file> --replace-head to relocate them.",
+    "[orchestration-summary] runtime-orchestration-summary.json is missing skillProvenance.name/version/version_source. Version provenance will be reported as observed_unknown by external evaluators.",
+    "[repair-ledger] validationRepairLedger[0].repairActions[] is missing",
+    "[repair-ledger] validationRepairLedger[0].revalidationReportPath is missing",
+    "[repair-ledger] validationRepairLedger[0].revalidationReportHash is missing",
+    "[repair-ledger] validationRepairLedger[0].revalidationSuccess should be a boolean",
+    "[html-quality] colors_and_type.css: free-explore brand CSS must use one primary hue only; forbidden secondary/accent brand variables found (--secondary, --secondary-foreground, --accent, --accent-foreground). Use --state-success/warning/error/info only for semantic states.",
+    "[html-quality] colors_and_type.css: free-explore radius tokens must stay within the restrained 2/4/8/12/16px scale; oversized or forbidden radius tokens found (--radius-xl: 18px). Do not use 20px+ radii unless the user explicitly requested large rounded shapes.",
+    "[html-quality] colors_and_type.css: ordinary/static shadow tokens must keep every shadow alpha <= 0.05; deeper shadows are allowed only for floating-layer tokens such as modal/popover/dropdown/drawer/overlay (--shadow-xs: 0 1px 3px rgba(0,0,0,0.25), --shadow-sm: 0 4px 14px rgba(0,0,0,0.3), --shadow-soft: 0 8px 24px rgba(0,0,0,0.35), --shadow: 0 18px 50px rgba(0,0,0,0.45), --shadow-lg: 0 30px 80px rgba(0,0,0,0.6)).",
+    "[html-quality] lock.html: hardcoded colors are forbidden outside <style id=\"theme-vars\">. Use brand CSS variables from the token reference.",
+    "[html-quality] lock.html: free-explore pages must not use secondary/accent brand variables. Use the single primary hue, neutral tints, or --state-success/warning/error/info for real semantic states.",
+    "[html-quality] music.html: hardcoded colors are forbidden outside <style id=\"theme-vars\">. Use brand CSS variables from the token reference.",
+    "[html-quality] music.html: free-explore pages must not use secondary/accent brand variables. Use the single primary hue, neutral tints, or --state-success/warning/error/info for real semantic states.",
+    "[html-quality] notes.html: free-explore pages must not use secondary/accent brand variables. Use the single primary hue, neutral tints, or --state-success/warning/error/info for real semantic states.",
+    "[html-quality] quickaccess.html: hardcoded colors are forbidden outside <style id=\"theme-vars\">. Use brand CSS variables from the token reference.",
+    "[html-quality] quickaccess.html: free-explore pages must not use secondary/accent brand variables. Use the single primary hue, neutral tints, or --state-success/warning/error/info for real semantic states.",
     "[html-quality] reminder.html: free-explore pages must not use secondary/accent brand variables. Use the single primary hue, neutral tints, or --state-success/warning/error/info for real semantic states."
   ],
-  "repairPlanHints": [],
+  "repairPlanHints": [
+    {
+      "errorClass": "hardcoded-color-in-body",
+      "owner": "sub-agent",
+      "repairScope": "targeted-token-replace",
+      "strategy": "targeted_token_replace_once",
+      "affectedFiles": [
+        "lock.html"
+      ],
+      "repairReportPath": null,
+      "repairAlreadyAttempted": false,
+      "allowSourceRead": "no-full-html-read",
+      "maxValidationRuns": 2
+    },
+    {
+      "errorClass": "hardcoded-color-in-body",
+      "owner": "sub-agent",
+      "repairScope": "targeted-token-replace",
+      "strategy": "targeted_token_replace_once",
+      "affectedFiles": [
+        "music.html"
+      ],
+      "repairReportPath": null,
+      "repairAlreadyAttempted": false,
+      "allowSourceRead": "no-full-html-read",
+      "maxValidationRuns": 2
+    },
+    {
+      "errorClass": "hardcoded-color-in-body",
+      "owner": "sub-agent",
+      "repairScope": "targeted-token-replace",
+      "strategy": "targeted_token_replace_once",
+      "affectedFiles": [
+        "quickaccess.html"
+      ],
+      "repairReportPath": null,
+      "repairAlreadyAttempted": false,
+      "allowSourceRead": "no-full-html-read",
+      "maxValidationRuns": 2
+    }
+  ],
   "repairActionTable": [],
   "errorCount": 0,
-  "warningCount": 2,
+  "warningCount": 18,
   "errors": [],
   "warnings": [
+    "[html-head-style] notes.html: found 2 custom <style> block(s) in <head>. The <head> is owned by apply-html-head-contract.mjs; move custom styles before </body> or re-run apply-html-head-contract.mjs <css-path> <html-file> --replace-head to relocate them.",
     "[html-head-style] reminder.html: found 1 custom <style> block(s) in <head>. The <head> is owned by apply-html-head-contract.mjs; move custom styles before </body> or re-run apply-html-head-contract.mjs <css-path> <html-file> --replace-head to relocate them.",
+    "[orchestration-summary] runtime-orchestration-summary.json is missing skillProvenance.name/version/version_source. Version provenance will be reported as observed_unknown by external evaluators.",
+    "[repair-ledger] validationRepairLedger[0].repairActions[] is missing",
+    "[repair-ledger] validationRepairLedger[0].revalidationReportPath is missing",
+    "[repair-ledger] validationRepairLedger[0].revalidationReportHash is missing",
+    "[repair-ledger] validationRepairLedger[0].revalidationSuccess should be a boolean",
+    "[html-quality] colors_and_type.css: free-explore brand CSS must use one primary hue only; forbidden secondary/accent brand variables found (--secondary, --secondary-foreground, --accent, --accent-foreground). Use --state-success/warning/error/info only for semantic states.",
+    "[html-quality] colors_and_type.css: free-explore radius tokens must stay within the restrained 2/4/8/12/16px scale; oversized or forbidden radius tokens found (--radius-xl: 18px). Do not use 20px+ radii unless the user explicitly requested large rounded shapes.",
+    "[html-quality] colors_and_type.css: ordinary/static shadow tokens must keep every shadow alpha <= 0.05; deeper shadows are allowed only for floating-layer tokens such as modal/popover/dropdown/drawer/overlay (--shadow-xs: 0 1px 3px rgba(0,0,0,0.25), --shadow-sm: 0 4px 14px rgba(0,0,0,0.3), --shadow-soft: 0 8px 24px rgba(0,0,0,0.35), --shadow: 0 18px 50px rgba(0,0,0,0.45), --shadow-lg: 0 30px 80px rgba(0,0,0,0.6)).",
+    "[html-quality] lock.html: hardcoded colors are forbidden outside <style id=\"theme-vars\">. Use brand CSS variables from the token reference.",
+    "[html-quality] lock.html: free-explore pages must not use secondary/accent brand variables. Use the single primary hue, neutral tints, or --state-success/warning/error/info for real semantic states.",
+    "[html-quality] music.html: hardcoded colors are forbidden outside <style id=\"theme-vars\">. Use brand CSS variables from the token reference.",
+    "[html-quality] music.html: free-explore pages must not use secondary/accent brand variables. Use the single primary hue, neutral tints, or --state-success/warning/error/info for real semantic states.",
+    "[html-quality] notes.html: free-explore pages must not use secondary/accent brand variables. Use the single primary hue, neutral tints, or --state-success/warning/error/info for real semantic states.",
+    "[html-quality] quickaccess.html: hardcoded colors are forbidden outside <style id=\"theme-vars\">. Use brand CSS variables from the token reference.",
+    "[html-quality] quickaccess.html: free-explore pages must not use secondary/accent brand variables. Use the single primary hue, neutral tints, or --state-success/warning/error/info for real semantic states.",
     "[html-quality] reminder.html: free-explore pages must not use secondary/accent brand variables. Use the single primary hue, neutral tints, or --state-success/warning/error/info for real semantic states."
   ],
   "validationRunDisciplineStatus": {
-    "declared": false,
+    "declared": true,
     "restoreMode": false,
-    "maxFullValidationRuns": null,
-    "validationHistoryCount": 0,
-    "repairLedgerCount": 0,
-    "softWarningsTriggerRepair": null,
+    "maxFullValidationRuns": 2,
+    "validationHistoryCount": 1,
+    "repairLedgerCount": 1,
+    "softWarningsTriggerRepair": false,
     "terminalState": null,
     "nextAction": null,
     "violations": [],
@@ -70,7 +142,7 @@
       "reason": "runtime-orchestration-summary.json missing skillProvenance; used skill-release-manifest.json"
     },
     "renderBlockingErrorCount": 0,
-    "softWarningCount": 2,
+    "softWarningCount": 18,
     "renderBlockingErrors": [],
     "repairActionTable": [],
     "nextCheck": {
@@ -87,11 +159,17 @@
     ]
   },
   "projectFileHashes": {
-    "reminder.design": "dd58444d587f266c25e139b8bf2bd571c3af3dd473028fae519494e8b0bdeb45",
-    "pages/reminder.html": "b3b1f35b699205a5a8b7b16f6b0487149b95a193c469e26a5492135468518f67"
+    "reminder.design": "4cb6a579ee5717471994af78f9cd2a9244218000ae1fce16dfdab93f1c98860b",
+    "colors_and_type.css": "ad3824510fe5a65da0e8f668d4b1dfe3a4b674823c33074c19c8c393c83132ac",
+    "runtime-orchestration-summary.json": "048705d42bb690e19cc3015d3d73aafc55184912b506bbd79c2f216a46c33e41",
+    "pages/lock.html": "1b386ef0b2f0b1f532d55ed6500f32ef55f9e90ef83ff1b2e1da8ed32df50e35",
+    "pages/music.html": "770fab04d7e04a415edc7cdfdf26a73da888f71104ddcd264e49467017165e1b",
+    "pages/notes.html": "b9c85955d60e5a3edc0cf45437f24b81c609104bc201c1fa144dde8a6724e79f",
+    "pages/quickaccess.html": "b94f35326990f4edaf3ac350a748eb16df5bddf685d1d18687583611c212867a",
+    "pages/reminder.html": "9525650975bfd5ae94fe42611068e6d4e506a6d41cc4da3326aaa551621fb4d5"
   },
   "designDir": "c:\\TraeProjects\\deskoverlay\\.design",
-  "expectedPages": null,
+  "expectedPages": 5,
   "requireInteractions": null,
-  "checkedAt": "2026-09-07T13:39:13.476Z"
+  "checkedAt": "2026-09-11T14:35:12.537Z"
 }

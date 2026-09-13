@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>锁屏页面</title>
+  <style id="theme-vars">
+    :root {
+      --radius-4: 4px; --radius-6: 6px; --radius-8: 8px; --radius-10: 10px; --radius-12: 12px; --radius-14: 14px; --radius-16: 16px; --radius-18: 18px; --radius-full: 9999px;
+      --spacer-0: 0px; --spacer-2: 2px; --spacer-4: 4px; --spacer-6: 6px; --spacer-8: 8px; --spacer-10: 10px; --spacer-12: 12px; --spacer-16: 16px; --spacer-20: 20px; --spacer-24: 24px; --spacer-32: 32px; --spacer-40: 40px; --spacer-48: 48px;
+      --font-family-default: "SF Pro Text", system-ui, -apple-system, sans-serif;
+      --font-weight-default: 400; --font-weight-medium: 500; --font-weight-strong: 600; --font-weight-bold: 700;
+      --body-xs-font-size: 10px; --body-xs-line-height: 14px;
+      --body-sm-font-size: 11px; --body-sm-line-height: 16px;
+      --body-md-font-size: 12px; --body-md-line-height: 18px;
+      --body-base-font-size: 13px; --body-base-line-height: 20px;
+      --heading-3xs-font-size: 11px; --heading-3xs-line-height: 16px;
+      --heading-2xs-font-size: 12px; --heading-2xs-line-height: 18px;
+      --heading-xs-font-size: 13px; --heading-xs-line-height: 20px;
+      --heading-sm-font-size: 16px; --heading-sm-line-height: 24px;
+      --bg-base-default: #1A1B1D; --bg-base-secondary: #222427; --bg-base-tertiary: #2A2D31;
+      --bg-overlay-l1: rgba(224,226,242,0.04); --bg-overlay-l2: rgba(224,226,242,0.06); --bg-overlay-l3: rgba(224,226,242,0.08); --bg-overlay-l4: rgba(224,226,242,0.12);
+      --bg-menu: #202123; --bg-tooltip: #1A1B1D;
+      --bg-brand: #32F08C; --bg-brand-hover: #0FDC78; --bg-brand-popup: rgba(50,240,140,0.12);
+      --text-default: #D1D3DB; --text-default-hover: #F5F9FE;
+      --text-secondary: #9599A6; --text-tertiary: #666B75;
+      --icon-default: #D1D3DB; --icon-secondary: #9599A6; --icon-tertiary: #666B75;
+      --border-neutral-l1: rgba(224,226,242,0.1); --border-neutral-l2: rgba(224,226,242,0.16);
+      --status-primary-default: #387BFF; --status-primary-hover: #4C88FF;
+      --status-primary-surface-l1: rgba(53,121,255,0.18);
+      --status-success-default: #33C192;
+      --status-alert-default: #D29D00;
+      --status-warning-default: #D27E24;
+      --status-error-default: #F65A5A;
+      --accent-teal: #2DD288; --accent-coral: #FF9392; --accent-amber: #DCB364; --accent-lime: #8ACB3A;
+      --accent-cyan: #04CBE5; --accent-blue: #7BB8FF; --accent-magenta: #EC93FF; --accent-violet: #BFA5FF; --accent-slate: #AFB9CF;
+      --special-white: #FFFFFF; --special-black: #000000;
+      --color-background: var(--bg-base-default);
+      --color-foreground: var(--text-default);
+      --color-card: var(--bg-base-secondary);
+      --color-primary: var(--bg-brand);
+      --color-primary-hover: var(--bg-brand-hover);
+      --color-primary-soft: var(--bg-brand-popup);
+      --color-border: var(--border-neutral-l1);
+      --color-muted: var(--bg-overlay-l2);
+      --color-muted-foreground: var(--text-secondary);
+      --color-surface: var(--bg-base-secondary);
+      --color-surface-variant: var(--bg-base-tertiary);
+      --color-on-primary: var(--text-onbrand);
+      --color-error: var(--status-error-default);
+      --color-error-soft: var(--status-error-surface-l1);
+      --color-success: var(--status-success-default);
+      --color-warning: var(--status-warning-default);
+      --color-info: var(--status-primary-default);
+    }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.3.1/dist/index.global.js"></script>
+  <style type="text/tailwindcss">
+    @theme inline {
+      --color-background: var(--bg-base-default);
+      --color-foreground: var(--text-default);
+      --color-card: var(--bg-base-secondary);
+      --color-primary: var(--bg-brand);
+      --color-primary-hover: var(--bg-brand-hover);
+      --color-border: var(--border-neutral-l1);
+      --color-muted: var(--bg-overlay-l2);
+      --color-muted-foreground: var(--text-secondary);
+      --color-surface: var(--bg-base-secondary);
+      --color-on-primary: var(--text-onbrand);
+      --color-error: var(--status-error-default);
+      --color-success: var(--status-success-default);
+      --color-warning: var(--status-warning-default);
+      --color-info: var(--status-primary-default);
+      --radius-sm: var(--radius-4);
+      --radius-md: var(--radius-6);
+      --radius-lg: var(--radius-8);
+      --radius-xl: var(--radius-10);
+    }
+    @layer base {
+      body { background: #05070a; color: var(--text-default); }
+    }
+  </style>
+  <style id="semantic-token-fallback">
+    .bg-background { background-color: var(--bg-base-default); }
+    .text-foreground { color: var(--text-default); }
+    .bg-card { background-color: var(--bg-base-secondary); }
+    .text-card-foreground { color: var(--text-default); }
+    .bg-primary { background-color: var(--bg-brand); }
+    .text-primary { color: var(--bg-brand); }
+    .bg-primary-soft { background-color: var(--bg-brand-popup); }
+    .bg-muted { background-color: var(--bg-overlay-l2); }
+    .text-muted { color: var(--text-secondary); }
+    .bg-surface { background-color: var(--bg-base-secondary); }
+    .border-border { border-color: var(--border-neutral-l1); }
+    .text-on-primary { color: var(--text-onbrand); }
+    .bg-error { background-color: var(--status-error-default); }
+    .text-error { color: var(--status-error-default); }
+    .bg-error-soft { background-color: var(--status-error-surface-l1); }
+    .bg-success { background-color: var(--status-success-default); }
+    .text-success { color: var(--status-success-default); }
+    .bg-warning { background-color: var(--status-warning-default); }
+    .text-warning { color: var(--status-warning-default); }
+    .bg-info { background-color: var(--status-primary-default); }
+    .text-info { color: var(--status-primary-default); }
+  </style>
+</head>
+<body>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { width: 100%; height: 100%; overflow: hidden; }
+    body {
+      font-family: var(--font-family-default);
+      font-size: var(--body-base-font-size);
+      line-height: var(--body-base-line-height);
+      background: #05070a;
+      color: var(--text-default);
+      user-select: none; -webkit-user-select: none;
+    }
+    .lock-universe {
+      position: fixed; inset: 0;
+      background:
+        radial-gradient(circle at 50% 50%, rgba(30, 45, 72, 0.55) 0%, rgba(8, 12, 20, 0.95) 55%, #020305 100%);
+      overflow: hidden;
+    }
+    #sky { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+    .sun-wrap {
+      position: absolute; left: 50%; top: 50%;
+      translate: -50% -50%;
+      z-index: 10; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .sun {
+      width: 15vmin; height: 15vmin; min-width: 96px; min-height: 96px;
+      border-radius: 50%;
+      background:
+        radial-gradient(circle at 35% 35%, #fff7d1 0%, #ffcc33 25%, #ff9933 55%, #c44e1c 100%);
+      box-shadow:
+        0 0 40px 8px rgba(255, 180, 60, 0.55),
+        0 0 90px 24px rgba(255, 130, 30, 0.28),
+        inset -8px -8px 30px rgba(120, 40, 10, 0.45);
+      animation: sunPulse 3.2s ease-in-out infinite alternate;
+      transition: filter 0.2s ease, box-shadow 0.2s ease;
+    }
+    .sun-wrap:hover .sun {
+      filter: brightness(1.15);
+      box-shadow:
+        0 0 55px 14px rgba(255, 190, 70, 0.7),
+        0 0 120px 36px rgba(255, 140, 40, 0.38),
+        inset -8px -8px 30px rgba(120, 40, 10, 0.45);
+    }
+    .sun-wrap:active .sun { filter: brightness(0.95); }
+    @keyframes sunPulse {
+      0% { transform: scale(1); filter: brightness(1); }
+      100% { transform: scale(1.04); filter: brightness(1.1); }
+    }
+    .lock-hint {
+      position: absolute; left: 50%; bottom: 7vh;
+      translate: -50% 0;
+      text-align: center; color: rgba(230, 237, 243, 0.8);
+      pointer-events: none; z-index: 10;
+    }
+    .lock-hint h1 {
+      margin: 0; font-size: clamp(18px, 2.4vmin, 28px);
+      font-weight: 700; letter-spacing: 1px;
+      text-shadow: 0 2px 14px rgba(0,0,0,0.6);
+    }
+  </style>
+
+  <div class="lock-universe">
+    <canvas id="sky"></canvas>
+    <div class="sun-wrap" id="sunUnlock" role="button" aria-label="解锁">
+      <div class="sun"></div>
+    </div>
+    <div class="lock-hint">
+      <h1>离开一会儿，马上回来</h1>
+    </div>
+  </div>
+
+  <script>
+    const canvas = document.getElementById("sky");
+    const ctx = canvas.getContext("2d");
+    let W = 0, H = 0, dpr = 1, cx = 0, cy = 0;
+
+    const PLANETS = [
+      { rx: 0.20, ry: 0.106, speed: 0.02, dir: 1, r: 0.0125, a0: 0.0, colors: ["#eaeaea","#d0d0d0","#b0b0b0","#808080","#505050"], ring: false },
+      { rx: 0.26, ry: 0.138, speed: 0.015, dir: -1, r: 0.015, a0: 1.8, colors: ["#fefae0","#f0e4c0","#e8d5a3","#d0b878","#a08050"], ring: false },
+      { rx: 0.32, ry: 0.166, speed: 0.012, dir: 1, r: 0.017, a0: 3.6, colors: ["#e8fff0","#68d8a0","#2898c0","#185880","#0a2848"], ring: false },
+      { rx: 0.37, ry: 0.192, speed: 0.0095, dir: -1, r: 0.014, a0: 5.1, colors: ["#f8c0a0","#e87848","#c04028","#882018","#4a1008"], ring: false },
+      { rx: 0.435, ry: 0.224, speed: 0.0075, dir: 1, r: 0.026, a0: 1.1, colors: ["#f8e8c8","#e8c898","#d4a868","#c89058","#a87048","#886038","#684828"], ring: false },
+      { rx: 0.50, ry: 0.255, speed: 0.006, dir: -1, r: 0.022, a0: 4.4, colors: ["#faf0d8","#f0dca8","#e0c878","#c8a858","#a08038"], ring: true },
+      { rx: 0.565, ry: 0.286, speed: 0.005, dir: 1, r: 0.016, a0: 2.4, colors: ["#e0f8f8","#a8e8e8","#68c0c8","#3a8898","#185868"], ring: false },
+      { rx: 0.62, ry: 0.315, speed: 0.004, dir: -1, r: 0.016, a0: 0.6, colors: ["#e8e0ff","#7868d0","#3828a8","#181068","#080840"], ring: false },
+    ];
+    const STARS = 260;
+    let stars = [];
+
+    function resize() {
+      dpr = Math.max(1, window.devicePixelRatio || 1);
+      W = window.innerWidth; H = window.innerHeight;
+      canvas.width = Math.round(W * dpr);
+      canvas.height = Math.round(H * dpr);
+      canvas.style.width = W + "px"; canvas.style.height = H + "px";
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      cx = W / 2; cy = H / 2;
+      stars = [];
+      for (let i = 0; i < STARS; i++) {
+        stars.push({
+          x: Math.random() * W, y: Math.random() * H,
+          r: Math.random() < 0.85 ? 0.5 + Math.random() * 0.8 : 1.2 + Math.random() * 1.4,
+          base: 0.25 + Math.random() * 0.6, tw: 1.5 + Math.random() * 3.5, ph: Math.random() * Math.PI * 2,
+        });
+      }
+    }
+
+    function drawPlanet(x, y, r, stops) {
+      const g = ctx.createRadialGradient(x - r * 0.3, y - r * 0.32, r * 0.02, x, y, r);
+      const n = stops.length;
+      for (let i = 0; i < n; i++) g.addColorStop(i / (n - 1), stops[i]);
+      ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fillStyle = g; ctx.fill();
+      /* atmosphere rim */
+      const a = ctx.createRadialGradient(x, y, r * 0.88, x, y, r * 1.08);
+      a.addColorStop(0, "rgba(255,255,255,0)");
+      a.addColorStop(0.7, "rgba(255,255,255,0.04)");
+      a.addColorStop(1, "rgba(255,255,255,0)");
+      ctx.beginPath(); ctx.arc(x, y, r * 1.08, 0, Math.PI * 2);
+      ctx.fillStyle = a; ctx.fill();
+    }
+
+    function frame(now) {
+      const t = now / 1000;
+      ctx.clearRect(0, 0, W, H);
+      for (const s of stars) {
+        const a = s.base + Math.sin(t * s.tw + s.ph) * 0.35;
+        ctx.globalAlpha = Math.max(0, Math.min(1, a));
+        ctx.fillStyle = "#fff";
+        ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+
+      const coreR = 0.13 * Math.min(W, H);
+      const core = ctx.createRadialGradient(cx, cy, 0, cx, cy, coreR);
+      core.addColorStop(0, "rgba(255,215,150,0.35)");
+      core.addColorStop(0.5, "rgba(255,170,110,0.12)");
+      core.addColorStop(1, "rgba(255,150,90,0)");
+      ctx.fillStyle = core; ctx.beginPath();
+      ctx.arc(cx, cy, coreR, 0, Math.PI * 2); ctx.fill();
+
+      ctx.lineWidth = 1;
+      for (const p of PLANETS) {
+        ctx.strokeStyle = "rgba(255,255,255,0.10)";
+        ctx.beginPath();
+        ctx.ellipse(cx, cy, p.rx * Math.min(W, H), p.ry * Math.min(W, H), 0, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      ctx.save();
+      for (const p of PLANETS) {
+        const x = cx + Math.cos(p.a0) * p.rx * Math.min(W, H);
+        const y = cy + Math.sin(p.a0) * p.ry * Math.min(W, H);
+        const rad = p.r * Math.min(W, H);
+        if (p.ring) {
+          ctx.save(); ctx.translate(x, y); ctx.rotate(-0.35);
+          ctx.strokeStyle = "rgba(220,200,150,0.50)";
+          ctx.lineWidth = Math.max(1.5, rad * 0.30);
+          ctx.beginPath(); ctx.ellipse(0, 0, rad * 1.8, rad * 0.58, 0, 0, Math.PI * 2); ctx.stroke();
+          ctx.strokeStyle = "rgba(200,180,130,0.35)";
+          ctx.lineWidth = Math.max(1, rad * 0.18);
+          ctx.beginPath(); ctx.ellipse(0, 0, rad * 2.3, rad * 0.76, 0, 0, Math.PI * 2); ctx.stroke();
+          ctx.strokeStyle = "rgba(180,160,110,0.22)";
+          ctx.lineWidth = Math.max(0.8, rad * 0.10);
+          ctx.beginPath(); ctx.ellipse(0, 0, rad * 2.7, rad * 0.90, 0, 0, Math.PI * 2); ctx.stroke();
+          ctx.restore();
+        }
+        drawPlanet(x, y, rad, p.colors);
+        /* Jupiter bands */
+        if (p === PLANETS[4]) {
+          ctx.save(); ctx.translate(x, y); ctx.globalAlpha = 0.12;
+          for (let b = -3; b <= 3; b++) {
+            const by = b * rad * 0.16;
+            ctx.beginPath();
+            ctx.ellipse(0, by, rad * 0.92, rad * 0.08, 0, 0, Math.PI * 2);
+            ctx.fillStyle = b % 2 === 0 ? "rgba(180,120,60,0.5)" : "rgba(240,200,140,0.4)";
+            ctx.fill();
+          }
+          ctx.beginPath();
+          ctx.ellipse(rad * 0.35, rad * 0.15, rad * 0.18, rad * 0.08, 0.1, 0, Math.PI * 2);
+          ctx.fillStyle = "rgba(200,90,50,0.22)"; ctx.fill();
+          ctx.restore();
+        }
+        /* Earth clouds */
+        if (p === PLANETS[2]) {
+          ctx.save(); ctx.translate(x, y); ctx.globalAlpha = 0.18;
+          ctx.fillStyle = "#fff";
+          ctx.beginPath(); ctx.ellipse(-rad * 0.2, -rad * 0.1, rad * 0.5, rad * 0.10, 0.2, 0, Math.PI * 2); ctx.fill();
+          ctx.beginPath(); ctx.ellipse(rad * 0.3, rad * 0.05, rad * 0.4, rad * 0.08, -0.3, 0, Math.PI * 2); ctx.fill();
+          ctx.beginPath(); ctx.ellipse(rad * 0.05, -rad * 0.35, rad * 0.45, rad * 0.09, 0, 0, Math.PI * 2); ctx.fill();
+          ctx.restore();
+        }
+        /* spin lines */
+        ctx.save(); ctx.translate(x, y); ctx.globalAlpha = 0.10;
+        for (let k = -1; k <= 1; k++) {
+          ctx.beginPath();
+          ctx.ellipse(0, k * rad * 0.4, rad * 0.95, rad * 0.22, 0, Math.PI, Math.PI * 2);
+          ctx.strokeStyle = "#fff"; ctx.lineWidth = Math.max(0.6, rad * 0.08); ctx.stroke();
+        }
+        ctx.restore();
+      }
+      ctx.restore();
+      for (const p of PLANETS) p.a0 += p.speed * 0.3 * p.dir;
+      requestAnimationFrame(frame);
+    }
+
+    resize();
+    window.addEventListener("resize", resize);
+    requestAnimationFrame(frame);
+  </script>
+</body>
+</html>

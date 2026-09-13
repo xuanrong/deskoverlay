@@ -14,8 +14,11 @@ function qaCardIcon(q) {
   return ICON_PAPERCLIP;
 }
 function qaCardHtml(q) {
+  const icon = q.type === "url" && q.icon
+    ? `<img class="qa-favicon" src="${q.icon}" alt="" />`
+    : qaCardIcon(q);
   return `<div class="qa-card" data-id="${q.id}" draggable="false">
-      <span class="qa-icon">${qaCardIcon(q)}</span>
+      <span class="qa-icon">${icon}</span>
       <span class="qa-title">${esc(q.title || q.target)}</span>
       <span class="qa-actions">
         <button class="qa-act" data-act="edit" title="编辑">${ICON_EDIT}</button>
@@ -40,8 +43,13 @@ export function renderQuickAccess(view) {
   let suppressClick = false; // 拖拽结束后的 click 不触发「打开」
   let drag = null; // { id, el, startX, startY, moved, ghost, raf }
 
+  function removeInsertSlot() {
+    groupsEl.querySelector(".qa-ph")?.remove();
+  }
+
   function clearDragVisual() {
-    groupsEl.querySelectorAll(".qa-card").forEach((r) => r.classList.remove("dragging", "qa-insert-before", "qa-insert-after"));
+    groupsEl.querySelectorAll(".qa-card").forEach((r) => r.classList.remove("dragging"));
+    removeInsertSlot();
     document.body.classList.remove("no-select");
     if (drag) {
       if (drag.ghost) drag.ghost.remove();
@@ -51,32 +59,44 @@ export function renderQuickAccess(view) {
     }
   }
 
-  // 扫描所有分组的卡片 + 空分组行，返回指针最近的插入点 { groupId, atId, cls }
+  // 按指针位置计算插入点：取 y 最近的分组，再在该组卡片流中按“整卡在上/同行左右半区”定位列。
+  // 返回 { groupId, atId }（atId 为将被推到占位槽之后的那张卡，null 表示组尾）。
   function targetAt(x, y) {
-    let best = null;
-    let bestDist = Infinity;
-    const cards = Array.from(groupsEl.querySelectorAll(".qa-card:not(.dragging)"));
-    for (const c of cards) {
-      const r = c.getBoundingClientRect();
-      const groupId = c.dataset.group;
-      const before = { atId: c.dataset.id, cls: "qa-insert-before", dx: x - r.left, dy: y - r.top };
-      const after = { atId: c.dataset.id, cls: "qa-insert-after", dx: r.right - x, dy: r.bottom - y };
-      for (const cand of [before, after]) {
-        const d = Math.hypot(Math.max(0, cand.dx), Math.max(0, cand.dy));
-        if (d < bestDist) { bestDist = d; best = { groupId, atId: cand.atId, cls: cand.cls }; }
-      }
-    }
+    let rowBest = null;
+    let rowBestD = Infinity;
     const rows = Array.from(groupsEl.querySelectorAll(".qa-row"));
     for (const row of rows) {
       const r = row.getBoundingClientRect();
-      if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) {
-        const groupId = row.dataset.group;
-        const last = row.querySelector(".qa-card:last-child");
-        const d = Math.abs(y - r.top);
-        if (!best || d < 8) best = { groupId, atId: last ? last.dataset.id : null, cls: "qa-insert-after" };
-      }
+      const mid = r.top + Math.min(34, r.height / 2);
+      const d = Math.abs(y - mid);
+      if (d < rowBestD) { rowBestD = d; rowBest = row; }
     }
-    return best;
+    if (!rowBest) return null;
+    const cards = Array.from(rowBest.children).filter((el) => el.classList.contains("qa-card"));
+    let idx = cards.length;
+    for (let i = 0; i < cards.length; i++) {
+      const rc = cards[i].getBoundingClientRect();
+      if (rc.bottom <= y) continue;          // 完全位于指针上方：插到其后
+      if (rc.top > y) { idx = i; break; }    // 已到指针下方的卡：插到其前
+      if (rc.left + rc.width / 2 < x) continue; // 同行且在中心右侧
+      idx = i;
+      break;
+    }
+    const atId = cards[idx] ? cards[idx].dataset.id : null;
+    return { groupId: rowBest.dataset.group, atId, idx, row: rowBest };
+  }
+
+  // 在目标位置插入占位槽，让周围卡片实时让位；仅在落点变化时调用。
+  let lastTargetKey = null;
+  function placeInsertSlot(t) {
+    const key = t ? `${t.groupId}:${t.atId ?? "├─end"}` : "";
+    if (lastTargetKey === key) return;
+    lastTargetKey = key;
+    removeInsertSlot();
+    if (!t) return;
+    const slot = document.createElement("div");
+    slot.className = "qa-ph";
+    t.row.insertBefore(slot, t.row.children[t.idx] ?? null);
   }
 
   function finishDrag() {
@@ -85,6 +105,7 @@ export function renderQuickAccess(view) {
     const t = drag?.target;
     clearDragVisual();
     drag = null;
+    lastTargetKey = null;
     if (moved && fromId && t && !(t.groupId && t.atId === fromId)) {
       suppressClick = true;
       // 拖拽释放通常不派发 click，短暂复位避免吞掉下一次真实的快捷方式点击
@@ -102,7 +123,7 @@ export function renderQuickAccess(view) {
           return `
         <div class="qa-group" data-gid="${g.id}">
           <div class="qa-group-head">${esc(g.name || "")}<span class="qa-count">${items.length}</span></div>
-          <div class="qa-row" data-group="${g.id}">${items.map(qaCardHtml).join("") || `<div class="dash-empty">＋ 点击右上角"添加"加入此分组</div>`}</div>
+          <div class="qa-row" data-group="${g.id}">${items.map(qaCardHtml).join("") || `<div class="dash-empty">该分组暂无内容，点右上角「添加」加入</div>`}</div>
         </div>`;
         }).join("")
       : `<div class="dash-empty">暂无分组，点「管理分组」新建</div>`;
@@ -167,8 +188,7 @@ export function renderQuickAccess(view) {
 
     const t = targetAt(e.clientX, e.clientY);
     drag.target = t;
-    groupsEl.querySelectorAll(".qa-card").forEach((r) => r.classList.remove("qa-insert-before", "qa-insert-after"));
-    if (t) groupsEl.querySelector(`.qa-card[data-id="${t.atId}"]`)?.classList.add(t.cls);
+    placeInsertSlot(t);
   });
 
   window.addEventListener("pointerup", () => {
@@ -209,7 +229,7 @@ function showQuickAccessModal(mode, item, onDone) {
       <div class="tm-field">
         <label>地址</label>
         <div class="tm-row" style="grid-template-columns: 1fr auto;">
-          <input id="qa-target" type="text" value="${item ? esc(item.target) : ""}" placeholder="${isEdit ? "网页链接或本地路径" : "粘贴链接，文件夹/文件可点浏览选择"}" />
+          <input id="qa-target" type="text" value="${item ? esc(item.target) : ""}" placeholder="${isEdit ? "网页链接或本地路径" : "链接或本地路径…"}" />
           <button id="qa-browse" class="tm-cancel" type="button" style="margin:0;">浏览…</button>
         </div>
       </div>
@@ -280,10 +300,16 @@ function showQuickAccessModal(mode, item, onDone) {
       groupId,
     };
     if (!data.target) { targetEl.focus(); return; }
-    if (isEdit) QuickAccess.update(item.id, data);
-    else QuickAccess.add(data);
+    if (isEdit) { QuickAccess.update(item.id, data); hideQuickAccessModal(); onDone?.(); return; }
+    const added = QuickAccess.add(data);
     hideQuickAccessModal();
     onDone?.();
+    // 网址快捷方式：异步获取站点图标（失败时保留默认地球图标）
+    if (added && data.type === "url") {
+      invoke("fetch_favicon", { url: data.target })
+        .then((icon) => { if (icon) { QuickAccess.update(added.id, { icon }); onDone?.(); } })
+        .catch(() => {});
+    }
   };
 
   qaModalEl.querySelector("#qa-cancel").addEventListener("click", hideQuickAccessModal);
@@ -312,7 +338,7 @@ function showQuickAccessGroupsModal(onDone) {
       <h3>管理分组</h3>
       <div class="tm-field"><label>新增分组</label>
         <div class="tm-row" style="grid-template-columns: 1fr auto;">
-          <input id="qa-g-new" type="text" placeholder="分组名称" />
+          <input id="qa-g-new" type="text" placeholder="分组名称…" />
           <button class="btn-primary" id="qa-g-add" type="button">添加</button>
         </div>
       </div>

@@ -1,12 +1,13 @@
-﻿// 今日概览视图：待办事项（左）+ 文件中心/最近操作（右）。
+// 今日概览视图：待办事项（左）+ 文件中心/最近操作（右）。
 import { Bus, invoke } from "../bus.js";
 import { Tasks } from "../tasks.js";
 import { state, saveState, pushRecentOp, onRecentOp } from "../state.js";
 import { STATUS_LABEL, TASK_STATUSES, PRIORITY_LABEL } from "../config.js";
-import { ICON_EXTERNAL, ICON_SEARCH, ICON_EDIT, ICON_TRASH, ICON_CHECK, ICON_BELL } from "../icons.js";
+import { ICON_EXTERNAL, ICON_SEARCH, ICON_EDIT, ICON_TRASH, ICON_CHECK, ICON_BELL, ICON_FOLDER, ICON_PAPERCLIP } from "../icons.js";
 import { ICON_TOMATO } from "../pomodoro.js";
 import { FILE_CATEGORIES, FILE_ICONS } from "../filetypes.js";
 import { esc, showDialog } from "./common.js";
+import { toast } from "../toast.js";
 import { createDatePicker } from "../datepicker.js";
 import { createSelect } from "../selectbox.js";
 
@@ -17,6 +18,25 @@ const LAYOUT_GRID_ICON = `<svg viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="
 // 图片类扩展名 → 文件中心显示缩略图；成功结果按文件名缓存，避免每次渲染重复读取
 const IMAGE_EXTS = new Set(["jpg", "jpeg", "png", "gif", "webp", "bmp", "svg", "ico"]);
 const THUMB_CACHE = new Map();
+
+// 全盘文件名搜索：走后端自建索引（file_index），子串匹配文件名，内存驻留即时返回
+function searchIcon(ext, isDir) {
+  if (isDir) return ICON_FOLDER;
+  for (const [cat, exts] of Object.entries(FILE_CATEGORIES)) if (exts.includes(ext)) return FILE_ICONS[cat] || ICON_PAPERCLIP;
+  return ICON_PAPERCLIP;
+}
+// 索引命中(Hit{path,is_dir}) → 单行 <div>
+function evRow(h) {
+  const p = h.path || "";
+  const name = p.split(/[\\/]/).pop() || "";
+  const dir = p.slice(0, -name.length).replace(/[\\/]$/, "");
+  const icon = searchIcon((name.split(".").pop() || "").toLowerCase(), !!h.is_dir);
+  return `<div class="ev-item" data-path="${esc(p)}" title="${esc(p)}&#10;（右键操作）">
+    <span class="ev-icon">${icon}</span>
+    <span class="ev-name">${esc(name)}</span>
+    <span class="ev-path">${esc(dir)}</span>
+  </div>`;
+}
 
 // 最近操作类型 → 图标（线性 SVG）+ 标签
 const OP_META = {
@@ -395,10 +415,12 @@ async function renderFilesBlock(el, view) {
     if (!tabs.includes(currentTab)) currentTab = tabs[0];
     el.innerHTML = `
     <div class="sec-title">文件中心
+      <span class="file-search"><input id="d-file-search" type="text" placeholder="全盘搜文件名…" spellcheck="false" autocomplete="off" /><button class="file-reindex" id="d-file-reindex" title="重建索引" type="button">↻</button></span>
       <button class="file-layout-toggle" id="d-file-layout" title="切换布局">${layout === "grid" ? LAYOUT_LIST_ICON : LAYOUT_GRID_ICON}</button>
     </div>
     <div class="file-tabs" id="d-file-tabs"></div>
     <div class="file-tab-content" id="d-file-content"></div>
+    <div class="file-search-results" id="d-file-results" hidden></div>
     <div class="recent-ops">
       <div class="sec-title"><span>最近操作</span><a class="recent-ops-all">全部记录 →</a></div>
       <div class="recent-ops-list" id="d-recent-ops-list">${renderRecentOps()}</div>
@@ -419,6 +441,91 @@ async function renderFilesBlock(el, view) {
     });
     el.querySelector(".recent-ops-all").addEventListener("click", showRecentOpsDialog);
 
+    // —— 全盘搜索（自建索引，后端 file_index）——
+    const searchEl = el.querySelector("#d-file-search");
+    const resultsEl = el.querySelector("#d-file-results");
+    let searchTimer = null;
+    let indexPoll = null; // 建索引期间的轮询
+    let readyOnce = false; // 索引就绪缓存：已就绪则后续击键跳过 index_status
+    // 搜索期间改动过文件（重命名/删除）→ 清空搜索回到分类浏览时需重载桌面列表。
+    // 分类视图渲染自 load() 一次性抓取的 groups 快照，不重载会一直显示旧文件名。
+    let desktopStale = false;
+    function setBrowseMode(browse) { // browse=true 显示桌面分类；false 显示搜索结果
+      tabsEl.style.display = browse ? "" : "none";
+      contentEl.style.display = browse ? "" : "none";
+      resultsEl.hidden = browse;
+    }
+    async function runSearch(q) {
+      clearTimeout(indexPoll); indexPoll = null;
+      if (!q) {
+        setBrowseMode(true);
+        resultsEl.innerHTML = "";
+        // 搜索期间动过文件：此刻输入框已空，重载不会丢查询状态，直接刷新分类视图
+        if (desktopStale) { desktopStale = false; load(); }
+        return;
+      }
+      setBrowseMode(false);
+      if (!readyOnce) { // 就绪前需查状态；就绪后缓存，击键不再多一次 IPC
+        let st;
+        try { st = await invoke("index_status"); } catch { st = { ready: false }; }
+        if (st.ready) { readyOnce = true; }
+        else {
+          if (!st.building) {
+            resultsEl.innerHTML = `<div class="ev-hint">索引尚未就绪，点击右侧「↻」重建索引。</div>`;
+            return;
+          }
+          resultsEl.innerHTML = `<div class="ev-hint">正在建立索引… 已扫描 ${st.scanned ?? 0} 项</div>`;
+          indexPoll = setTimeout(() => { if (searchEl.value.trim() === q) runSearch(q); }, 1000);
+          return;
+        }
+      }
+      let res;
+      try {
+        res = await invoke("search_files", { query: q, limit: 120 });
+      } catch (err) {
+        readyOnce = false; // 出错后重置状态缓存，下次重新探测
+        resultsEl.innerHTML = `<div class="ev-hint">搜索出错：${esc(String(err))}。可点「↻」重建索引或重试。</div>`;
+        return;
+      }
+      if (searchEl.value.trim() !== q) return; // 输入已变化，丢弃过期结果
+      if (!res.length) { resultsEl.innerHTML = `<div class="dash-empty">没有匹配「${esc(q)}」的文件</div>`; return; }
+      resultsEl.innerHTML = `<div class="ev-list">${res.map(evRow).join("")}</div>`;
+    }
+    // 事件委托：只挂一个双击监听，避免每次渲染重建 200 个监听
+    resultsEl.addEventListener("dblclick", async (e) => {
+      const row = e.target.closest(".ev-item");
+      if (!row) return;
+      try {
+        await invoke("open_path", { target: row.dataset.path });
+        pushRecentOp({ kind: "file_open", name: row.dataset.path.split(/[\\/]/).pop() });
+      } catch (err) {
+        showDialog({ title: "打开失败", message: String(err), okText: "知道了", showCancel: false });
+      }
+    });
+    // 同样用事件委托挂右键：搜索结果行作用于**全盘绝对路径**，走 *_path 命令族
+    resultsEl.addEventListener("contextmenu", (e) => {
+      const row = e.target.closest(".ev-item");
+      if (!row) return;
+      e.preventDefault();
+      showPathMenu(e.clientX, e.clientY, row.dataset.path, () => {
+        desktopStale = true; // 桌面分类视图可能也含该文件，回浏览态时需重载
+        runSearch(searchEl.value.trim());
+      });
+    });
+    searchEl.addEventListener("input", () => {
+      clearTimeout(searchTimer);
+      const q = searchEl.value.trim();
+      searchTimer = setTimeout(() => runSearch(q), 200);
+    });
+    searchEl.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") { clearTimeout(indexPoll); searchEl.value = ""; runSearch(""); searchEl.blur(); }
+    });
+    el.querySelector("#d-file-reindex").addEventListener("click", async () => {
+      await invoke("rebuild_index");
+      readyOnce = false; // 重建后索引不在就绪态，重新走状态轮询
+      runSearch(searchEl.value.trim());
+    });
+
     function renderContent() {
       const arr = groups[currentTab] || [];
       const icon = FILE_ICONS[currentTab] || ICON_PAPERCLIP;
@@ -436,7 +543,7 @@ async function renderFilesBlock(el, view) {
       contentEl.querySelectorAll(".fg-item, .fg-card").forEach((item) => {
         item.addEventListener("contextmenu", (e) => {
           e.preventDefault();
-          showFileMenu(e.clientX, e.clientY, item.dataset.name, view, load);
+          showFileMenu(e.clientX, e.clientY, item.dataset.name, load);
         });
         item.addEventListener("dblclick", () => {
           invoke("open_file", { name: item.dataset.name });
@@ -446,23 +553,38 @@ async function renderFilesBlock(el, view) {
     }
 
     // 异步为图片文件加载缩略图（成功→显示图，失败→移除 img 露出图标兜底）
+    // 并发限流：一次最多 4 个在途请求，避免几十张图同时读盘/占满 IPC；容器被切走后剩余项跳过
     async function loadThumbs(container) {
       const imgs = Array.from(container.querySelectorAll("img.fg-thumb[data-img]"));
-      await Promise.all(imgs.map(async (img) => {
-        const name = img.dataset.img;
-        if (!THUMB_CACHE.has(name)) {
-          try {
-            THUMB_CACHE.set(name, (await invoke("image_thumbnail", { name })) || "");
-          } catch (e) {
-            THUMB_CACHE.set(name, "");
+      const queue = imgs.slice();
+      const worker = async () => {
+        while (queue.length) {
+          const img = queue.shift();
+          if (!img.isConnected) continue; // 已切走：容器被重建，无需继续
+          const name = img.dataset.img;
+          if (!THUMB_CACHE.has(name)) {
+            try {
+              THUMB_CACHE.set(name, (await invoke("image_thumbnail", { name })) || "");
+              // 容量上限：超限淘汰最早条目（Map 按插入序迭代），避免 base64 常驻内存无限增长
+              if (THUMB_CACHE.size > 200) {
+                let n = THUMB_CACHE.size - 200;
+                for (const k of THUMB_CACHE.keys()) {
+                  THUMB_CACHE.delete(k);
+                  if (--n <= 0) break;
+                }
+              }
+            } catch (e) {
+              THUMB_CACHE.set(name, "");
+            }
           }
+          const url = THUMB_CACHE.get(name);
+          if (!url) { img.remove(); continue; }
+          img.addEventListener("error", () => img.remove(), { once: true });
+          img.src = url;
+          img.hidden = false;
         }
-        const url = THUMB_CACHE.get(name);
-        if (!url) { img.remove(); return; }
-        img.addEventListener("error", () => img.remove(), { once: true });
-        img.src = url;
-        img.hidden = false;
-      }));
+      };
+      await Promise.all(Array.from({ length: Math.min(4, imgs.length) }, worker));
     }
 
     function renderTabs() {
@@ -490,25 +612,59 @@ async function renderFilesBlock(el, view) {
   view.onDestroy(hideFileMenu);
 }
 
-// 文件右键菜单（打开 / 资源管理器定位 / 重命名 / 删除到回收站）
+// -------------------- 右键菜单 --------------------
+// 两种作用域的菜单共用外壳：桌面分类视图用「文件名」作用域命令，
+// 全盘搜索结果用「绝对路径」作用域命令（见 showPathMenu 注释）。
 let fileMenuEl = null;
-function showFileMenu(x, y, name, view, onChange) {
+
+// 菜单外壳：按实测尺寸把位置夹回视口内、点击外部关闭、随视图销毁清理。
+// items: [{ act, label, danger? }]；onPick(act) 处理动作。
+// 销毁清理统一由 renderFilesBlock 里的 view.onDestroy(hideFileMenu) 负责，
+// 此处不再按次注册（原实现每次打开都注册一次，会累积重复项）。
+function openContextMenu(x, y, items, onPick) {
   hideFileMenu();
   fileMenuEl = document.createElement("div");
   fileMenuEl.className = "file-menu";
-  fileMenuEl.style.left = Math.min(x, window.innerWidth - 180) + "px";
-  fileMenuEl.style.top = Math.min(y, window.innerHeight - 160) + "px";
-  fileMenuEl.innerHTML = `
-    <button data-act="open">打开</button>
-    <button data-act="reveal">在资源管理器中显示</button>
-    <button data-act="rename">重命名</button>
-    <button data-act="delete" class="danger">删除（回收站）</button>`;
+  fileMenuEl.innerHTML = items
+    .map((it) => `<button data-act="${it.act}"${it.danger ? ' class="danger"' : ""}>${esc(it.label)}</button>`)
+    .join("");
+  // 先以不可见插入以量取实际尺寸，再夹取位置：菜单项数量不同高度差异明显，
+  // 用固定余量（原实现 180/160）在屏幕底部会溢出。
+  fileMenuEl.style.visibility = "hidden";
   document.body.appendChild(fileMenuEl);
+  const w = fileMenuEl.offsetWidth;
+  const h = fileMenuEl.offsetHeight;
+  fileMenuEl.style.left = Math.max(4, Math.min(x, window.innerWidth - w - 4)) + "px";
+  fileMenuEl.style.top = Math.max(4, Math.min(y, window.innerHeight - h - 4)) + "px";
+  // 测量阶段入场动画已跑完，这里重放一次
+  fileMenuEl.style.animation = "none";
+  void fileMenuEl.offsetWidth;
+  fileMenuEl.style.animation = "";
+  fileMenuEl.style.visibility = "";
 
   fileMenuEl.addEventListener("click", async (e) => {
-    const act = e.target.dataset.act;
-    if (!act) return;
+    const btn = e.target.closest("button[data-act]");
+    if (!btn) return;
     hideFileMenu();
+    await onPick(btn.dataset.act);
+  });
+
+  setTimeout(() => document.addEventListener("click", hideFileMenu, { once: true }), 0);
+}
+
+function hideFileMenu() {
+  if (fileMenuEl) { fileMenuEl.remove(); fileMenuEl = null; }
+}
+
+// 桌面文件右键菜单（打开 / 资源管理器定位 / 重命名 / 删除到回收站）
+// 这些命令是 desktop_dir 作用域的：后端把入参当文件名 join 到桌面目录。
+function showFileMenu(x, y, name, onChange) {
+  openContextMenu(x, y, [
+    { act: "open", label: "打开" },
+    { act: "reveal", label: "在资源管理器中显示" },
+    { act: "rename", label: "重命名" },
+    { act: "delete", label: "删除（回收站）", danger: true },
+  ], async (act) => {
     try {
       if (act === "open") {
         await invoke("open_file", { name });
@@ -534,11 +690,75 @@ function showFileMenu(x, y, name, view, onChange) {
       showDialog({ title: "操作失败", message: String(err), okText: "知道了", showCancel: false });
     }
   });
-
-  setTimeout(() => document.addEventListener("click", hideFileMenu, { once: true }), 0);
-  view.onDestroy(hideFileMenu);
 }
-function hideFileMenu() {
-  if (fileMenuEl) { fileMenuEl.remove(); fileMenuEl = null; }
+
+// 全盘搜索结果右键菜单 —— 作用域是**绝对路径**，与桌面菜单的关键差异：
+// 命中可能在任何盘符（含系统目录），不能走 open_file/reveal_file/rename_file/delete_file
+// （那些会把路径当文件名拼到桌面目录上，结果是找不到文件或误改桌面上的同名文件），
+// 故一律走 *_path 命令族。
+function showPathMenu(x, y, path, onChange) {
+  const name = path.split(/[\\/]/).pop() || path;
+  openContextMenu(x, y, [
+    { act: "open", label: "打开" },
+    { act: "reveal", label: "在资源管理器中显示" },
+    { act: "copy", label: "复制完整路径" },
+    { act: "rename", label: "重命名" },
+    { act: "delete", label: "删除（回收站）", danger: true },
+  ], async (act) => {
+    try {
+      if (act === "open") {
+        await invoke("open_path", { target: path });
+        pushRecentOp({ kind: "file_open", name });
+      } else if (act === "reveal") {
+        await invoke("reveal_path", { target: path });
+        pushRecentOp({ kind: "file_reveal", name });
+      } else if (act === "copy") {
+        await copyText(path);
+      } else if (act === "rename") {
+        const newName = await showDialog({ title: "重命名", input: true, inputValue: name, okText: "确定" });
+        if (newName && newName !== name) {
+          await invoke("rename_path", { target: path, newName });
+          pushRecentOp({ kind: "file_rename", name, text: `${name} → ${newName}` });
+          onChange();
+        }
+      } else if (act === "delete") {
+        // 确认框里带上完整路径：搜索命中可能在任何位置，只给文件名不足以判断删的是哪一个
+        const ok = await showDialog({
+          title: "删除文件",
+          message: `确认删除「${name}」？\n${path}\n（移到回收站，可恢复）`,
+          okText: "删除",
+          danger: true,
+        });
+        if (!ok) return;
+        await invoke("delete_path", { target: path });
+        pushRecentOp({ kind: "file_delete", name });
+        onChange();
+      }
+    } catch (err) {
+      showDialog({ title: "操作失败", message: String(err), okText: "知道了", showCancel: false });
+    }
+  });
+}
+
+// 复制文本到剪贴板：优先 Clipboard API，不可用则回退 textarea + execCommand。
+// 打包版 origin 为 http://tauri.localhost（Chromium 视 *.localhost 为安全上下文），
+// 但 WebView2 版本差异下 clipboard 仍可能缺失，故保留回退分支。
+async function copyText(text) {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      toast("已复制路径");
+      return;
+    }
+  } catch (_) { /* 落到回退分支 */ }
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  ta.style.cssText = "position:fixed;top:-1000px;opacity:0;";
+  document.body.appendChild(ta);
+  ta.select();
+  let ok = false;
+  try { ok = document.execCommand("copy"); } catch (_) { ok = false; }
+  ta.remove();
+  toast(ok ? "已复制路径" : "复制失败，请手动选择路径");
 }
 

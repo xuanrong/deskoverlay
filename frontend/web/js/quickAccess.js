@@ -27,14 +27,16 @@ export const QuickAccess = {
     if (!t) return;
     ensureDefaultGroup();
     const gid = groupId && state.qaGroups.some((g) => g.id === groupId) ? groupId : state.qaGroups[0].id;
-    state.quickAccess.push({
+    const q = {
       id: "qa" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
       type: type === "folder" || type === "file" ? type : "url",
       title: (title || "").trim() || t,
       target: t,
       groupId: gid,
-    });
+    };
+    state.quickAccess.push(q);
     persist();
+    return q;
   },
 
   update(id, patch) {

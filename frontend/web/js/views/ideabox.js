@@ -2,7 +2,7 @@
 // 数据模型沿用 state.ideabox: { id, text, tag, ts }（按记录时间倒序呈现）
 // 自定义标签存于 state.ideaTags，统一用青色系。
 import { state, saveState } from "../state.js";
-import { esc, showDialog, insertBreak, fitTextarea } from "./common.js";
+import { esc, showDialog, fitTextarea } from "./common.js";
 
 // 随手记输入区最大自适应高度（超出后内部滚动）
 const INPUT_MAX_H = 200;
@@ -127,7 +127,7 @@ export function renderIdeabox(view) {
   body.innerHTML = `
     <div class="idea-page">
       <section class="idea-composer">
-        <textarea class="idea-input" id="idea-input" rows="1" placeholder="随手记下来：一句话灵感 / 待办 / 摘录，回车记录 · Ctrl+Enter 换行…" spellcheck="false"></textarea>
+        <textarea class="idea-input" id="idea-input" rows="1" placeholder="一句话灵感 / 待办 / 摘录…" spellcheck="false"></textarea>
         <div class="idea-composer-foot">
           <div class="idea-form-tags" id="idea-form-tags"></div>
           <button class="btn-primary idea-add" id="idea-add">＋ 记录</button>
@@ -137,7 +137,7 @@ export function renderIdeabox(view) {
         <div class="idea-filters" id="idea-filters"></div>
         <div class="idea-search">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15.5 14h-.79l-.28-.27a6.5 6.5 0 1 0-.7.7l.27.28v.79l5 4.99L20.49 19zm-6 0A4.5 4.5 0 1 1 14 9.5 4.5 4.5 0 0 1 9.5 14"/></svg>
-          <input id="idea-q" type="text" placeholder="搜索…" autocomplete="off" spellcheck="false" />
+          <input id="idea-q" type="text" placeholder="搜索碎片…" autocomplete="off" spellcheck="false" />
         </div>
       </div>
       <div class="idea-wall" id="idea-wall"></div>
@@ -216,7 +216,7 @@ export function renderIdeabox(view) {
 
     if (!list.length) {
       const base = (state.ideabox || []).length;
-      wallEl.innerHTML = `<div class="idea-empty">${kw ? "没有匹配的碎片" : base ? "该标签下还没有碎片" : "还没有灵感碎片，先在随手记里记录一条吧"}</div>`;
+      wallEl.innerHTML = `<div class="idea-empty">${kw ? "没有匹配的碎片" : base ? "该标签下暂无碎片" : "还没有碎片，在上方记一条开始吧"}</div>`;
       wallEl.style.display = "block";
       return;
     }
@@ -291,11 +291,15 @@ export function renderIdeabox(view) {
   }
 
   addBtn.addEventListener("click", add);
-  // 回车 = 记录；Ctrl/Cmd+回车 = 换行；Shift+回车保留默认换行（与工作记录录入一致）
+  // 回车 = 换行（默认行为）；Ctrl/Cmd+回车 = 记录（与工作记录录入一致）
   inputEl.addEventListener("keydown", (e) => {
     if (e.isComposing || e.key !== "Enter") return;
-    if (e.ctrlKey || e.metaKey) { e.preventDefault(); insertBreak(inputEl); fitTextarea(inputEl, INPUT_MAX_H); }
-    else if (!e.shiftKey) { e.preventDefault(); add(); }
+    if (e.ctrlKey || e.metaKey) {
+      e.preventDefault();
+      add();
+      fitTextarea(inputEl, INPUT_MAX_H);
+    }
+    // 其余情况（含 Shift+回车）执行默认换行
   });
   inputEl.addEventListener("input", () => fitTextarea(inputEl, INPUT_MAX_H));
 

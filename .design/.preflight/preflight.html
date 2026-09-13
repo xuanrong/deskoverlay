@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Preflight</title>
+    <style id="theme-vars">
+/* DeskOverlay Design System — tokens for quick access redesign */
+:root {
+  /* ── Semantic aliases (required by apply-html-head-contract.mjs) ── */
+  --background: #0a0e15;
+  --foreground: #e6edf3;
+  --card: #141923;
+  --card-foreground: #e6edf3;
+  --popover: #1f2632;
+  --popover-foreground: #e6edf3;
+  --primary: #58a6ff;
+  --primary-foreground: #061014;
+  --muted: #1a1f2b;
+  --muted-foreground: #9aa7b4;
+  --border: rgba(255,255,255,0.10);
+  --input: #111820;
+  --ring: #58a6ff;
+  --destructive: #ff7b72;
+  --destructive-foreground: #061014;
+  --secondary: #1a1f2b;
+  --secondary-foreground: #9aa7b4;
+  --accent: #39c5cf;
+  --accent-foreground: #061014;
+
+  /* ── Radius scale ── */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-xl: 18px;
+  --radius-full: 9999px;
+
+  /* ── DeskOverlay extended tokens ── */
+  --bg-base: #0a0e15;
+  --bg-panel: #141923;
+  --bg-panel-2: #161b24;
+  --bg-elevated: #1f2632;
+  --bg-input: #111820;
+  --bg-hover: rgba(255,255,255,0.06);
+  --bg-hover-strong: rgba(255,255,255,0.10);
+
+  --border-strong: rgba(255,255,255,0.18);
+  --border-input: #2a3340;
+
+  --text: #e6edf3;
+  --text-dim: #9aa7b4;
+  --text-faint: #5b6675;
+  --text-invert: #061014;
+
+  --blue: #58a6ff;
+  --blue-rgb: 88,166,255;
+  --green: #3fb950;
+  --green-rgb: 63,185,80;
+  --amber: #d29922;
+  --amber-rgb: 210,153,34;
+  --danger: #ff7b72;
+  --danger-rgb: 255,123,114;
+  --purple: #bc8cff;
+  --purple-rgb: 188,140,255;
+  --cyan: #39c5cf;
+
+  --success: #3fb950;
+  --warning: #d29922;
+  --error: #ff7b72;
+  --tomato: #ff7b72;
+
+  /* Typography */
+  --text-xs: 10px;
+  --text-sm: 11px;
+  --text-base: 13px;
+  --text-md: 14px;
+  --text-lg: 18px;
+  --text-xl: 22px;
+  --text-display: 48px;
+  --lh-tight: 1.2;
+  --lh-normal: 1.5;
+  --lh-loose: 1.7;
+  --fw-regular: 400;
+  --fw-medium: 500;
+  --fw-semibold: 600;
+  --fw-bold: 700;
+
+  /* Spacing (4px base) */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+
+  /* Shadows */
+  --shadow-xs: 0 1px 3px rgba(0,0,0,0.25);
+  --shadow-sm: 0 4px 14px rgba(0,0,0,0.3);
+  --shadow-soft: 0 8px 24px rgba(0,0,0,0.35);
+  --shadow: 0 18px 50px rgba(0,0,0,0.45);
+  --shadow-lg: 0 30px 80px rgba(0,0,0,0.6);
+
+  /* Motion */
+  --t-fast: 120ms ease;
+  --t: 180ms cubic-bezier(0.22,0.61,0.36,1);
+  --t-slow: 260ms ease;
+
+  /* Layout */
+  --nav-w: 240px;
+  --font: "Segoe UI Variable", "Segoe UI", "Microsoft YaHei", "PingFang SC", Inter, system-ui, sans-serif;
+  --font-mono: "Cascadia Mono", "JetBrains Mono", Consolas, monospace;
+
+  /* Chart tokens */
+  --chart-1: #58a6ff;
+  --chart-2: #3fb950;
+  --chart-3: #d29922;
+  --chart-4: #bc8cff;
+  --chart-5: #ff7b72;
+}
+
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.3.1/dist/index.global.js"></script>
+    <script src="https://unpkg.com/lucide@1.8.0/dist/umd/lucide.min.js"></script>
+    <style type="text/tailwindcss">
+  @theme inline {
+    --color-background: var(--background);
+    --color-foreground: var(--foreground);
+    --color-card: var(--card);
+    --color-card-foreground: var(--card-foreground);
+    --color-popover: var(--popover);
+    --color-popover-foreground: var(--popover-foreground);
+    --color-primary: var(--primary);
+    --color-primary-foreground: var(--primary-foreground);
+    --color-secondary: var(--secondary);
+    --color-secondary-foreground: var(--secondary-foreground);
+    --color-muted: var(--muted);
+    --color-muted-foreground: var(--muted-foreground);
+    --color-accent: var(--accent);
+    --color-accent-foreground: var(--accent-foreground);
+    --color-destructive: var(--destructive);
+    --color-destructive-foreground: var(--destructive-foreground);
+    --color-border: var(--border);
+    --color-input: var(--input);
+    --color-ring: var(--ring);
+    --color-chart-1: var(--chart-1);
+    --color-chart-2: var(--chart-2);
+    --color-chart-3: var(--chart-3);
+    --color-chart-4: var(--chart-4);
+    --color-chart-5: var(--chart-5);
+    --radius-sm: var(--radius-sm);
+    --radius-md: var(--radius-md);
+    --radius-lg: var(--radius-lg);
+    --radius-xl: var(--radius-xl);
+  }
+  @layer base {
+    body { background: var(--background); color: var(--foreground); }
+    td, th { @apply break-words; word-break: break-all; word-break: auto-phrase; }
+    th { @apply whitespace-nowrap; }
+  }
+    </style>
+    <style id="semantic-token-fallback">
+      .bg-background { background-color: var(--background); }
+      .text-background { color: var(--background); }
+      .border-background { border-color: var(--background); }
+      .ring-background { --tw-ring-color: var(--background); }
+      .bg-foreground { background-color: var(--foreground); }
+      .text-foreground { color: var(--foreground); }
+      .border-foreground { border-color: var(--foreground); }
+      .ring-foreground { --tw-ring-color: var(--foreground); }
+      .bg-card { background-color: var(--card); }
+      .text-card { color: var(--card); }
+      .border-card { border-color: var(--card); }
+      .ring-card { --tw-ring-color: var(--card); }
+      .bg-card-foreground { background-color: var(--card-foreground); }
+      .text-card-foreground { color: var(--card-foreground); }
+      .border-card-foreground { border-color: var(--card-foreground); }
+      .ring-card-foreground { --tw-ring-color: var(--card-foreground); }
+      .bg-popover { background-color: var(--popover); }
+      .text-popover { color: var(--popover); }
+      .border-popover { border-color: var(--popover); }
+      .ring-popover { --tw-ring-color: var(--popover); }
+      .bg-popover-foreground { background-color: var(--popover-foreground); }
+      .text-popover-foreground { color: var(--popover-foreground); }
+      .border-popover-foreground { border-color: var(--popover-foreground); }
+      .ring-popover-foreground { --tw-ring-color: var(--popover-foreground); }
+      .bg-primary { background-color: var(--primary); }
+      .text-primary { color: var(--primary); }
+      .border-primary { border-color: var(--primary); }
+      .ring-primary { --tw-ring-color: var(--primary); }
+      .bg-primary-foreground { background-color: var(--primary-foreground); }
+      .text-primary-foreground { color: var(--primary-foreground); }
+      .border-primary-foreground { border-color: var(--primary-foreground); }
+      .ring-primary-foreground { --tw-ring-color: var(--primary-foreground); }
+      .bg-secondary { background-color: var(--secondary); }
+      .text-secondary { color: var(--secondary); }
+      .border-secondary { border-color: var(--secondary); }
+      .ring-secondary { --tw-ring-color: var(--secondary); }
+      .bg-secondary-foreground { background-color: var(--secondary-foreground); }
+      .text-secondary-foreground { color: var(--secondary-foreground); }
+      .border-secondary-foreground { border-color: var(--secondary-foreground); }
+      .ring-secondary-foreground { --tw-ring-color: var(--secondary-foreground); }
+      .bg-muted { background-color: var(--muted); }
+      .text-muted { color: var(--muted); }
+      .border-muted { border-color: var(--muted); }
+      .ring-muted { --tw-ring-color: var(--muted); }
+      .bg-muted-foreground { background-color: var(--muted-foreground); }
+      .text-muted-foreground { color: var(--muted-foreground); }
+      .border-muted-foreground { border-color: var(--muted-foreground); }
+      .ring-muted-foreground { --tw-ring-color: var(--muted-foreground); }
+      .bg-accent { background-color: var(--accent); }
+      .text-accent { color: var(--accent); }
+      .border-accent { border-color: var(--accent); }
+      .ring-accent { --tw-ring-color: var(--accent); }
+      .bg-accent-foreground { background-color: var(--accent-foreground); }
+      .text-accent-foreground { color: var(--accent-foreground); }
+      .border-accent-foreground { border-color: var(--accent-foreground); }
+      .ring-accent-foreground { --tw-ring-color: var(--accent-foreground); }
+      .bg-destructive { background-color: var(--destructive); }
+      .text-destructive { color: var(--destructive); }
+      .border-destructive { border-color: var(--destructive); }
+      .ring-destructive { --tw-ring-color: var(--destructive); }
+      .bg-destructive-foreground { background-color: var(--destructive-foreground); }
+      .text-destructive-foreground { color: var(--destructive-foreground); }
+      .border-destructive-foreground { border-color: var(--destructive-foreground); }
+      .ring-destructive-foreground { --tw-ring-color: var(--destructive-foreground); }
+      .bg-border { background-color: var(--border); }
+      .text-border { color: var(--border); }
+      .border-border { border-color: var(--border); }
+      .ring-border { --tw-ring-color: var(--border); }
+      .bg-input { background-color: var(--input); }
+      .text-input { color: var(--input); }
+      .border-input { border-color: var(--input); }
+      .ring-input { --tw-ring-color: var(--input); }
+      .bg-ring { background-color: var(--ring); }
+      .text-ring { color: var(--ring); }
+      .border-ring { border-color: var(--ring); }
+      .ring-ring { --tw-ring-color: var(--ring); }
+      .bg-chart-1 { background-color: var(--chart-1); }
+      .text-chart-1 { color: var(--chart-1); }
+      .border-chart-1 { border-color: var(--chart-1); }
+      .ring-chart-1 { --tw-ring-color: var(--chart-1); }
+      .bg-chart-2 { background-color: var(--chart-2); }
+      .text-chart-2 { color: var(--chart-2); }
+      .border-chart-2 { border-color: var(--chart-2); }
+      .ring-chart-2 { --tw-ring-color: var(--chart-2); }
+      .bg-chart-3 { background-color: var(--chart-3); }
+      .text-chart-3 { color: var(--chart-3); }
+      .border-chart-3 { border-color: var(--chart-3); }
+      .ring-chart-3 { --tw-ring-color: var(--chart-3); }
+      .bg-chart-4 { background-color: var(--chart-4); }
+      .text-chart-4 { color: var(--chart-4); }
+      .border-chart-4 { border-color: var(--chart-4); }
+      .ring-chart-4 { --tw-ring-color: var(--chart-4); }
+      .bg-chart-5 { background-color: var(--chart-5); }
+      .text-chart-5 { color: var(--chart-5); }
+      .border-chart-5 { border-color: var(--chart-5); }
+      .ring-chart-5 { --tw-ring-color: var(--chart-5); }
+    </style>
+    <style>
+      .no-scrollbar::-webkit-scrollbar { display: none; }
+      .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+      [data-icon] {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        -webkit-mask-size: contain;
+        mask-size: contain;
+        -webkit-mask-repeat: no-repeat;
+        mask-repeat: no-repeat;
+        -webkit-mask-position: center;
+        mask-position: center;
+        background-color: currentColor;
+      }
+    </style>
+</head>
+<body class="min-h-screen font-sans antialiased">
+    <main>
+    </main>
+    <script>lucide.createIcons();</script>
+</body>
+</html>

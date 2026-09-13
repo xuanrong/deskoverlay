@@ -26,8 +26,12 @@ const PLANETS = [
 const STARS = 260;
 let stars = [];
 
+// 预计算渐变缓存（resize 时重建，避免每帧 createRadialGradient）
+let planetGrads = [];
+let planetRadii = [];
+
 function resize() {
-  dpr = Math.max(1, window.devicePixelRatio || 1);
+  dpr = Math.min(1.5, Math.max(1, window.devicePixelRatio || 1));
   W = window.innerWidth;
   H = window.innerHeight;
   canvas.width = Math.round(W * dpr);
@@ -37,6 +41,7 @@ function resize() {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   cx = W / 2;
   cy = H / 2;
+
   stars = [];
   for (let i = 0; i < STARS; i++) {
     stars.push({
@@ -48,36 +53,49 @@ function resize() {
       ph: Math.random() * Math.PI * 2,
     });
   }
+
+  // 预计算行星渐变（以 (0,0) 为球心，绘制时 translate 到实际位置）
+  planetGrads = [];
+  planetRadii = [];
+  const min = Math.min(W, H);
+  for (const p of PLANETS) {
+    const rad = p.r * min;
+    planetRadii.push(rad);
+    const g = ctx.createRadialGradient(-rad * 0.35, -rad * 0.35, rad * 0.1, 0, 0, rad);
+    g.addColorStop(0, p.colors[0]);
+    g.addColorStop(0.55, p.colors[1]);
+    g.addColorStop(1, p.colors[2]);
+    planetGrads.push(g);
+  }
 }
 
-function drawCircle(x, y, radius, stops) {
-  const g = ctx.createRadialGradient(x - radius * 0.35, y - radius * 0.35, radius * 0.1, x, y, radius);
-  g.addColorStop(0, stops[0]);
-  g.addColorStop(0.55, stops[1]);
-  g.addColorStop(1, stops[2]);
+function drawPlanet(idx, x, y) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.fillStyle = planetGrads[idx];
   ctx.beginPath();
-  ctx.arc(x, y, radius, 0, Math.PI * 2);
-  ctx.fillStyle = g;
+  ctx.arc(0, 0, planetRadii[idx], 0, Math.PI * 2);
   ctx.fill();
+  ctx.restore();
 }
 
 function frame(now) {
   const t = now / 1000;
+  const min = Math.min(W, H);
   ctx.clearRect(0, 0, W, H);
 
-  // 背景闪烁星星
+  // 背景闪烁星星 — fillRect 替代 arc，tiny dot 肉眼无区别但更快
+  ctx.fillStyle = "#fff";
   for (const s of stars) {
     const a = s.base + Math.sin(t * s.tw + s.ph) * 0.35;
     ctx.globalAlpha = Math.max(0, Math.min(1, a));
-    ctx.fillStyle = "#fff";
-    ctx.beginPath();
-    ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
-    ctx.fill();
+    const sz = s.r * 2;
+    ctx.fillRect(s.x - s.r, s.y - s.r, sz, sz);
   }
   ctx.globalAlpha = 1;
 
   // 星系核心辉光（柔和的暖色光晕，太阳 DOM 会叠在其上）
-  const coreR = 0.13 * Math.min(W, H);
+  const coreR = 0.13 * min;
   const core = ctx.createRadialGradient(cx, cy, 0, cx, cy, coreR);
   core.addColorStop(0, "rgba(255,215,150,0.35)");
   core.addColorStop(0.5, "rgba(255,170,110,0.12)");
@@ -92,16 +110,18 @@ function frame(now) {
   for (const p of PLANETS) {
     ctx.strokeStyle = "rgba(255,255,255,0.10)";
     ctx.beginPath();
-    ctx.ellipse(cx, cy, p.rx * Math.min(W, H), p.ry * Math.min(W, H), 0, 0, Math.PI * 2);
+    ctx.ellipse(cx, cy, p.rx * min, p.ry * min, 0, 0, Math.PI * 2);
     ctx.stroke();
   }
 
   // 画行星（土星先画光环在背后）
   ctx.save();
-  for (const p of PLANETS) {
-    const x = cx + Math.cos(p.a0) * p.rx * Math.min(W, H);
-    const y = cy + Math.sin(p.a0) * p.ry * Math.min(W, H);
-    const rad = p.r * Math.min(W, H);
+  for (let idx = 0; idx < PLANETS.length; idx++) {
+    const p = PLANETS[idx];
+    const x = cx + Math.cos(p.a0) * p.rx * min;
+    const y = cy + Math.sin(p.a0) * p.ry * min;
+    const rad = planetRadii[idx];
+
     if (p.ring) {
       ctx.save();
       ctx.translate(x, y);
@@ -118,7 +138,9 @@ function frame(now) {
       ctx.stroke();
       ctx.restore();
     }
-    drawCircle(x, y, rad, p.colors);
+
+    drawPlanet(idx, x, y);
+
     // 自转痕迹：极淡的横向条纹让球看起来在转
     ctx.save();
     ctx.translate(x, y);
@@ -140,10 +162,19 @@ function frame(now) {
   requestAnimationFrame(frame);
 }
 
+// 解锁：请求后端销毁系统级锁屏窗口。
+// 必须重试——这是全屏置顶窗口，invoke 静默失败会让用户卡在锁屏页无法退出，只能杀进程。
+// 拆成两层是为了让 unlock 保持无参：它被当作 click 监听器直接使用（见文件末尾），
+// 若把 retry 直接做成 unlock 的形参，Event 对象会被当成 retry 传入导致重试判断失效。
+function hideLockWin(retry) {
+  if (!(TAURI && TAURI.core && typeof TAURI.core.invoke === "function")) return;
+  TAURI.core.invoke("hide_lock").catch(() => {
+    if (retry > 0) setTimeout(() => hideLockWin(retry - 1), 300);
+  });
+}
+
 function unlock() {
-  if (TAURI && TAURI.core && typeof TAURI.core.invoke === "function") {
-    TAURI.core.invoke("hide_lock").catch(() => {});
-  }
+  hideLockWin(2);
 }
 
 sunBtn.addEventListener("click", unlock);

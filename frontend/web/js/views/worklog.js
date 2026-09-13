@@ -1,8 +1,9 @@
 // 工作记录视图 · 方案 B（双栏总览工作台）：
-// 左栏 = 类型筛选 / 类型分布 / 周历热力；右栏 = 快捷录入 + 按天分组的时刻列时间线。
-// 数据模型沿用 state.workLogs: { id, date:"YYYY-MM-DD", time:"HH:MM", text, type, tags }
+// 左栏 = 类型筛选 / 类型分布 / 周历热力；右栏 = 快捷录入 + 按天分组的时间线。
+// 记录粒度只到「日期」，不含时分；历史数据遗留的 time 字段保留但不再展示/录入。
+// 数据模型沿用 state.workLogs: { id, date:"YYYY-MM-DD", text, type, tags }
 import { state, saveState } from "../state.js";
-import { esc, insertBreak, fitTextarea } from "./common.js";
+import { esc, fitTextarea } from "./common.js";
 import { createDatePicker } from "../datepicker.js";
 import { createSelect } from "../selectbox.js";
 
@@ -26,12 +27,6 @@ const PILL_CLASS = { 工作: "wb-pill-work", 会议: "wb-pill-meet", 学习: "wb
 function todayStr() {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
-
-// 当前时刻 HH:MM（本地）
-function nowTime() {
-  const d = new Date();
-  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
 function toDate(str) {
@@ -110,7 +105,7 @@ function heatCells() {
   return cells;
 }
 
-// 按日期分组（最近在前）；同日内按时刻升序（无时刻的排末尾）
+// 按日期分组（最近在前）；同日内保持录入顺序（粒度到天，不再按时分排序）
 function groupByDay(list) {
   const map = new Map();
   for (const log of list) {
@@ -118,12 +113,7 @@ function groupByDay(list) {
     if (!map.has(date)) map.set(date, []);
     map.get(date).push(log);
   }
-  return [...map.entries()]
-    .sort((a, b) => (a[0] < b[0] ? 1 : -1))
-    .map(([date, items]) => [
-      date,
-      items.slice().sort((x, y) => (x.time || "99:99").localeCompare(y.time || "99:99")),
-    ]);
+  return [...map.entries()].sort((a, b) => (a[0] < b[0] ? 1 : -1));
 }
 
 // ---------- 区块模板 ----------
@@ -189,14 +179,11 @@ function heatCardHTML() {
     </section>`;
 }
 
-// 单条时间线条目（方案 B：左侧等宽时刻列 + 类型胶囊 + 紫色标签）
+// 单条时间线条目（类型胶囊 + 紫色标签；记录粒度到天，无时刻列）
 function logItem(log) {
-  const tc = TYPE_CLASS[log.type] || "other";
   const pill = PILL_CLASS[log.type] || "wb-pill-other";
-  const tm = log.time || "--:--";
   return `
     <div class="wb-it" data-id="${esc(log.id)}">
-      <div class="wb-it-tm">${esc(tm)}</div>
       <div class="wb-it-body">
         <div class="wb-it-text">${esc(log.text)}</div>
         <div class="wb-it-meta">
@@ -239,7 +226,7 @@ export function renderWorkLog(view) {
       <section class="wb-main">
         <div class="wb-card wb-entry">
           <div class="wb-entry-top">
-            <textarea id="wb-text" rows="1" placeholder="记一条：今天完成了什么？（回车记录 · Ctrl+Enter 换行）"></textarea>
+            <textarea id="wb-text" rows="1" placeholder="记一条：今天完成了什么？"></textarea>
             <button class="btn-primary" id="wb-add">＋ 记录</button>
           </div>
           <div class="wb-entry-foot">
@@ -322,7 +309,6 @@ export function renderWorkLog(view) {
     state.workLogs.push({
       id: "wl" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
       date: dateVal(),
-      time: nowTime(),
       type: curType,
       text,
       tags: [],
@@ -341,15 +327,19 @@ export function renderWorkLog(view) {
     paintTypeChips();
   }));
 
-  // 回车 = 记录；Ctrl/Cmd+回车 = 换行；Shift+回车保留默认换行（与灵感碎片随手记一致）
+  // 回车 = 换行（默认行为）；Ctrl/Cmd+回车 = 记录（与灵感碎片随手记一致）
   textEl.addEventListener("keydown", (e) => {
     if (e.isComposing || e.key !== "Enter") return;
-    if (e.ctrlKey || e.metaKey) { e.preventDefault(); insertBreak(textEl); fitTextarea(textEl, INPUT_MAX_H); }
-    else if (!e.shiftKey) { e.preventDefault(); addBtn.click(); }
+    if (e.ctrlKey || e.metaKey) {
+      e.preventDefault();
+      addBtn.click();
+      fitTextarea(textEl, INPUT_MAX_H);
+    }
+    // 其余情况（含 Shift+回车）执行默认换行
   });
   textEl.addEventListener("input", () => fitTextarea(textEl, INPUT_MAX_H));
 
-  // 编辑弹窗：内容 / 日期 / 时间 / 类型 / 标签
+  // 编辑弹窗：内容 / 日期 / 类型 / 标签（粒度到天，无时分）
   function editLog(id, onDone) {
     const log = (state.workLogs || []).find((w) => w.id === id);
     if (!log) return;
@@ -359,10 +349,7 @@ export function renderWorkLog(view) {
       <div class="task-modal wl-edit-modal">
         <h3>编辑记录</h3>
         <div class="tm-field"><label>内容</label><textarea id="wl-e-text" rows="6">${esc(log.text)}</textarea></div>
-        <div class="tm-row">
-          <div class="tm-field"><label>日期</label><div id="wl-e-date"></div></div>
-          <div class="tm-field"><label>时间</label><input id="wl-e-time" type="time" value="${esc(log.time || "")}" /></div>
-        </div>
+        <div class="tm-field"><label>日期</label><div id="wl-e-date"></div></div>
         <div class="tm-row">
           <div class="tm-field"><label>类型</label><div id="wl-e-type"></div></div>
           <div class="tm-field"><label>标签（逗号分隔）</label><input id="wl-e-tags" type="text" value="${esc((log.tags || []).join(","))}" /></div>
@@ -381,8 +368,6 @@ export function renderWorkLog(view) {
       if (!text) return;
       log.text = text;
       log.date = ov.querySelector("#wl-e-date").value || log.date;
-      const t = ov.querySelector("#wl-e-time").value;
-      log.time = t || "";
       log.type = ov.querySelector("#wl-e-type").value;
       log.tags = ov.querySelector("#wl-e-tags").value.split(",").map((s) => s.trim()).filter(Boolean);
       saveState();

@@ -1,0 +1,878 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>我的速记 — DeskOverlay</title>
+  <style id="theme-vars">
+    /* TraeCode Design Library — tokens inlined (read-only reference) */
+    :root {
+      --radius-2: 2px; --radius-4: 4px; --radius-6: 6px; --radius-8: 8px; --radius-10: 10px; --radius-full: 9999px;
+      --spacer-0: 0px; --spacer-4: 4px; --spacer-6: 6px; --spacer-8: 8px; --spacer-12: 12px; --spacer-16: 16px; --spacer-24: 24px; --spacer-32: 32px; --spacer-40: 40px;
+      --font-family-default: "SF Pro Text", system-ui, -apple-system, sans-serif;
+      --font-family-heading: "SF Pro", system-ui, -apple-system, sans-serif;
+      --font-family-mono: "JetBrains Mono", system-ui, -apple-system, sans-serif;
+      --font-weight-default: 400; --font-weight-code: 450; --font-weight-medium: 500; --font-weight-strong: 600;
+      --body-xs-font-size: 10px; --body-xs-line-height: 14px;
+      --body-sm-font-size: 11px; --body-sm-line-height: 16px;
+      --body-md-font-size: 12px; --body-md-line-height: 18px;
+      --body-base-font-size: 13px; --body-base-line-height: 20px;
+      --heading-3xs-font-size: 11px; --heading-3xs-line-height: 16px;
+      --heading-2xs-font-size: 12px; --heading-2xs-line-height: 18px;
+      --heading-xs-font-size: 13px; --heading-xs-line-height: 20px;
+      --heading-sm-font-size: 16px; --heading-sm-line-height: 24px;
+      --bg-base-default: #1A1B1D; --bg-base-secondary: #222427; --bg-base-tertiary: #2A2D31;
+      --bg-overlay-l1: rgba(224,226,242,0.04); --bg-overlay-l2: rgba(224,226,242,0.06); --bg-overlay-l3: rgba(224,226,242,0.08); --bg-overlay-l4: rgba(224,226,242,0.12);
+      --bg-menu: #202123; --bg-tooltip: #1A1B1D; --bg-invert: #DADDE5; --bg-invert-hover: #EDEFF2; --bg-invert-active: #979AA4; --bg-invert-disabled: rgba(224,226,242,0.12);
+      --bg-brand: #32F08C; --bg-brand-hover: #0FDC78; --bg-brand-disabled: rgba(50,240,140,0.2); --bg-brand-popup: rgba(50,240,140,0.12);
+      --text-default: #D1D3DB; --text-default-hover: #F5F9FE; --text-default-active: #F5F9FE;
+      --text-secondary: #9599A6; --text-secondary-hover: #D1D3DB; --text-secondary-active: #D1D3DB;
+      --text-tertiary: #666B75; --text-disabled: #666B75; --text-onbrand: #0C0C0D; --text-onaccent: #0C0C0D;
+      --text-brand: #32F08C; --text-brand-hover: #0FDC78;
+      --icon-default: #D1D3DB; --icon-default-hover: #F5F9FE; --icon-default-active: #F5F9FE;
+      --icon-secondary: #9599A6; --icon-secondary-hover: #D1D3DB; --icon-secondary-active: #D1D3DB;
+      --icon-tertiary: #666B75; --icon-disabled: #666B75; --icon-onbrand: #0C0C0D; --icon-onaccent: #0C0C0D;
+      --icon-brand: #32F08C; --icon-brand-hover: #0FDC78;
+      --border-neutral-l1: rgba(224,226,242,0.1); --border-neutral-l2: rgba(224,226,242,0.16); --border-neutral-l3: rgba(224,226,242,0.2);
+      --border-contrast: #FFFFFF; --border-brand: #32F08C;
+      --status-primary-default: #387BFF; --status-primary-hover: #4C88FF; --status-primary-active: #1759DD;
+      --status-primary-surface-l1: rgba(53,121,255,0.18); --status-primary-surface-l2: rgba(53,121,255,0.28);
+      --status-success-default: #33C192; --status-success-hover: #5ED4AD; --status-success-active: #27B082;
+      --status-success-surface-l1: rgba(0,165,110,0.18);
+      --status-alert-default: #D29D00; --status-alert-hover: #DFB949; --status-alert-active: #AB8820;
+      --status-alert-surface-l1: rgba(210,157,0,0.16);
+      --status-warning-default: #D27E24; --status-warning-hover: #D78B28; --status-warning-active: #B46510;
+      --status-warning-surface-l1: rgba(210,126,36,0.16);
+      --status-error-default: #F65A5A; --status-error-hover: #F86262; --status-error-active: #B33636;
+      --status-error-surface-l1: rgba(246,70,70,0.18);
+      --accent-teal: #2DD288; --accent-coral: #FF9392; --accent-amber: #DCB364; --accent-lime: #8ACB3A;
+      --accent-cyan: #04CBE5; --accent-blue: #7BB8FF; --accent-magenta: #EC93FF; --accent-violet: #BFA5FF; --accent-slate: #AFB9CF;
+      --special-white: #FFFFFF; --special-black: #000000;
+      --color-background: var(--bg-base-default);
+      --color-foreground: var(--text-default);
+      --color-card: var(--bg-base-secondary);
+      --color-primary: var(--bg-brand);
+      --color-primary-hover: var(--bg-brand-hover);
+      --color-primary-soft: var(--bg-brand-popup);
+      --color-border: var(--border-neutral-l1);
+      --color-muted: var(--bg-overlay-l2);
+      --color-muted-foreground: var(--text-secondary);
+      --color-surface: var(--bg-base-secondary);
+      --color-surface-variant: var(--bg-base-tertiary);
+      --color-on-primary: var(--text-onbrand);
+      --color-error: var(--status-error-default);
+      --color-error-soft: var(--status-error-surface-l1);
+      --color-success: var(--status-success-default);
+      --color-warning: var(--status-warning-default);
+      --color-info: var(--status-primary-default);
+    }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.3.1/dist/index.global.js"></script>
+  <style type="text/tailwindcss">
+    @theme inline {
+      --color-background: var(--bg-base-default);
+      --color-foreground: var(--text-default);
+      --color-card: var(--bg-base-secondary);
+      --color-primary: var(--bg-brand);
+      --color-primary-hover: var(--bg-brand-hover);
+      --color-border: var(--border-neutral-l1);
+      --color-muted: var(--bg-overlay-l2);
+      --color-muted-foreground: var(--text-secondary);
+      --color-surface: var(--bg-base-secondary);
+      --color-on-primary: var(--text-onbrand);
+      --color-error: var(--status-error-default);
+      --color-success: var(--status-success-default);
+      --color-warning: var(--status-warning-default);
+      --color-info: var(--status-primary-default);
+      --radius-sm: var(--radius-4);
+      --radius-md: var(--radius-6);
+      --radius-lg: var(--radius-8);
+      --radius-xl: var(--radius-10);
+    }
+    @layer base {
+      body { background: var(--bg-base-default); color: var(--text-default); }
+    }
+  </style>
+  <style id="semantic-token-fallback">
+    .bg-background { background-color: var(--bg-base-default); }
+    .text-foreground { color: var(--text-default); }
+    .bg-card { background-color: var(--bg-base-secondary); }
+    .text-card-foreground { color: var(--text-default); }
+    .bg-primary { background-color: var(--bg-brand); }
+    .text-primary { color: var(--bg-brand); }
+    .text-primary-foreground { color: var(--text-onbrand); }
+    .border-border { border-color: var(--border-neutral-l1); }
+    .bg-muted { background-color: var(--bg-overlay-l2); }
+    .text-muted-foreground { color: var(--text-secondary); }
+    .bg-surface { background-color: var(--bg-base-secondary); }
+    .text-on-primary { color: var(--text-onbrand); }
+  </style>
+
+  <!-- ───────── Layout-critical CSS (page stands without Tailwind) ───────── -->
+  <style id="critical-layout">
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+    body {
+      font-family: var(--font-family-default);
+      font-size: var(--body-base-font-size);
+      line-height: var(--body-base-line-height);
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
+    }
+
+    .desktop-sim {
+      min-height: 100vh;
+      background:
+        radial-gradient(ellipse at 20% 0%, rgba(50,240,140,0.04) 0%, transparent 50%),
+        radial-gradient(ellipse at 80% 100%, rgba(56,123,255,0.03) 0%, transparent 50%),
+        linear-gradient(160deg, #161719 0%, #1A1B1D 40%, #1E1F22 100%);
+      display: flex; flex-direction: column;
+      align-items: center;
+      padding: var(--spacer-40) var(--spacer-24) var(--spacer-40);
+      gap: var(--spacer-24);
+    }
+
+    .page-header { text-align: center; }
+    .page-header h1 {
+      font-family: var(--font-family-heading);
+      font-size: 20px; font-weight: 600; line-height: 24px;
+      color: var(--text-default); letter-spacing: -0.2px;
+    }
+    .page-header p {
+      font-size: var(--body-sm-font-size); line-height: var(--body-sm-line-height);
+      color: var(--text-secondary); margin-top: var(--spacer-6);
+    }
+
+    .showcase { display: flex; flex-direction: column; align-items: center; gap: var(--spacer-12); width: 960px; }
+    .showcase-label {
+      font-size: var(--body-xs-font-size); font-weight: 600;
+      color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.1em;
+    }
+
+    /* ═══ Notes window — main container ═══ */
+    .notes-window {
+      width: 960px;
+      height: 600px;
+      display: flex; flex-direction: column;
+      overflow: hidden;
+      border-radius: var(--radius-10);
+      background: var(--bg-base-secondary);
+      border: 1px solid var(--border-neutral-l2);
+      box-shadow: 0 2px 8px rgba(0,0,0,0.2), 0 12px 40px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.04);
+    }
+
+    /* Top bar */
+    .notes-topbar {
+      flex: 0 0 auto;
+      height: 52px;
+      display: flex; align-items: center; gap: var(--spacer-12);
+      padding: 0 var(--spacer-16);
+      border-bottom: 1px solid var(--border-neutral-l1);
+      background: var(--bg-base-secondary);
+    }
+    .notes-topbar-title {
+      font-size: 15px; font-weight: 600; color: var(--text-default);
+      display: flex; align-items: center; gap: var(--spacer-8);
+      white-space: nowrap;
+    }
+    .notes-topbar-title .count {
+      font-size: var(--body-xs-font-size); font-weight: 500; color: var(--text-tertiary);
+      background: var(--bg-overlay-l2); padding: 2px 6px; border-radius: var(--radius-4);
+    }
+    .notes-topbar .spacer { flex: 1 1 auto; }
+
+    /* Body: sidebar + main */
+    .notes-body { flex: 1 1 auto; display: flex; min-height: 0; }
+
+    /* Sidebar */
+    .notes-sidebar {
+      flex: 0 0 240px;
+      width: 240px;
+      display: flex; flex-direction: column;
+      border-right: 1px solid var(--border-neutral-l1);
+      background: var(--bg-base-secondary);
+      overflow: hidden;
+    }
+    .sidebar-scroll { flex: 1 1 auto; overflow-y: auto; padding: var(--spacer-12) var(--spacer-8); }
+
+    /* Main editor region */
+    .notes-main {
+      flex: 1 1 auto; min-width: 0;
+      display: flex; flex-direction: column;
+      background: var(--bg-base-default);
+    }
+
+    /* Editor toolbar */
+    .editor-toolbar {
+      flex: 0 0 auto;
+      display: flex; align-items: center; gap: var(--spacer-8);
+      padding: var(--spacer-12) var(--spacer-16);
+      border-bottom: 1px solid var(--border-neutral-l1);
+    }
+    .editor-toolbar .spacer { flex: 1 1 auto; }
+
+    /* Live preview editor */
+    .live-editor {
+      flex: 1 1 auto; min-height: 0;
+      overflow-y: auto;
+      padding: var(--spacer-24) var(--spacer-32);
+      font-size: 14px;
+      line-height: 1.8;
+      color: var(--text-default);
+      cursor: text;
+    }
+
+    /* Status bar */
+    .status-bar {
+      flex: 0 0 auto;
+      height: 30px;
+      display: flex; align-items: center; gap: var(--spacer-12);
+      padding: 0 var(--spacer-16);
+      border-top: 1px solid var(--border-neutral-l1);
+      background: var(--bg-base-secondary);
+      font-size: var(--body-xs-font-size);
+    }
+    .status-bar .spacer { flex: 1 1 auto; }
+
+    /* Empty state card */
+    .empty-card {
+      width: 360px;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: var(--spacer-12);
+      padding: var(--spacer-32) var(--spacer-24);
+      border-radius: var(--radius-10);
+      background: var(--bg-base-secondary);
+      border: 1px solid var(--border-neutral-l2);
+      box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+    }
+  </style>
+
+  <!-- ───────── Component visual styling ───────── -->
+  <style>
+    /* Scrollbar */
+    .sidebar-scroll::-webkit-scrollbar,
+    .live-editor::-webkit-scrollbar { width: 8px; height: 8px; }
+    .sidebar-scroll::-webkit-scrollbar-track,
+    .live-editor::-webkit-scrollbar-track { background: var(--bg-base-secondary); }
+    .sidebar-scroll::-webkit-scrollbar-thumb,
+    .live-editor::-webkit-scrollbar-thumb {
+      background: var(--bg-base-tertiary); border-radius: var(--radius-full);
+      border: 2px solid var(--bg-base-secondary);
+    }
+    .sidebar-scroll::-webkit-scrollbar-thumb:hover,
+    .live-editor::-webkit-scrollbar-thumb:hover { background: var(--text-tertiary); }
+
+    /* ═══ Search box ═══ */
+    .search-box {
+      position: relative;
+      display: flex; align-items: center;
+      height: 32px; width: 220px;
+      background: var(--bg-base-tertiary);
+      border: 1px solid var(--border-neutral-l1);
+      border-radius: var(--radius-6);
+      transition: border-color 120ms ease, box-shadow 120ms ease;
+    }
+    .search-box:focus-within {
+      border-color: var(--border-brand);
+      box-shadow: 0 0 0 3px var(--bg-brand-popup);
+    }
+    .search-box .search-icon {
+      position: absolute; left: 8px;
+      display: flex; color: var(--text-tertiary);
+    }
+    .search-box .search-icon svg { width: 14px; height: 14px; display: block; }
+    .search-box input {
+      flex: 1; height: 100%;
+      background: transparent; border: none; outline: none;
+      padding: 0 var(--spacer-8) 0 30px;
+      color: var(--text-default);
+      font-size: var(--body-md-font-size);
+      font-family: var(--font-family-default);
+    }
+    .search-box input::placeholder { color: var(--text-tertiary); }
+    .search-kbd {
+      position: absolute; right: 6px;
+      font-size: 10px; color: var(--text-tertiary);
+      background: var(--bg-overlay-l3); border: 1px solid var(--border-neutral-l1);
+      border-radius: var(--radius-4); padding: 1px 5px;
+      font-family: var(--font-family-mono);
+    }
+
+    /* ═══ New button ═══ */
+    .new-btn {
+      flex: 0 0 auto;
+      height: 32px;
+      display: inline-flex; align-items: center; gap: var(--spacer-6);
+      padding: 0 var(--spacer-12);
+      background: var(--bg-brand);
+      color: var(--text-onbrand);
+      border: none;
+      border-radius: var(--radius-6);
+      font-size: var(--body-md-font-size); font-weight: 600;
+      cursor: pointer;
+      transition: background 120ms ease, transform 80ms ease;
+    }
+    .new-btn:hover { background: var(--bg-brand-hover); }
+    .new-btn:active { transform: scale(0.97); }
+    .new-btn svg { width: 14px; height: 14px; }
+
+    /* ═══ Sidebar groups ═══ */
+    .group { margin-bottom: var(--spacer-8); }
+    .group + .group { border-top: 1px solid var(--border-neutral-l1); padding-top: var(--spacer-8); margin-top: var(--spacer-4); }
+    .group-header {
+      display: flex; align-items: center; gap: var(--spacer-6);
+      padding: 0 var(--spacer-8) var(--spacer-6);
+      font-size: var(--body-xs-font-size); font-weight: 600;
+      color: var(--text-tertiary);
+      text-transform: uppercase; letter-spacing: 0.06em;
+    }
+    .group-header .grp-icon {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 14px; height: 14px; color: var(--text-tertiary);
+    }
+    .group-header .grp-icon svg { width: 14px; height: 14px; display: block; }
+    .group-header .grp-count {
+      margin-left: auto;
+      font-size: 10px; color: var(--text-tertiary);
+      background: var(--bg-overlay-l2); padding: 1px 5px; border-radius: var(--radius-full);
+    }
+
+    /* ═══ Note card ═══ */
+    .note-card {
+      position: relative;
+      display: flex; align-items: stretch;
+      padding: var(--spacer-8) var(--spacer-8);
+      padding-left: 10px;
+      border-radius: var(--radius-6);
+      cursor: pointer;
+      margin-bottom: 1px;
+      transition: background 120ms ease;
+    }
+    .note-card:hover { background: var(--bg-overlay-l2); }
+    .note-card.active {
+      background: var(--bg-overlay-l3);
+      box-shadow: inset 2px 0 0 0 var(--border-brand);
+    }
+    .note-card.active .note-title { color: var(--text-default-active); }
+
+    .note-body { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+
+    /* Title row: title + time on same line */
+    .note-title-row {
+      display: flex; align-items: baseline; gap: var(--spacer-6);
+      min-width: 0;
+    }
+    .note-title {
+      flex: 1 1 auto; min-width: 0;
+      font-size: 13px; font-weight: 600; line-height: 17px;
+      color: var(--text-default);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .note-time {
+      flex: 0 0 auto;
+      font-size: 10px; line-height: 14px;
+      color: var(--text-tertiary);
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
+
+    /* Preview: 2-line clamp */
+    .note-preview {
+      font-size: 11px; line-height: 15px;
+      color: var(--text-secondary);
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .note-actions {
+      flex: 0 0 auto;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 2px;
+      opacity: 0;
+      transition: opacity 120ms ease;
+      margin-left: var(--spacer-4);
+    }
+    .note-card:hover .note-actions { opacity: 1; }
+    .note-card.active .note-actions { opacity: 1; }
+    .act-btn {
+      width: 22px; height: 22px;
+      display: inline-flex; align-items: center; justify-content: center;
+      background: transparent; border: none; cursor: pointer;
+      border-radius: var(--radius-4);
+      color: var(--text-tertiary);
+      transition: background 100ms ease, color 100ms ease;
+    }
+    .act-btn:hover { background: var(--bg-overlay-l4); }
+    .act-btn svg { width: 14px; height: 14px; display: block; }
+    .act-btn.pin { color: var(--text-tertiary); }
+    .act-btn.pin.pinned { color: var(--status-alert-default); }
+    .act-btn.del:hover { color: var(--status-error-default); }
+
+    /* ═══ Title input ═══ */
+    .title-input {
+      flex: 1 1 auto; min-width: 0;
+      height: 32px;
+      background: transparent; border: 1px solid transparent;
+      border-radius: var(--radius-6);
+      padding: 0 var(--spacer-8);
+      color: var(--text-default);
+      font-size: 15px; font-weight: 600;
+      font-family: var(--font-family-default);
+      outline: none;
+      transition: background 120ms ease, border-color 120ms ease;
+    }
+    .title-input:hover { background: var(--bg-overlay-l1); }
+    .title-input:focus {
+      background: var(--bg-base-tertiary);
+      border-color: var(--border-neutral-l2);
+    }
+
+    /* ═══ Toolbar icon buttons ═══ */
+    .tool-btn {
+      flex: 0 0 auto;
+      width: 30px; height: 30px;
+      display: inline-flex; align-items: center; justify-content: center;
+      background: transparent; border: 1px solid transparent;
+      border-radius: var(--radius-6);
+      color: var(--icon-secondary); cursor: pointer;
+      transition: background 100ms ease, color 100ms ease, border-color 100ms ease;
+    }
+    .tool-btn:hover { background: var(--bg-overlay-l2); color: var(--icon-default); }
+    .tool-btn svg { width: 16px; height: 16px; display: block; }
+    .tool-btn.pin.active { color: var(--status-alert-default); }
+    .tool-btn.del:hover { color: var(--status-error-default); }
+
+    /* ═══ Live preview editor — Obsidian-style ═══ */
+    .live-editor .md-h1 {
+      font-size: 20px; font-weight: 700; line-height: 28px;
+      color: var(--text-default-active);
+      letter-spacing: -0.3px;
+      margin-bottom: var(--spacer-16);
+    }
+    .live-editor .md-h2 {
+      font-size: 16px; font-weight: 600; line-height: 22px;
+      color: var(--text-default);
+      margin-top: var(--spacer-20); margin-bottom: var(--spacer-8);
+    }
+    .live-editor .md-p {
+      font-size: 14px; line-height: 26px;
+      color: var(--text-default);
+      margin-bottom: var(--spacer-6);
+    }
+    .live-editor .md-ul { list-style: none; padding: 0; margin-bottom: var(--spacer-8); }
+    .live-editor .md-li {
+      font-size: 14px; line-height: 26px;
+      color: var(--text-default);
+      padding-left: 24px; position: relative;
+      margin-bottom: 2px;
+    }
+    .live-editor .md-li::before {
+      content: "•"; position: absolute; left: 8px; top: 0;
+      color: var(--text-tertiary); font-weight: 600;
+    }
+    .live-editor .md-ol { list-style: none; padding: 0; margin-bottom: var(--spacer-8); counter-reset: md-counter; }
+    .live-editor .md-ol-li {
+      font-size: 14px; line-height: 26px;
+      color: var(--text-default);
+      padding-left: 28px; position: relative;
+      margin-bottom: 2px;
+      counter-increment: md-counter;
+    }
+    .live-editor .md-ol-li::before {
+      content: counter(md-counter) ".";
+      position: absolute; left: 4px; top: 0;
+      color: var(--text-brand); font-weight: 600;
+      font-variant-numeric: tabular-nums;
+    }
+    .live-editor strong { font-weight: 600; color: var(--text-default-active); }
+    .live-editor code {
+      font-family: "SF Mono", "JetBrains Mono", monospace;
+      font-size: 12px; color: var(--accent-cyan);
+      background: var(--bg-overlay-l3); padding: 1px 5px; border-radius: var(--radius-4);
+    }
+    .live-editor .md-blockquote {
+      border-left: 3px solid var(--border-brand);
+      background: var(--bg-brand-popup);
+      padding: var(--spacer-8) var(--spacer-12);
+      border-radius: 0 var(--radius-6) var(--radius-6) 0;
+      margin: var(--spacer-12) 0;
+    }
+    .live-editor .md-blockquote p { color: var(--text-secondary); margin-bottom: 0; font-size: 14px; line-height: 24px; }
+
+    /* Active editing line — shows raw Markdown syntax (Obsidian-style) */
+    .live-line {
+      background: var(--bg-overlay-l1);
+      border-radius: var(--radius-4);
+      padding: 0 4px;
+      margin: 0 -4px;
+      position: relative;
+    }
+    .live-line::before {
+      content: "";
+      position: absolute;
+      left: 0; top: 0; bottom: 0;
+      width: 2px;
+      background: var(--bg-brand);
+      border-radius: 1px;
+      opacity: 0.5;
+    }
+    /* Raw syntax chars on active line */
+    .raw-syntax {
+      color: var(--text-tertiary);
+      font-family: "SF Mono", "JetBrains Mono", monospace;
+      font-size: 13px;
+    }
+    /* Blinking cursor */
+    .cursor {
+      display: inline-block;
+      width: 2px; height: 18px;
+      background: var(--bg-brand);
+      vertical-align: text-bottom;
+      margin-left: 1px;
+      animation: blink 1s steps(2) infinite;
+    }
+    @keyframes blink { 50% { opacity: 0; } }
+
+    /* ═══ Status bar ═══ */
+    .status-left, .status-center, .status-right { display: flex; align-items: center; gap: var(--spacer-8); }
+    .status-left { color: var(--text-tertiary); }
+    .status-center { color: var(--text-secondary); }
+    .save-dot { width: 6px; height: 6px; border-radius: var(--radius-full); background: var(--bg-brand); box-shadow: 0 0 6px rgba(50,240,140,0.6); }
+    .status-sep { width: 1px; height: 12px; background: var(--border-neutral-l2); }
+
+    /* ═══ Empty state ═══ */
+    .empty-icon {
+      width: 56px; height: 56px;
+      display: flex; align-items: center; justify-content: center;
+      border-radius: var(--radius-10);
+      background: var(--bg-overlay-l2);
+      color: var(--text-tertiary);
+    }
+    .empty-icon svg { width: 28px; height: 28px; display: block; }
+    .empty-title { font-size: 14px; font-weight: 500; color: var(--text-secondary); text-align: center; }
+    .empty-hint { font-size: 12px; color: var(--text-tertiary); text-align: center; }
+    .empty-hint b { color: var(--bg-brand); font-weight: 600; }
+
+    .icon-ghost { width: 14px; height: 14px; display: inline-flex; color: var(--text-tertiary); }
+    .icon-ghost svg { width: 14px; height: 14px; display: block; }
+  </style>
+</head>
+<body class="min-h-screen antialiased">
+  <main>
+    <div class="desktop-sim">
+
+      <div class="page-header">
+        <h1>我的速记</h1>
+        <p>速记模块 · Obsidian 式实时预览 · Markdown 编辑</p>
+      </div>
+
+      <!-- ═══════ MAIN STATE ═══════ -->
+      <div class="showcase">
+        <div class="showcase-label">速记模块 · 主状态</div>
+
+        <div class="notes-window">
+
+          <!-- Top bar -->
+          <div class="notes-topbar">
+            <div class="notes-topbar-title">
+              我的速记
+              <span class="count">8</span>
+            </div>
+            <div class="spacer"></div>
+            <div class="search-box">
+              <span class="search-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="11" cy="11" r="8"/>
+                  <path d="m21 21-4.35-4.35"/>
+                </svg>
+              </span>
+              <input id="notes-search" type="text" placeholder="搜索笔记标题、内容…" />
+              <span class="search-kbd">⌘K</span>
+            </div>
+            <button id="notes-new-btn" class="new-btn">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 5v14"/><path d="M5 12h14"/>
+              </svg>
+              新建
+            </button>
+          </div>
+
+          <!-- Body -->
+          <div class="notes-body">
+
+            <!-- ═══ Sidebar: note list ═══ -->
+            <aside id="notes-sidebar" class="notes-sidebar">
+              <div class="sidebar-scroll">
+
+                <!-- Pinned -->
+                <div class="group">
+                  <div class="group-header">
+                    <span class="grp-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 3h6l-.5 5L17 10l-5 3-5-3 2.5-2L9 3Z"/></svg></span>
+                    置顶 <span class="grp-count">2</span>
+                  </div>
+
+                  <div class="note-card active">
+                    <div class="note-body">
+                      <div class="note-title-row">
+                        <div class="note-title">项目架构规划</div>
+                        <div class="note-time">09-08 14:30</div>
+                      </div>
+                      <div class="note-preview">前端模块化拆分方案，按功能域划分…</div>
+                    </div>
+                    <div class="note-actions">
+                      <button class="act-btn pin pinned" title="取消置顶">
+                        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M9 4h6l-.5 4.5L17 12l-5 3-5-3 2.5-3.5L9 4Z" /><path d="M12 15v5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                      </button>
+                      <button class="act-btn del" title="删除">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div class="note-card">
+                    <div class="note-body">
+                      <div class="note-title-row">
+                        <div class="note-title">读书笔记《深度工作》</div>
+                        <div class="note-time">09-07 20:15</div>
+                      </div>
+                      <div class="note-preview">专注力是稀缺资源，需要主动保护…</div>
+                    </div>
+                    <div class="note-actions">
+                      <button class="act-btn pin pinned" title="取消置顶">
+                        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M9 4h6l-.5 4.5L17 12l-5 3-5-3 2.5-3.5L9 4Z" /><path d="M12 15v5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                      </button>
+                      <button class="act-btn del" title="删除">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Today -->
+                <div class="group">
+                  <div class="group-header">
+                    <span class="grp-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg></span>
+                    今天 <span class="grp-count">2</span>
+                  </div>
+
+                  <div class="note-card">
+                    <div class="note-body">
+                      <div class="note-title-row">
+                        <div class="note-title">会议纪要 - 周一站会</div>
+                        <div class="note-time">今天 10:00</div>
+                      </div>
+                      <div class="note-preview">本周重点：完成音乐模块重构…</div>
+                    </div>
+                    <div class="note-actions">
+                      <button class="act-btn pin" title="置顶">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4h6l-.5 4.5L17 12l-5 3-5-3 2.5-3.5L9 4Z"/><path d="M12 15v5"/></svg>
+                      </button>
+                      <button class="act-btn del" title="删除">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div class="note-card">
+                    <div class="note-body">
+                      <div class="note-title-row">
+                        <div class="note-title">灵感草稿</div>
+                        <div class="note-time">今天 15:22</div>
+                      </div>
+                      <div class="note-preview">如果番茄钟能和待办联动…</div>
+                    </div>
+                    <div class="note-actions">
+                      <button class="act-btn pin" title="置顶">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4h6l-.5 4.5L17 12l-5 3-5-3 2.5-3.5L9 4Z"/><path d="M12 15v5"/></svg>
+                      </button>
+                      <button class="act-btn del" title="删除">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- This Week -->
+                <div class="group">
+                  <div class="group-header">
+                    <span class="grp-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><path d="M3.27 6.96 12 12l8.73-5.04"/><path d="M12 22V12"/></svg></span>
+                    本周 <span class="grp-count">2</span>
+                  </div>
+
+                  <div class="note-card">
+                    <div class="note-body">
+                      <div class="note-title-row">
+                        <div class="note-title">周报模板</div>
+                        <div class="note-time">09-06</div>
+                      </div>
+                      <div class="note-preview">一、本周完成 二、下周计划…</div>
+                    </div>
+                    <div class="note-actions">
+                      <button class="act-btn pin" title="置顶">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4h6l-.5 4.5L17 12l-5 3-5-3 2.5-3.5L9 4Z"/><path d="M12 15v5"/></svg>
+                      </button>
+                      <button class="act-btn del" title="删除">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div class="note-card">
+                    <div class="note-body">
+                      <div class="note-title-row">
+                        <div class="note-title">CSS 性能笔记</div>
+                        <div class="note-time">09-05</div>
+                      </div>
+                      <div class="note-preview">避免过多 backdrop-filter…</div>
+                    </div>
+                    <div class="note-actions">
+                      <button class="act-btn pin" title="置顶">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4h6l-.5 4.5L17 12l-5 3-5-3 2.5-3.5L9 4Z"/><path d="M12 15v5"/></svg>
+                      </button>
+                      <button class="act-btn del" title="删除">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- All -->
+                <div class="group">
+                  <div class="group-header">
+                    <span class="grp-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="6" rx="9" ry="3"/><path d="M3 6v6c0 1.66 4.03 3 9 3s9-1.34 9-3V6"/><path d="M3 12v6c0 1.66 4.03 3 9 3s9-1.34 9-3v-6"/></svg></span>
+                    全部 <span class="grp-count">2</span>
+                  </div>
+
+                  <div class="note-card">
+                    <div class="note-body">
+                      <div class="note-title-row">
+                        <div class="note-title">Git 工作流</div>
+                        <div class="note-time">09-02</div>
+                      </div>
+                      <div class="note-preview">feature 分支命名规范…</div>
+                    </div>
+                    <div class="note-actions">
+                      <button class="act-btn pin" title="置顶">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4h6l-.5 4.5L17 12l-5 3-5-3 2.5-3.5L9 4Z"/><path d="M12 15v5"/></svg>
+                      </button>
+                      <button class="act-btn del" title="删除">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div class="note-card">
+                    <div class="note-body">
+                      <div class="note-title-row">
+                        <div class="note-title">Tauri IPC 注意事项</div>
+                        <div class="note-time">08-28</div>
+                      </div>
+                      <div class="note-preview">invoke 参数用 camelCase…</div>
+                    </div>
+                    <div class="note-actions">
+                      <button class="act-btn pin" title="置顶">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4h6l-.5 4.5L17 12l-5 3-5-3 2.5-3.5L9 4Z"/><path d="M12 15v5"/></svg>
+                      </button>
+                      <button class="act-btn del" title="删除">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+            </aside>
+
+            <!-- ═══ Main editor region ═══ -->
+            <section class="notes-main">
+
+              <!-- Toolbar -->
+              <div class="editor-toolbar">
+                <input id="notes-title-input" class="title-input" type="text" value="项目架构规划" />
+                <div class="spacer"></div>
+                <button class="tool-btn pin active" title="已置顶">
+                  <svg viewBox="0 0 24 24" fill="currentColor"><path d="M9 4h6l-.5 4.5L17 12l-5 3-5-3 2.5-3.5L9 4Z"/><path d="M12 15v5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                </button>
+                <button class="tool-btn del" title="删除笔记">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+                </button>
+              </div>
+
+              <!-- ═══ Obsidian-style live preview editor ═══ -->
+              <div id="notes-editor" class="live-editor">
+                <div class="md-h1">项目架构规划</div>
+                <div class="md-h2">目标</div>
+                <div class="md-p">将 DeskOverlay 前端从单文件架构迁移到模块化架构。</div>
+                <div class="md-h2">模块拆分</div>
+                <ul class="md-ul">
+                  <li class="md-li"><strong>核心层</strong>: <code>state.js</code> / <code>bus.js</code> / <code>store.js</code></li>
+                  <li class="md-li"><strong>视图层</strong>: 各模块独立 view renderer</li>
+                  <!-- Active editing line — shows raw Markdown syntax with blinking cursor -->
+                  <li class="md-li live-line">
+                    <span class="raw-syntax">- </span><strong>工具层</strong>: <code>icons</code> / <code>datepicker</code> / <code>selectbox</code><span class="cursor"></span>
+                  </li>
+                </ul>
+                <div class="md-h2">优先级</div>
+                <ol class="md-ol">
+                  <li class="md-ol-li">抽离 <code>views</code> 目录</li>
+                  <li class="md-ol-li">统一 View 生命周期</li>
+                  <li class="md-ol-li">按需加载游戏模块</li>
+                </ol>
+                <div class="md-blockquote">
+                  <p>注意：保持 Tauri IPC 兼容性，不破坏现有状态持久化。</p>
+                </div>
+              </div>
+
+              <!-- Status bar -->
+              <div class="status-bar">
+                <div class="status-left">
+                  <span>482 字</span>
+                  <span class="status-sep"></span>
+                  <span>约 2 分钟</span>
+                </div>
+                <div class="spacer"></div>
+                <div class="status-center">
+                  <span class="save-dot"></span>
+                  已保存 15:22:08
+                </div>
+                <div class="spacer"></div>
+                <div class="status-right">
+                  <span>Markdown</span>
+                  <span class="status-sep"></span>
+                  <button class="act-btn del" title="删除笔记" style="opacity:1">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                  </button>
+                </div>
+              </div>
+
+            </section>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══════ EMPTY STATE ═══════ -->
+      <div class="showcase">
+        <div class="showcase-label">速记模块 · 空状态</div>
+        <div class="empty-card">
+          <div class="empty-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/>
+              <path d="M14 2v5h5"/>
+              <path d="M9 13h6"/>
+              <path d="M9 17h4"/>
+            </svg>
+          </div>
+          <div>
+            <div class="empty-title">还没有笔记</div>
+            <div class="empty-hint">点击 <b>+ 新建</b> 创建第一篇吧</div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </main>
+</body>
+</html>

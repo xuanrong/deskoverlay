@@ -25,6 +25,8 @@ sysinfo = { version = "0.32", features = ["network", "disk"] }
 ureq = "2"
 # 图片缩略图：桌面文件中心把图片读成 base64 data URL
 base64 = "0.22"
+# 位图解码缩放：缩略图先缩到最长边 128px 再编码（按需特性，控制依赖体积）
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "webp", "bmp", "ico"] }
 # windows-core 作为直接依赖，便于使用其导出的 `w!` 宽字符串宏
 # （windows::core 系 windows_core 的别名，但 macro 经该别名导入不稳定）。
 windows-core = "0.61"
@@ -33,12 +35,16 @@ windows-core = "0.61"
 # windows 主版本一致，否则会出现两个 windows crate 共存、HWND 等类型跨版本不匹配。
 windows = { version = "0.61", features = [
   "Win32_Foundation",
+  "Win32_Security",
   "Win32_UI_WindowsAndMessaging",
   "Win32_UI_Input_KeyboardAndMouse",
   "Win32_System_SystemInformation",
   "Win32_System_Power",
   "Win32_System_Com",
+  "Win32_System_Ioctl",
+  "Win32_System_IO",
   "Win32_Media_Audio",
   "Win32_Graphics_Dwm",
   "Win32_Graphics_Gdi",
+  "Win32_Storage_FileSystem",
 ] }

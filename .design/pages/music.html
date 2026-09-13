@@ -1,0 +1,807 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>在线音乐 & 音源页面</title>
+  <style id="theme-vars">
+    :root {
+      --radius-4: 4px; --radius-6: 6px; --radius-8: 8px; --radius-10: 10px; --radius-12: 12px; --radius-14: 14px; --radius-16: 16px; --radius-18: 18px; --radius-full: 9999px;
+      --spacer-0: 0px; --spacer-4: 4px; --spacer-6: 6px; --spacer-8: 8px; --spacer-10: 10px; --spacer-12: 12px; --spacer-14: 14px; --spacer-16: 16px; --spacer-20: 20px; --spacer-24: 24px; --spacer-32: 32px; --spacer-40: 40px;
+      --font-family-default: "SF Pro Text", system-ui, -apple-system, sans-serif;
+      --font-family-heading: "SF Pro", system-ui, -apple-system, sans-serif;
+      --font-weight-default: 400; --font-weight-medium: 500; --font-weight-strong: 600;
+      --body-xs-font-size: 10px; --body-xs-line-height: 14px;
+      --body-sm-font-size: 11px; --body-sm-line-height: 16px;
+      --body-md-font-size: 12px; --body-md-line-height: 18px;
+      --body-base-font-size: 13px; --body-base-line-height: 20px;
+      --heading-3xs-font-size: 11px; --heading-3xs-line-height: 16px;
+      --heading-2xs-font-size: 12px; --heading-2xs-line-height: 18px;
+      --heading-xs-font-size: 13px; --heading-xs-line-height: 20px;
+      --heading-sm-font-size: 16px; --heading-sm-line-height: 24px;
+      --bg-base-default: #1A1B1D; --bg-base-secondary: #222427; --bg-base-tertiary: #2A2D31;
+      --bg-overlay-l1: rgba(224,226,242,0.04); --bg-overlay-l2: rgba(224,226,242,0.06); --bg-overlay-l3: rgba(224,226,242,0.08); --bg-overlay-l4: rgba(224,226,242,0.12);
+      --bg-menu: #202123; --bg-tooltip: #1A1B1D;
+      --bg-brand: #32F08C; --bg-brand-hover: #0FDC78;
+      --text-default: #D1D3DB; --text-default-hover: #F5F9FE;
+      --text-secondary: #9599A6; --text-tertiary: #666B75;
+      --icon-default: #D1D3DB; --icon-secondary: #9599A6; --icon-tertiary: #666B75;
+      --border-neutral-l1: rgba(224,226,242,0.1); --border-neutral-l2: rgba(224,226,242,0.16);
+      --status-primary-default: #387BFF; --status-primary-hover: #4C88FF;
+      --status-primary-surface-l1: rgba(53,121,255,0.18);
+      --status-success-default: #33C192;
+      --status-alert-default: #D29D00;
+      --status-warning-default: #D27E24;
+      --accent-cyan: #04CBE5; --accent-blue: #7BB8FF; --accent-violet: #BFA5FF;
+      --color-background: var(--bg-base-default);
+      --color-foreground: var(--text-default);
+      --color-card: var(--bg-base-secondary);
+      --color-primary: var(--bg-brand);
+      --color-border: var(--border-neutral-l1);
+      --color-muted: var(--bg-overlay-l2);
+      --color-muted-foreground: var(--text-secondary);
+      --color-surface: var(--bg-base-secondary);
+      --color-surface-variant: var(--bg-base-tertiary);
+    }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.3.1/dist/index.global.js"></script>
+  <style type="text/tailwindcss">
+    @theme inline {
+      --color-background: var(--bg-base-default);
+      --color-foreground: var(--text-default);
+      --color-card: var(--bg-base-secondary);
+      --color-primary: var(--bg-brand);
+      --color-primary-hover: var(--bg-brand-hover);
+      --color-border: var(--border-neutral-l1);
+      --color-muted: var(--bg-overlay-l2);
+      --color-muted-foreground: var(--text-secondary);
+      --color-surface: var(--bg-base-secondary);
+      --color-on-primary: var(--text-onbrand);
+      --color-error: var(--status-error-default);
+      --color-success: var(--status-success-default);
+      --color-warning: var(--status-warning-default);
+      --color-info: var(--status-primary-default);
+      --radius-sm: var(--radius-4);
+      --radius-md: var(--radius-6);
+      --radius-lg: var(--radius-8);
+      --radius-xl: var(--radius-10);
+    }
+    @layer base {
+      body { background: var(--bg-base-default); color: var(--text-default); }
+    }
+  </style>
+  <style id="semantic-token-fallback">
+    .bg-background { background-color: var(--bg-base-default); }
+    .text-foreground { color: var(--text-default); }
+    .bg-card { background-color: var(--bg-base-secondary); }
+    .text-card-foreground { color: var(--text-default); }
+    .bg-primary { background-color: var(--bg-brand); }
+    .text-primary { color: var(--bg-brand); }
+    .text-primary-hover { color: var(--bg-brand-hover); }
+    .bg-primary-soft { background-color: var(--bg-brand-popup); }
+    .text-primary-soft { color: var(--bg-brand-popup); }
+    .bg-muted { background-color: var(--bg-overlay-l2); }
+    .text-muted { color: var(--text-secondary); }
+    .bg-surface { background-color: var(--bg-base-secondary); }
+    .border-border { border-color: var(--border-neutral-l1); }
+    .text-on-primary { color: var(--text-onbrand); }
+    .bg-error { background-color: var(--status-error-default); }
+    .text-error { color: var(--status-error-default); }
+    .bg-error-soft { background-color: var(--status-error-surface-l1); }
+    .bg-success { background-color: var(--status-success-default); }
+    .text-success { color: var(--status-success-default); }
+    .bg-warning { background-color: var(--status-warning-default); }
+    .text-warning { color: var(--status-warning-default); }
+    .bg-info { background-color: var(--status-primary-default); }
+    .text-info { color: var(--status-primary-default); }
+  </style>
+</head>
+
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: var(--font-family-default);
+      font-size: var(--body-base-font-size);
+      line-height: var(--body-base-line-height);
+      background:
+        radial-gradient(ellipse at 20% 0%, var(--status-primary-surface-l1) 0%, transparent 50%),
+        radial-gradient(ellipse at 80% 100%, var(--bg-brand-popup) 0%, transparent 50%),
+        linear-gradient(160deg, var(--bg-base-default) 0%, var(--bg-base-secondary) 40%, var(--bg-base-tertiary) 100%);
+      color: var(--text-default);
+      min-height: 100vh;
+    }
+    .page {
+      max-width: 1200px; margin: 0 auto;
+      padding: var(--spacer-40) var(--spacer-24) var(--spacer-32);
+    }
+    .page-header {
+      text-align: center; margin-bottom: var(--spacer-40);
+    }
+    .page-header h1 {
+      font-size: 24px; font-weight: 600;
+      color: var(--text-default);
+      letter-spacing: -0.3px;
+    }
+    .page-header p {
+      font-size: var(--body-sm-font-size);
+      color: var(--text-secondary);
+      margin-top: var(--spacer-6);
+    }
+
+    /* ═══ Section label ═══ */
+    .section-label {
+      display: flex; align-items: center; gap: var(--spacer-8);
+      font-size: var(--body-xs-font-size); font-weight: 600;
+      color: var(--text-tertiary); text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: var(--spacer-16);
+    }
+    .section-label::after {
+      content: ""; flex: 1 1 auto; height: 1px;
+      background: var(--border-neutral-l1);
+    }
+
+    /* ═══ 1. Music Player View ═══ */
+    .player-view {
+      width: 400px; margin: 0 auto;
+      background: rgba(34,36,39,0.96);
+      border: 1px solid var(--border-neutral-l2);
+      border-radius: var(--radius-16);
+      overflow: hidden;
+      box-shadow: 0 0 0 1px rgba(0,0,0,0.3), 0 8px 32px rgba(0,0,0,0.4);
+      backdrop-filter: blur(28px) saturate(1.2);
+      -webkit-backdrop-filter: blur(28px) saturate(1.2);
+    }
+
+    .player-stage {
+      display: flex; flex-direction: column;
+      align-items: center; padding: var(--spacer-32) var(--spacer-24) var(--spacer-20);
+      position: relative;
+    }
+    .player-glow {
+      position: absolute; top: 7%; left: 50%; transform: translateX(-50%);
+      width: 300px; height: 300px; border-radius: 50%;
+      background: radial-gradient(circle, rgba(56,123,255,0.12), rgba(56,123,255,0.03) 50%, transparent 70%);
+      filter: blur(40px); pointer-events: none;
+    }
+
+    .player-disc {
+      width: 200px; height: 200px; border-radius: 50%;
+      background:
+        radial-gradient(circle at 30% 28%, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0.02) 12%, transparent 26%),
+        repeating-radial-gradient(circle at 50% 50%, rgba(0,0,0,0.28) 0, rgba(0,0,0,0.28) 1.5px, rgba(255,255,255,0.03) 2.5px, rgba(0,0,0,0) 3px),
+        radial-gradient(circle at 50% 50%, #20242f 0%, #1a1e2b 55%, #141724 100%);
+      box-shadow:
+        inset 0 0 0 2px rgba(255,255,255,0.06),
+        inset 0 0 28px rgba(0,0,0,0.7),
+        0 12px 36px rgba(0,0,0,0.5);
+      display: grid; place-items: center;
+      position: relative; z-index: 1;
+      animation: discSpin 16s linear infinite;
+    }
+    @keyframes discSpin { to { transform: rotate(360deg); } }
+
+    .player-art {
+      width: 120px; height: 120px; border-radius: 50%;
+      background: radial-gradient(circle at 35% 30%, #f6c4a0, #8a3b4a 65%, #2a1226);
+      display: grid; place-items: center;
+    }
+    .player-art svg {
+      width: 48px; height: 48px; color: rgba(255,255,255,0.7);
+    }
+
+    .player-title {
+      font-size: 18px; font-weight: 600; color: var(--text-default);
+      margin-top: var(--spacer-20); text-align: center;
+      max-width: 100%; overflow: hidden; text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .player-artist {
+      font-size: var(--body-sm-font-size); color: var(--text-secondary);
+      margin-top: var(--spacer-4); text-align: center;
+    }
+
+    /* Lyrics */
+    .player-lyric {
+      max-height: 120px; overflow-y: auto;
+      text-align: center; font-size: 14px; line-height: 2.2;
+      color: var(--text-tertiary);
+      padding: var(--spacer-8) var(--spacer-20);
+      scroll-behavior: smooth;
+    }
+    .player-lyric .ly-cur {
+      color: var(--text-default); font-weight: 600; font-size: 15px;
+    }
+
+    /* Progress */
+    .player-progress {
+      display: flex; align-items: center; gap: var(--spacer-10);
+      padding: 0 var(--spacer-20);
+    }
+    .player-time {
+      font-size: var(--body-xs-font-size); color: var(--text-tertiary);
+      font-variant-numeric: tabular-nums; flex: 0 0 auto; min-width: 30px;
+    }
+    .player-track {
+      flex: 1 1 auto; height: 4px; border-radius: 2px;
+      background: rgba(255,255,255,0.08); cursor: pointer; position: relative;
+    }
+    .player-track-fill {
+      height: 100%; width: 45%;
+      background: linear-gradient(90deg, var(--status-primary-default), var(--accent-cyan));
+      border-radius: 2px;
+    }
+
+    /* Control bar */
+    .player-foot {
+      display: grid; grid-template-columns: 1fr auto 1fr;
+      align-items: center; gap: var(--spacer-16);
+      padding: var(--spacer-12) var(--spacer-20);
+      background: var(--bg-overlay-l2);
+      border-top: 1px solid var(--border-neutral-l1);
+    }
+    .player-info {
+      justify-self: start; min-width: 0;
+      display: flex; flex-direction: column; gap: 2px;
+    }
+    .player-name {
+      font-size: var(--body-sm-font-size); font-weight: 600;
+      color: var(--text-default);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .player-sub {
+      font-size: var(--body-xs-font-size); color: var(--text-tertiary);
+    }
+    .player-ctrls {
+      display: flex; align-items: center; gap: var(--spacer-6);
+    }
+    .pc-btn {
+      width: 32px; height: 32px; border-radius: var(--radius-8);
+      border: none; background: transparent;
+      color: var(--icon-secondary);
+      cursor: pointer; display: flex; align-items: center; justify-content: center;
+      transition: all 120ms ease;
+    }
+    .pc-btn:hover { background: var(--bg-overlay-l3); color: var(--icon-default); }
+    .pc-btn.active { color: var(--status-primary-default); }
+    .pc-btn.big {
+      width: 40px; height: 40px; border-radius: var(--radius-full);
+      background: var(--status-primary-default); color: #fff;
+    }
+    .pc-btn.big:hover { background: var(--status-primary-hover); }
+    .pc-btn svg { width: 16px; height: 16px; }
+    .pc-btn.big svg { width: 18px; height: 18px; }
+    .player-right {
+      justify-self: end; display: flex;
+      align-items: center; gap: var(--spacer-8);
+    }
+    .pill-btn {
+      padding: 5px 14px; border-radius: var(--radius-full);
+      border: 1px solid var(--border-neutral-l2); background: transparent;
+      color: var(--text-secondary); font-size: var(--body-sm-font-size);
+      font-family: inherit; font-weight: 500; cursor: pointer;
+      transition: all 120ms ease;
+    }
+    .pill-btn:hover {
+      border-color: var(--status-primary-default);
+      color: var(--status-primary-default);
+      background: var(--status-primary-surface-l1);
+    }
+
+    /* ═══ 2. Online Music Modal ═══ */
+    .online-modal {
+      width: 860px;
+      background: var(--bg-menu);
+      border: 1px solid var(--border-neutral-l2);
+      border-radius: var(--radius-14);
+      box-shadow: 0 0 0 1px rgba(0,0,0,0.3), 0 16px 48px rgba(0,0,0,0.5);
+      overflow: hidden;
+      margin: var(--spacer-32) auto 0;
+    }
+    .om-head {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: var(--spacer-20) var(--spacer-24) var(--spacer-16);
+      border-bottom: 1px solid var(--border-neutral-l1);
+    }
+    .om-head h2 {
+      font-size: var(--heading-sm-font-size); font-weight: 600;
+      color: var(--text-default);
+    }
+    .om-head .close-btn {
+      width: 28px; height: 28px; border-radius: var(--radius-6);
+      border: none; background: transparent;
+      color: var(--icon-tertiary); cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 16px; transition: all 120ms ease;
+    }
+    .om-head .close-btn:hover {
+      background: var(--bg-overlay-l3); color: var(--icon-default);
+    }
+
+    .om-body {
+      display: flex; height: 420px;
+    }
+    /* Left sidebar */
+    .om-sidebar {
+      width: 160px; flex: 0 0 auto;
+      display: flex; flex-direction: column; gap: var(--spacer-4);
+      padding: var(--spacer-12);
+      border-right: 1px solid var(--border-neutral-l1);
+      overflow-y: auto;
+    }
+    .om-src {
+      padding: var(--spacer-8) var(--spacer-12); border-radius: var(--radius-8);
+      border: 1px solid transparent; background: transparent;
+      color: var(--text-secondary); font-size: var(--body-sm-font-size);
+      font-family: inherit; cursor: pointer; text-align: left;
+      transition: all 120ms ease;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .om-src:hover { background: var(--bg-overlay-l2); color: var(--text-default); }
+    .om-src.active {
+      background: var(--status-primary-surface-l1);
+      border-color: rgba(56,123,255,0.25);
+      color: var(--status-primary-default); font-weight: 600;
+    }
+    .om-src-fav {
+      border-color: var(--border-neutral-l1); margin-bottom: var(--spacer-6);
+    }
+    .om-src-fav.active {
+      background: rgba(255,123,114,0.12);
+      border-color: rgba(255,123,114,0.3);
+      color: #ff7b72; font-weight: 600;
+    }
+    .om-src-add {
+      border-style: dashed; border-color: var(--border-neutral-l2);
+      color: var(--text-tertiary); margin-top: auto; text-align: center;
+    }
+    .om-src-add:hover { border-color: var(--status-primary-default); color: var(--status-primary-default); }
+
+    /* Right main */
+    .om-main {
+      flex: 1 1 auto; min-width: 0;
+      display: flex; flex-direction: column; gap: var(--spacer-12);
+      padding: var(--spacer-16) var(--spacer-20);
+    }
+    /* Mode tabs */
+    .om-tabs {
+      display: flex; align-items: center; gap: var(--spacer-4);
+      padding: 3px; background: var(--bg-overlay-l2);
+      border: 1px solid var(--border-neutral-l1);
+      border-radius: var(--radius-10); width: fit-content;
+    }
+    .om-tab {
+      padding: 6px 16px; border-radius: var(--radius-8);
+      border: 0; background: transparent;
+      color: var(--text-secondary); font-size: var(--body-sm-font-size);
+      font-family: inherit; cursor: pointer;
+      transition: all 120ms ease;
+    }
+    .om-tab:hover { color: var(--text-default); }
+    .om-tab.active {
+      background: var(--status-primary-surface-l1);
+      color: var(--status-primary-default); font-weight: 600;
+    }
+
+    /* Search panel */
+    .om-panel {
+      display: flex; align-items: center; gap: var(--spacer-10);
+    }
+    .om-input {
+      flex: 1 1 auto; min-width: 0;
+      background: var(--bg-overlay-l2); border: 1px solid var(--border-neutral-l1);
+      color: var(--text-default); padding: 9px 13px;
+      border-radius: var(--radius-8); font-size: var(--body-sm-font-size);
+      font-family: inherit; outline: none;
+      transition: border-color 120ms ease;
+    }
+    .om-input:focus { border-color: var(--status-primary-default); }
+    .om-input::placeholder { color: var(--text-tertiary); }
+    .om-type-select {
+      appearance: none; padding: 9px 28px 9px 10px; min-width: 70px;
+      background: var(--bg-overlay-l2); border: 1px solid var(--border-neutral-l1);
+      color: var(--text-default); font-size: var(--body-sm-font-size);
+      border-radius: var(--radius-8); font-family: inherit; cursor: pointer;
+      outline: none;
+    }
+    .om-search-btn {
+      padding: 9px 16px; border-radius: var(--radius-8);
+      border: none; background: var(--status-primary-default);
+      color: #fff; font-size: var(--body-sm-font-size); font-weight: 600;
+      font-family: inherit; cursor: pointer;
+      transition: background 120ms ease;
+    }
+    .om-search-btn:hover { background: var(--status-primary-hover); }
+
+    /* Results */
+    .om-results {
+      flex: 1 1 auto; min-height: 0; overflow-y: auto;
+      display: flex; flex-direction: column; gap: 2px;
+      background: var(--bg-overlay-l1); border: 1px solid var(--border-neutral-l1);
+      border-radius: var(--radius-8); padding: var(--spacer-4);
+    }
+    .om-result {
+      display: flex; align-items: center; gap: var(--spacer-10);
+      padding: 9px 10px; border-radius: var(--radius-6);
+      cursor: pointer; transition: background 120ms ease;
+    }
+    .om-result:hover { background: var(--bg-overlay-l2); }
+    .om-result .mr-play {
+      font-size: 12px; color: var(--text-tertiary);
+      flex: 0 0 auto; transition: all 120ms ease;
+    }
+    .om-result:hover .mr-play { color: var(--status-primary-default); transform: scale(1.1); }
+    .om-result .mr-title {
+      color: var(--text-default); flex: 0 1 45%; min-width: 0;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      font-size: var(--body-md-font-size);
+    }
+    .om-result .mr-artist {
+      color: var(--text-secondary); flex: 1 1 auto; min-width: 0;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      font-size: var(--body-sm-font-size);
+    }
+
+    /* Rank badge */
+    .rank-badge {
+      flex: 0 0 auto; width: 24px; height: 24px; border-radius: var(--radius-6);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums;
+      background: var(--bg-overlay-l3); color: var(--text-secondary);
+      border: 1px solid var(--border-neutral-l1);
+    }
+    .rank-badge.top1 {
+      background: linear-gradient(135deg, #ffd75e, #ff9d00);
+      color: #1a1400; border-color: transparent;
+      box-shadow: 0 2px 8px rgba(255,157,0,0.3);
+    }
+    .rank-badge.top2 {
+      background: linear-gradient(135deg, #e3e8ee, #aab3bf);
+      color: #1c2127; border-color: transparent;
+    }
+    .rank-badge.top3 {
+      background: linear-gradient(135deg, #ffb27a, #d97a3d);
+      color: #3a1c0a; border-color: transparent;
+    }
+
+    /* Group header */
+    .om-group {
+      display: flex; align-items: center; gap: var(--spacer-8);
+      padding: 12px 6px 6px; font-size: 11px; font-weight: 700;
+      color: var(--text-default); letter-spacing: 0.3px;
+    }
+    .om-group::before {
+      content: ""; width: 3px; height: 14px; border-radius: 2px;
+      background: linear-gradient(180deg, var(--status-primary-default), var(--accent-cyan));
+    }
+
+    /* Sheet card */
+    .sheet-card {
+      display: flex; align-items: center; gap: var(--spacer-12);
+      padding: 9px 10px; border-radius: var(--radius-6);
+      cursor: pointer; transition: background 120ms ease;
+    }
+    .sheet-card:hover { background: var(--bg-overlay-l2); }
+    .sheet-icon {
+      width: 38px; height: 38px; border-radius: var(--radius-8);
+      background: rgba(56,123,255,0.1); border: 1px solid rgba(56,123,255,0.2);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 16px; color: var(--status-primary-default);
+      flex: 0 0 auto;
+    }
+    .sheet-card:hover .sheet-icon { background: rgba(56,123,255,0.18); transform: scale(1.05); }
+    .sheet-info {
+      flex: 1 1 auto; min-width: 0;
+      display: flex; flex-direction: column; gap: 2px;
+    }
+    .sheet-title {
+      font-size: var(--body-md-font-size); font-weight: 600;
+      color: var(--text-default);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .sheet-desc {
+      font-size: var(--body-sm-font-size); color: var(--text-tertiary);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+
+    .om-hint {
+      padding: var(--spacer-12) var(--spacer-20);
+      font-size: var(--body-xs-font-size); color: var(--text-tertiary);
+      text-align: center; border-top: 1px solid var(--border-neutral-l1);
+    }
+
+    /* ═══ 3. Audio Source Modal ═══ */
+    .src-modal {
+      width: 520px; margin: var(--spacer-32) auto 0;
+      background: var(--bg-menu);
+      border: 1px solid var(--border-neutral-l2);
+      border-radius: var(--radius-14);
+      box-shadow: 0 0 0 1px rgba(0,0,0,0.3), 0 16px 48px rgba(0,0,0,0.5);
+      overflow: hidden;
+    }
+    .src-head {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: var(--spacer-20) var(--spacer-24) var(--spacer-16);
+      border-bottom: 1px solid var(--border-neutral-l1);
+    }
+    .src-head h2 {
+      font-size: var(--heading-sm-font-size); font-weight: 600;
+      color: var(--text-default);
+    }
+    .src-head .close-btn {
+      width: 28px; height: 28px; border-radius: var(--radius-6);
+      border: none; background: transparent;
+      color: var(--icon-tertiary); cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 16px; transition: all 120ms ease;
+    }
+    .src-head .close-btn:hover {
+      background: var(--bg-overlay-l3); color: var(--icon-default);
+    }
+    .src-list {
+      display: flex; flex-direction: column; gap: var(--spacer-4);
+      padding: var(--spacer-16) var(--spacer-24); max-height: 200px;
+      overflow-y: auto;
+    }
+    .src-row {
+      display: flex; align-items: center; gap: var(--spacer-12);
+      padding: var(--spacer-10) var(--spacer-12);
+      border-radius: var(--radius-8); background: var(--bg-overlay-l1);
+      border: 1px solid var(--border-neutral-l1);
+      transition: border-color 120ms ease;
+    }
+    .src-row:hover { border-color: var(--border-neutral-l2); }
+    .src-name {
+      font-size: var(--body-md-font-size); font-weight: 600;
+      color: var(--text-default); flex: 0 0 auto;
+    }
+    .src-url {
+      font-size: var(--body-xs-font-size); color: var(--text-tertiary);
+      flex: 1 1 auto; min-width: 0;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      font-family: "JetBrains Mono", monospace;
+    }
+    .src-del {
+      width: 26px; height: 26px; border-radius: var(--radius-6);
+      border: none; background: transparent; color: var(--text-tertiary);
+      cursor: pointer; font-size: 14px; display: flex;
+      align-items: center; justify-content: center;
+      transition: all 120ms ease;
+    }
+    .src-del:hover { background: rgba(246,90,90,0.12); color: #F65A5A; }
+    .src-empty {
+      text-align: center; padding: var(--spacer-24);
+      font-size: var(--body-sm-font-size); color: var(--text-tertiary);
+    }
+    .src-add {
+      display: flex; align-items: center; gap: var(--spacer-10);
+      padding: 0 var(--spacer-24) var(--spacer-16);
+    }
+    .src-input {
+      flex: 1 1 auto; min-width: 0;
+      background: var(--bg-overlay-l2); border: 1px solid var(--border-neutral-l1);
+      color: var(--text-default); padding: 9px 13px;
+      border-radius: var(--radius-8); font-size: var(--body-sm-font-size);
+      font-family: inherit; outline: none;
+      transition: border-color 120ms ease;
+    }
+    .src-input:focus { border-color: var(--status-primary-default); }
+    .src-input::placeholder { color: var(--text-tertiary); }
+    .src-btn {
+      padding: 9px 14px; border-radius: var(--radius-8);
+      border: 1px solid var(--border-neutral-l2); background: transparent;
+      color: var(--text-secondary); font-size: var(--body-sm-font-size);
+      font-family: inherit; cursor: pointer; white-space: nowrap;
+      transition: all 120ms ease;
+    }
+    .src-btn:hover {
+      border-color: var(--status-primary-default);
+      color: var(--status-primary-default);
+      background: var(--status-primary-surface-l1);
+    }
+    .src-hint {
+      padding: 0 var(--spacer-24) var(--spacer-16);
+      font-size: var(--body-xs-font-size); color: var(--text-tertiary);
+      line-height: 1.6;
+    }
+    .src-hint code {
+      font-family: "JetBrains Mono", monospace;
+      font-size: var(--body-xs-font-size);
+      background: var(--bg-overlay-l2); padding: 1px 6px;
+      border-radius: var(--radius-4); color: var(--accent-cyan);
+    }
+    .src-actions {
+      display: flex; justify-content: flex-end;
+      padding: var(--spacer-12) var(--spacer-24) var(--spacer-20);
+      border-top: 1px solid var(--border-neutral-l1);
+    }
+    .src-done {
+      padding: 8px 20px; border-radius: var(--radius-8);
+      border: none; background: var(--bg-brand);
+      color: #0C0C0D; font-size: var(--body-sm-font-size); font-weight: 600;
+      font-family: inherit; cursor: pointer;
+      transition: background 120ms ease;
+    }
+    .src-done:hover { background: var(--bg-brand-hover); }
+  </style>
+
+<body>
+  <div class="page">
+    <div class="page-header">
+      <h1>在线音乐 & 音源页面</h1>
+      <p>音乐播放器 · 在线音乐弹窗 · 音源管理</p>
+    </div>
+
+    <!-- ═══ 1. Music Player ═══ -->
+    <div class="section-label">音乐播放器</div>
+    <div class="player-view" style="width: 1165px; height: 535px;">
+      <div class="player-stage">
+        <div class="player-glow"></div>
+        <div class="player-disc">
+          <div class="player-art">
+            <svg viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"></path>
+            </svg>
+          </div>
+        </div>
+        <div class="player-title">晴天</div>
+        <div class="player-artist">周杰伦 · 在线 · 酷狗</div>
+      </div>
+      <div class="player-lyric">
+        <div class="ly-cur">故事的小黄花 从出生那年就飘着</div>
+        <div>童年的荡秋千 随记忆一直晃到现在</div>
+        <div>Re So So Si Do Si La</div>
+        <div>So La Si Si Si Si La Si La So</div>
+      </div>
+      <div class="player-progress">
+        <span class="player-time">1:24</span>
+        <div class="player-track"><div class="player-track-fill"></div></div>
+        <span class="player-time">4:29</span>
+      </div>
+      <div class="player-foot">
+        <div class="player-info">
+          <div class="player-name">晴天</div>
+          <div class="player-sub">在线 · 酷狗</div>
+        </div>
+        <div class="player-ctrls">
+          <button class="pc-btn active" title="喜欢">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"></path></svg>
+          </button>
+          <button class="pc-btn" title="随机">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 1l4 4-4 4"></path><path d="M3 11V9a4 4 0 0 1 4-4h14"></path><path d="M7 23l-4-4 4-4"></path><path d="M21 13v2a4 4 0 0 1-4 4H3"></path></svg>
+          </button>
+          <button class="pc-btn" title="上一首">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"></path></svg>
+          </button>
+          <button class="pc-btn big" title="暂停">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"></path></svg>
+          </button>
+          <button class="pc-btn" title="下一首">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"></path></svg>
+          </button>
+          <button class="pc-btn" title="列表">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>
+          </button>
+        </div>
+        <div class="player-right">
+          <button class="pill-btn">在线</button>
+          <button class="pc-btn" title="音量">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ 2. Online Music Modal ═══ -->
+    <div class="section-label" style="margin-top: var(--spacer-40);">在线音乐弹窗</div>
+    <div class="online-modal">
+      <div class="om-head">
+        <h2>在线音乐</h2>
+        <button class="close-btn">✕</button>
+      </div>
+      <div class="om-body">
+        <div class="om-sidebar">
+          <button class="om-src om-src-fav">♡ 喜欢</button>
+          <button class="om-src active">酷狗</button>
+          <button class="om-src">酷我</button>
+          <button class="om-src">网易云</button>
+          <button class="om-src om-src-add">+ 音源</button>
+        </div>
+        <div class="om-main">
+          <div class="om-tabs">
+            <button class="om-tab active">排行榜</button>
+            <button class="om-tab">歌单</button>
+            <button class="om-tab">搜索</button>
+          </div>
+          <div class="om-panel">
+            <input class="om-input" type="text" placeholder="搜索歌曲…" >
+            <select class="om-type-select"><option>歌曲</option><option>专辑</option></select>
+            <button class="om-search-btn">搜索</button>
+          </div>
+          <div class="om-results">
+            <div class="om-group">酷狗 · 排行榜</div>
+            <div class="om-result">
+              <span class="rank-badge top1">1</span>
+              <span class="mr-title">我记得</span>
+              <span class="mr-artist">赵雷</span>
+            </div>
+            <div class="om-result">
+              <span class="rank-badge top2">2</span>
+              <span class="mr-title">可能</span>
+              <span class="mr-artist">程响</span>
+            </div>
+            <div class="om-result">
+              <span class="rank-badge top3">3</span>
+              <span class="mr-title">乌梅子酱</span>
+              <span class="mr-artist">李荣浩</span>
+            </div>
+            <div class="om-result">
+              <span class="rank-badge">4</span>
+              <span class="mr-title">向云端</span>
+              <span class="mr-artist">黄绮珊</span>
+            </div>
+            <div class="om-result">
+              <span class="rank-badge">5</span>
+              <span class="mr-title">起风了</span>
+              <span class="mr-artist">买辣椒也用券</span>
+            </div>
+            <div class="om-result">
+              <span class="rank-badge">6</span>
+              <span class="mr-title">兰亭序</span>
+              <span class="mr-artist">周杰伦</span>
+            </div>
+            <div class="om-result">
+              <span class="rank-badge">7</span>
+              <span class="mr-title">孤勇者</span>
+              <span class="mr-artist">陈奕迅</span>
+            </div>
+            <div class="om-result">
+              <span class="rank-badge">8</span>
+              <span class="mr-title">错位时空</span>
+              <span class="mr-artist">艾辰</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="om-hint">点歌曲即整列表加入播放队列；播放控制回到音乐页。</div>
+    </div>
+
+    <!-- ═══ 3. Audio Source Modal ═══ -->
+    <div class="section-label" style="margin-top: var(--spacer-40);">音源管理</div>
+    <div class="src-modal">
+      <div class="src-head">
+        <h2>音源管理</h2>
+        <button class="close-btn">✕</button>
+      </div>
+      <div class="src-list">
+        <div class="src-row">
+          <span class="src-name">酷狗</span>
+          <span class="src-url">https://js.258008.xyz/nian/kg.js</span>
+          <button class="src-del">✕</button>
+        </div>
+        <div class="src-row">
+          <span class="src-name">酷我</span>
+          <span class="src-url">https://js.258008.xyz/nian/kw.js</span>
+          <button class="src-del">✕</button>
+        </div>
+        <div class="src-row">
+          <span class="src-name">网易云</span>
+          <span class="src-url">https://js.258008.xyz/nian/wy.js</span>
+          <button class="src-del">✕</button>
+        </div>
+      </div>
+      <div class="src-add">
+        <input class="src-input" type="text" placeholder="音源 JS 地址（https://…）" >
+        <button class="src-btn">添加 URL</button>
+        <button class="src-btn">本地 .js</button>
+      </div>
+      <div class="src-hint">
+        兼容 MusicFree 插件（含 jsjiami 混淆版，自动适配 axios/he）。音源自备，示例：<code>https://js.258008.xyz/nian/kg.js</code>（酷狗）、<code>https://js.258008.xyz/nian/kw.js</code>（酷我）。
+      </div>
+      <div class="src-actions">
+        <button class="src-done">完成</button>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

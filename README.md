@@ -3,7 +3,7 @@
 Windows 桌面工作台（Tauri v2 + WebView2）。应用嵌入 Explorer 桌面 WorkerW，使工作台成为「桌面本身」——Win+D 回到工作台，任务栏仍可见。
 
 - 侧边导航 + 单模块切换的固定布局
-- 今日概览、工作记录、灵感碎片、系统健康、在线音乐、休息一下（小游戏）、我的速记、系统设置等内置模块
+- 今日概览、工作记录、灵感碎片、系统健康、在线音乐、休息一下（小游戏）、笔记列表、系统设置等内置模块
 - 隐私锁屏（离开自动锁定）、提醒（每日定时 / 间隔 / 久坐 / 喝水）、系统级置顶提醒窗口
 - **可扩展架构：外部 .zip 插件包**，前端与（可选）Rust→wasm 后端都在插件包内，导入即用
 
@@ -20,8 +20,19 @@ cargo tauri dev
 ```
 
 - 前端：`frontend/web/`（`js/` 为 ESM 模块，`css/style.css`）
-- 后端：`src-tauri/src/`（`main.rs` 编排、`sys_bridge.rs` 系统采样、`wasm_plugin.rs` 插件 wasm 运行时、`plugin_pkg.rs` 插件包安装）
+- 后端：`src-tauri/src/`（`main.rs` 编排、`file_index.rs` 全盘索引、`sys_bridge.rs` 系统采样、`wasm_plugin.rs` 插件 wasm 运行时、`plugin_pkg.rs` 插件包安装）
 - 持久化：`state.json` 写入 app_data_dir（音乐类数据独立 `music.json`，工作记录独立 `worklogs.json`）
+
+### 前端冒烟测试（无需 Tauri 运行时）
+
+用真浏览器（headless Chrome + CDP）注入一套假后端，验证主窗口与提醒窗口的关键契约。
+Chrome 路径自动探测，可用 `CHROME=<路径>` 覆盖。
+
+```bash
+node tools/smoke.mjs
+```
+
+覆盖：文件中心搜索结果渲染与右键菜单（必须调用**绝对路径作用域**的 `delete_path`，不得误用桌面作用域的 `delete_file`）、提醒窗口「窗口可见 ⟺ 有内容」不变量与 `hide_reminder` 回调。
 
 ---
 

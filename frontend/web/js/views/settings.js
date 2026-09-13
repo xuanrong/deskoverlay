@@ -1,8 +1,9 @@
-// 系统设置视图：面向应用偏好设置 + 插件管理 + 隐私锁定 + 关于信息。持久化到 state.settings / state.lock / state.plugins。
-import { state, saveState } from "../state.js";
+// 系统设置视图：面向应用偏好设置 + 插件管理 + 隐私锁定 + 备份恢复 + 关于信息。持久化到 state.settings / state.lock / state.plugins。
+import { state, saveState, loadState } from "../state.js";
 import { invoke } from "../bus.js";
 import { esc, showDialog } from "./common.js";
 import { getPlugins, addPlugin, removePlugin } from "../plugins.js";
+import { pushLockEnabled } from "../lock.js";
 
 export function renderSettings(view) {
   view.header.style.display = "none";
@@ -75,6 +76,24 @@ export function renderSettings(view) {
       </div>
 
       <div class="set-panel">
+        <div class="sec-title">备份与恢复</div>
+        <div class="set-row">
+          <div class="set-info">
+            <div class="set-name">导出备份</div>
+            <div class="set-desc">将所有数据（笔记、工作记录、灵感碎片、任务、设置等）打包为 zip 文件</div>
+          </div>
+          <button class="btn-primary" id="set-backup">导出备份</button>
+        </div>
+        <div class="set-row">
+          <div class="set-info">
+            <div class="set-name">恢复备份</div>
+            <div class="set-desc">从 zip 备份文件恢复数据，当前数据将被覆盖</div>
+          </div>
+          <button class="btn-ghost" id="set-restore">选择备份文件</button>
+        </div>
+      </div>
+
+      <div class="set-panel">
         <div class="sec-title">关于</div>
         <div class="set-row">
           <div class="set-info"><div class="set-name">DeskOverlay</div><div class="set-desc">Windows 桌面工作台 · 数据本地持久化</div></div>
@@ -91,6 +110,8 @@ export function renderSettings(view) {
       if (!state.lock) state.lock = {};
       state.lock.enabled = e.target.checked;
       saveState();
+      // 同步后端监控开关：关闭时降频轮询，开启时恢复每秒空闲推送
+      pushLockEnabled();
     });
     body.querySelector("#set-lock-min").addEventListener("change", (e) => {
       if (!state.lock) state.lock = {};
@@ -129,6 +150,74 @@ export function renderSettings(view) {
         } finally {
           mediaBtn.textContent = "测试";
           mediaBtn.disabled = false;
+        }
+      });
+    }
+
+    // 备份
+    const backupBtn = body.querySelector("#set-backup");
+    if (backupBtn) {
+      backupBtn.addEventListener("click", async () => {
+        backupBtn.textContent = "导出中…";
+        backupBtn.disabled = true;
+        try {
+          let savePath = null;
+          try {
+            savePath = await invoke("plugin:dialog|save", {
+              options: {
+                title: "选择备份保存位置",
+                defaultPath: `deskoverlay-backup-${new Date().toISOString().slice(0, 10)}.zip`,
+                filters: [{ name: "备份文件", extensions: ["zip"] }],
+              },
+            });
+          } catch (_) { savePath = null; }
+          if (!savePath || (typeof savePath !== "string")) { backupBtn.textContent = "导出备份"; backupBtn.disabled = false; return; }
+          await invoke("backup_data", { zipPath: savePath });
+          showDialog({ title: "备份完成", message: `数据已导出到：\n${savePath}`, okText: "知道了", showCancel: false });
+        } catch (e) {
+          showDialog({ title: "备份失败", message: String(e && e.message || e), okText: "知道了", showCancel: false });
+        } finally {
+          backupBtn.textContent = "导出备份";
+          backupBtn.disabled = false;
+        }
+      });
+    }
+
+    // 恢复
+    const restoreBtn = body.querySelector("#set-restore");
+    if (restoreBtn) {
+      restoreBtn.addEventListener("click", async () => {
+        let zipPath = null;
+        try {
+          const picked = await invoke("plugin:dialog|open", {
+            options: { multiple: false, title: "选择备份文件", filters: [{ name: "备份文件", extensions: ["zip"] }] },
+          }).catch(() => null);
+          zipPath = typeof picked === "string" && picked ? picked : null;
+        } catch (_) { zipPath = null; }
+        if (!zipPath) return;
+
+        const confirmed = await showDialog({
+            title: "确认恢复",
+            message: "恢复将覆盖当前所有数据，且无法撤销。\n确定继续吗？",
+            okText: "确认恢复",
+            cancelText: "取消",
+            danger: true,
+          });
+        if (!confirmed) return;
+
+        restoreBtn.textContent = "恢复中…";
+        restoreBtn.disabled = true;
+        try {
+          await invoke("restore_data", { zipPath });
+          // 重新加载状态
+          await loadState();
+          await showDialog({ title: "恢复完成", message: "数据已恢复，即将刷新页面以应用更改。", okText: "刷新", showCancel: false });
+          location.reload();
+        } catch (e) {
+          showDialog({ title: "恢复失败", message: String(e && e.message || e), okText: "知道了", showCancel: false });
+        } finally {
+          restoreBtn.textContent = "选择备份文件";
+          restoreBtn.disabled = false;
         }
       });
     }

@@ -323,7 +323,11 @@ function applyArtwork(el, artwork) {
 // 兼容 MusicFree 协议插件（含 jsjiami 混淆版）：
 //   module.exports = { platform, async search(kw, page, type), async getMediaSource(song, quality) }
 // 通过 require polyfill 提供 mock axios / he，把 HTTP 请求转到 Rust 代理（无 CORS、可带 headers）。
+// 实例缓存：同一脚本只执行一次，避免每次搜索/取流/歌词都重新解析执行（脚本往往数百 KB 且混淆）。
+// 执行抛错不缓存（下次调用可重试，addSource 的正则兜底不受影响）。
+const pluginCache = new Map();
 function loadMusicPlugin(code) {
+  if (pluginCache.has(code)) return pluginCache.get(code);
   const mod = { exports: {} };
 
   const safeParse = (text) => { try { return JSON.parse(text); } catch { return text; } };
@@ -469,7 +473,9 @@ function loadMusicPlugin(code) {
   const out = mod.exports || {};
   // Parcel/ESM 打包的插件会把真实实例挂在 .default 上，需解包；
   // 不解包则 plugin.search / getMediaSource 等全部为 undefined（表现为「缺少search」）
-  return out.default && typeof out.default === "object" ? out.default : out;
+  const plugin = out.default && typeof out.default === "object" ? out.default : out;
+  pluginCache.set(code, plugin);
+  return plugin;
 }
 
 // ---- 音源管理弹窗：添加（URL/本地 js）/ 移除 ----
@@ -651,7 +657,7 @@ export function renderMusic(view) {
     curEl.textContent = fmt(musicAudio.currentTime);
     if (musicAudio.duration) {
       durEl.textContent = fmt(musicAudio.duration);
-      fillEl.style.width = (musicAudio.currentTime / musicAudio.duration * 100) + "%";
+      fillEl.style.transform = `scaleX(${musicAudio.currentTime / musicAudio.duration})`;
     }
     if (lyricEl) renderLyric();
   }
@@ -666,8 +672,8 @@ export function renderMusic(view) {
   function onPlayPause() { updatePlayBtn(); syncPlayerButtons?.(); }
   function onTime() {
     curEl.textContent = fmt(musicAudio.currentTime);
-    if (musicAudio.duration) fillEl.style.width = (musicAudio.currentTime / musicAudio.duration * 100) + "%";
-    // 歌词同步高亮
+    if (musicAudio.duration) fillEl.style.transform = `scaleX(${musicAudio.currentTime / musicAudio.duration})`;
+    // 歌词同步高亮：只动「上一行移除 + 当前行添加」两个节点（O(1)，避免每次换行全列表重设 class）
     if (currentLyric.length && lyricEl) {
       let idx = -1;
       for (let i = 0; i < currentLyric.length; i++) {
@@ -675,10 +681,15 @@ export function renderMusic(view) {
         else break;
       }
       if (idx !== -1 && idx !== lastLyricIdx) {
+        const prev = lyricEl.children[lastLyricIdx];
+        if (prev) prev.classList.remove("cur");
+        const cur = lyricEl.children[idx];
+        if (cur) {
+          cur.classList.add("cur");
+          // 平滑滚动由容器 CSS scroll-behavior 提供，无需 JS 侧重复指定
+          cur.scrollIntoView({ block: "center" });
+        }
         lastLyricIdx = idx;
-        lyricEl.querySelectorAll(".ly-line").forEach((el, j) => el.classList.toggle("cur", j === idx));
-        const cur = lyricEl.querySelector(".ly-line.cur");
-        if (cur && cur.scrollIntoView) cur.scrollIntoView({ block: "center", behavior: "smooth" });
       }
     }
   }

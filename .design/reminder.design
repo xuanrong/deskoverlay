@@ -22,6 +22,113 @@
         "htmlSrc": "pages/reminder.html",
         "interactions": []
       }
+    },
+    {
+      "id": "page-music",
+      "title": "在线音乐 & 音源",
+      "type": "page",
+      "version": 1,
+      "createdAt": 1788792000000,
+      "canvasData": {
+        "x": 0,
+        "y": 285,
+        "group": 1,
+        "layoutSnapshot": {
+          "version": 1,
+          "contentHeight": 590,
+          "viewportWidth": 799,
+          "sourceHash": "fnv1a-8edd99ae",
+          "measuredAt": 1788959744418
+        },
+        "deviceType": "freeSize",
+        "windowSize": {
+          "width": 799,
+          "height": 590
+        }
+      },
+      "devMetadata": {
+        "htmlSrc": "pages/music.html",
+        "interactions": []
+      }
+    },
+    {
+      "id": "page-lock",
+      "title": "锁屏页面",
+      "type": "page",
+      "version": 1,
+      "createdAt": 1788850000000,
+      "canvasData": {
+        "x": 0,
+        "y": 567,
+        "group": 2,
+        "layoutSnapshot": {
+          "version": 1,
+          "contentHeight": 600,
+          "viewportWidth": 800,
+          "sourceHash": "fnv1a-6cfa3ebd",
+          "measuredAt": 1788793493745
+        }
+      },
+      "devMetadata": {
+        "htmlSrc": "pages/lock.html",
+        "interactions": []
+      }
+    },
+    {
+      "id": "page-notes",
+      "title": "我的速记",
+      "type": "page",
+      "version": 1,
+      "createdAt": 1788959120000,
+      "canvasData": {
+        "x": 0,
+        "y": 852,
+        "group": 3,
+        "deviceType": "freeSize",
+        "windowSize": {
+          "width": 799,
+          "height": 477
+        },
+        "layoutSnapshot": {
+          "version": 1,
+          "contentHeight": 477,
+          "viewportWidth": 799,
+          "sourceHash": "fnv1a-eb450186",
+          "measuredAt": 1789136872194
+        }
+      },
+      "devMetadata": {
+        "htmlSrc": "pages/notes.html",
+        "interactions": []
+      }
+    },
+    {
+      "id": "page-quickaccess",
+      "title": "快捷访问",
+      "type": "page",
+      "version": 1,
+      "createdAt": 1789136676000,
+      "canvasData": {
+        "x": 0,
+        "y": 1101,
+        "group": 4,
+        "deviceType": "freeSize",
+        "windowSize": {
+          "width": 1200,
+          "height": 800
+        },
+        "layoutSnapshot": {
+          "version": 1,
+          "contentHeight": 800,
+          "viewportWidth": 1200,
+          "sourceHash": "fnv1a-fb31a52c",
+          "measuredAt": 1789137329957
+        }
+      },
+      "devMetadata": {
+        "htmlSrc": "pages/quickaccess.html",
+        "interactions": []
+      }
     }
   ],
   "config": {

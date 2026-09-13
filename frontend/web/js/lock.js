@@ -6,8 +6,7 @@ import { Heartbeat, invoke } from "./bus.js";
 
 let lastActive = Date.now();
 let globalIdleMs = -1; // 由后端 system-idle 提供全局空闲毫秒（Tauri）
-let audioPlaying = false; // 是否有音频/视频正在播放
-let audioProbeTick = 0;   // 每 3 秒采样一次，与后端锁屏采样频率一致
+let audioPlaying = false; // 是否有音频/视频正在播放（同由 system-idle 事件提供，后端每 3 秒枚举一次）
 let intervalId = null;
 let locked = false;
 
@@ -71,14 +70,17 @@ const LOCK_PLANETS = [
 const LOCK_STAR_COUNT = 260;
 
 // 启动星空 canvas 动画，返回取消函数
+// 性能优化：预计算渐变、dpr 上限 1.5、star 用 fillRect、缓存 min(W,H)
 function startSkyAnim(canvas, planetsRef) {
   const ctx = canvas.getContext("2d");
   let dpr = 1, W = 0, H = 0, cx = 0, cy = 0;
   let stars = [];
   let raf = 0;
+  let planetGrads = [];
+  let planetRadii = [];
 
   function resize() {
-    dpr = Math.max(1, window.devicePixelRatio || 1);
+    dpr = Math.min(1.5, Math.max(1, window.devicePixelRatio || 1));
     W = canvas.clientWidth || window.innerWidth;
     H = canvas.clientHeight || window.innerHeight;
     canvas.width = Math.round(W * dpr);
@@ -96,34 +98,45 @@ function startSkyAnim(canvas, planetsRef) {
         base: 0.25 + Math.random() * 0.6, tw: 1.5 + Math.random() * 3.5, ph: Math.random() * Math.PI * 2,
       });
     }
+    // 预计算行星渐变（以 (0,0) 为球心）
+    planetGrads = [];
+    planetRadii = [];
+    const min = Math.min(W, H);
+    for (const p of planetsRef) {
+      const rad = p.r * min;
+      planetRadii.push(rad);
+      const g = ctx.createRadialGradient(-rad * 0.35, -rad * 0.35, rad * 0.1, 0, 0, rad);
+      g.addColorStop(0, p.colors[0]);
+      g.addColorStop(0.55, p.colors[1]);
+      g.addColorStop(1, p.colors[2]);
+      planetGrads.push(g);
+    }
   }
 
-  function drawCircle(px, py, radius, stops) {
-    const g = ctx.createRadialGradient(px - radius * 0.35, py - radius * 0.35, radius * 0.1, px, py, radius);
-    g.addColorStop(0, stops[0]);
-    g.addColorStop(0.55, stops[1]);
-    g.addColorStop(1, stops[2]);
+  function drawPlanet(idx, px, py) {
+    ctx.save();
+    ctx.translate(px, py);
+    ctx.fillStyle = planetGrads[idx];
     ctx.beginPath();
-    ctx.arc(px, py, radius, 0, Math.PI * 2);
-    ctx.fillStyle = g;
+    ctx.arc(0, 0, planetRadii[idx], 0, Math.PI * 2);
     ctx.fill();
+    ctx.restore();
   }
 
   function frame(now) {
     const t = now / 1000;
+    const min = Math.min(W, H);
     ctx.clearRect(0, 0, W, H);
+    ctx.fillStyle = "#fff";
     for (const s of stars) {
       const a = s.base + Math.sin(t * s.tw + s.ph) * 0.35;
       ctx.globalAlpha = Math.max(0, Math.min(1, a));
-      ctx.fillStyle = "#fff";
-      ctx.beginPath();
-      ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
-      ctx.fill();
+      const sz = s.r * 2;
+      ctx.fillRect(s.x - s.r, s.y - s.r, sz, sz);
     }
     ctx.globalAlpha = 1;
 
-    // 星系核心辉光
-    const coreR = 0.13 * Math.min(W, H);
+    const coreR = 0.13 * min;
     const core = ctx.createRadialGradient(cx, cy, 0, cx, cy, coreR);
     core.addColorStop(0, "rgba(255,215,150,0.35)");
     core.addColorStop(0.5, "rgba(255,170,110,0.12)");
@@ -137,14 +150,15 @@ function startSkyAnim(canvas, planetsRef) {
     for (const p of planetsRef) {
       ctx.strokeStyle = "rgba(255,255,255,0.10)";
       ctx.beginPath();
-      ctx.ellipse(cx, cy, p.rx * Math.min(W, H), p.ry * Math.min(W, H), 0, 0, Math.PI * 2);
+      ctx.ellipse(cx, cy, p.rx * min, p.ry * min, 0, 0, Math.PI * 2);
       ctx.stroke();
     }
     ctx.save();
-    for (const p of planetsRef) {
-      const x = cx + Math.cos(p.a0) * p.rx * Math.min(W, H);
-      const y = cy + Math.sin(p.a0) * p.ry * Math.min(W, H);
-      const rad = p.r * Math.min(W, H);
+    for (let idx = 0; idx < planetsRef.length; idx++) {
+      const p = planetsRef[idx];
+      const x = cx + Math.cos(p.a0) * p.rx * min;
+      const y = cy + Math.sin(p.a0) * p.ry * min;
+      const rad = planetRadii[idx];
       if (p.ring) {
         ctx.save();
         ctx.translate(x, y);
@@ -161,7 +175,7 @@ function startSkyAnim(canvas, planetsRef) {
         ctx.stroke();
         ctx.restore();
       }
-      drawCircle(x, y, rad, p.colors);
+      drawPlanet(idx, x, y);
       ctx.save();
       ctx.translate(x, y);
       ctx.globalAlpha = 0.10;
@@ -204,6 +218,9 @@ function buildOverlay() {
   return ov;
 }
 
+// 页面内遮罩回退：仅在浏览器开发态有实际防护意义。
+// 打包版主窗口已注入 WorkerW 成为「桌面本身」，该遮罩会被任何前台应用盖住，
+// 因此它不能替代系统级锁屏窗口——建窗失败的正解是后端重试（见 show_lock）。
 function showLock() {
   if (document.getElementById("lock-overlay")) return;
   const ov = buildOverlay();
@@ -217,10 +234,12 @@ async function doLock() {
   const tauri = window.__TAURI__ || window.__TAURI_INTERNALS__;
   if (tauri && tauri.core && typeof tauri.core.invoke === "function") {
     try {
-      // show_lock 返回是否真正展示了系统级锁屏窗口；false 或调用失败则回退页面内遮罩
-      const shown = await tauri.core.invoke("show_lock");
-      if (shown !== false) return;
-    } catch (_) { /* 命令失败：落到本地浮层 */ }
+      // show_lock 无返回值（建窗是异步的，命令立即返回），因此不能按返回值判断成败。
+      // 后端建窗重试 3 次仍失败时会推 lock-failed，由 startLockController 里的监听器
+      // 重置 locked，让空闲心跳下一轮继续尝试。
+      await tauri.core.invoke("show_lock");
+      return;
+    } catch (_) { /* 命令调用本身失败：落到本地浮层 */ }
   }
   showLock();
 }
@@ -234,18 +253,11 @@ function unlock() {
 
 function tick() {
   if (locked) return;
-  // 每 3 秒采样一次"是否有视频/音乐在播放"，与设置页检测同源（直接查音频会话，不依赖事件）
-  audioProbeTick++;
-  if (audioProbeTick % 3 === 0) {
-    invoke("check_media_playing")
-      .then((b) => { if (typeof b === "boolean") audioPlaying = b; })
-      .catch(() => {});
-  }
   const cfg = state.lock;
   if (!cfg || !cfg.enabled) return;
-  const minutes = Math.min(120, Math.max(1, cfg.minutes || 5));
-  // 正在播放音频/视频时不视为离开，不锁定
+  // 正在播放音频/视频时不视为离开，不锁定（audioPlaying 由后端 system-idle 事件推送）
   if (audioPlaying) return;
+  const minutes = Math.min(120, Math.max(1, cfg.minutes || 5));
   // 优先用全局空闲（任何应用无操作才算空闲）；浏览器开发态退回本地事件估算
   const idleMs = globalIdleMs >= 0 ? globalIdleMs : (Date.now() - lastActive);
   if (idleMs >= minutes * 60000) {
@@ -253,23 +265,39 @@ function tick() {
   }
 }
 
+// 将锁屏开关推送给后端：未启用时后端降频轮询（暂停音频枚举与空闲事件推送），避免常驻空转。
+// 浏览器开发态 invoke 回退 Bus 模拟，无副作用。
+export function pushLockEnabled() {
+  invoke("set_lock_monitor_enabled", { enabled: !!(state.lock && state.lock.enabled) }).catch(() => {});
+}
+
 export function startLockController() {
   ACTIVITY_EVENTS.forEach((e) => window.addEventListener(e, onActivity, { passive: true }));
   document.addEventListener("visibilitychange", () => { if (!document.hidden) lastActive = Date.now(); });
   // 空闲检测走统一秒级心跳
   intervalId = Heartbeat.on(tick);
-  // 后端全局空闲事件：无论在哪应用操作都刷新
+  // 推送初始开关状态（loadState 已完成，state.lock 就绪）
+  pushLockEnabled();
+  // 后端全局空闲事件：无论在哪应用操作都刷新；
+  // audioPlaying 同源消费（后端每 3 秒枚举一次音频会话），替代前端 invoke 轮询的重复枚举
   if ((window.__TAURI__ || window.__TAURI_INTERNALS__) && window.__TAURI__?.event?.listen) {
     window.__TAURI__.event.listen("system-idle", (e) => {
       const p = e?.payload || {};
-      // 只消费全局空闲时长；audioPlaying 由 tick 内 direct invoke 采样（更可靠、同源于设置页检测）
       if (typeof p.idleMs === "number") globalIdleMs = p.idleMs;
+      if (typeof p.audioPlaying === "boolean") audioPlaying = p.audioPlaying;
     }).catch(() => {});
     // 系统级锁屏窗口解锁后，重置主窗口的锁定状态
     window.__TAURI__.event.listen("lock-hide", () => {
       locked = false;
       lastActive = Date.now();
       globalIdleMs = -1;
+    }).catch(() => {});
+    // 系统级锁屏建窗失败（后端已重试 3 次）：必须重置 locked，否则 tick() 会被
+    // `if (locked) return` 永久拦住，锁定功能在本进程内彻底失效。
+    // 重置后空闲计时从头开始，下一轮仍会重试。
+    window.__TAURI__.event.listen("lock-failed", () => {
+      locked = false;
+      lastActive = Date.now();
     }).catch(() => {});
   }
 }

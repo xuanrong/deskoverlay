@@ -11,7 +11,7 @@ export const MODULES = [
   { id: "system", title: "系统健康", icon: ICON_ACTIVITY },
   { id: "music", title: "在线音乐", icon: ICON_MUSIC },
   { id: "relax", title: "休息一下", icon: ICON_GAME },
-  { id: "notes", title: "我的速记", icon: ICON_NOTES },
+  { id: "notes", title: "笔记列表", icon: ICON_NOTES },
   { id: "settings", title: "系统设置", icon: ICON_GEAR },
 ];
 

@@ -35,6 +35,16 @@ pub fn stop_system_sampling() {
     SYSTEM_SAMPLING_ON.store(false, Ordering::Relaxed);
 }
 
+/// 隐私锁屏是否启用（由前端 set_lock_monitor_enabled 推送）。
+/// 未启用时空闲监控降频：暂停音频枚举与 system-idle 事件推送，仅低频轮询开关。
+static LOCK_MONITOR_ON: AtomicBool = AtomicBool::new(false);
+
+/// 前端推送隐私锁屏开关（启动时与设置页变更时调用）。
+#[tauri::command]
+pub fn set_lock_monitor_enabled(enabled: bool) {
+    LOCK_MONITOR_ON.store(enabled, Ordering::Relaxed);
+}
+
 /// 读取真实电源状态，返回 (电池百分比, 电源标签)。
 /// 电源标签：AC（插电）/ BATTERY（使用电池）/ CHARGING（充电中）。
 /// 桌面台式机无电池时返回 (0, "AC")。
@@ -221,27 +231,33 @@ pub fn check_media_playing() -> bool {
     is_audio_playing()
 }
 
-/// 全局空闲监控：每秒把"距上次输入的毫秒数"与"是否有音频播放"推送给前端
+/// 全局空闲监控：锁屏启用期间每秒把"距上次输入的毫秒数"与"是否有音频播放"推送给前端
 /// （system-idle 事件）。供隐私锁屏使用——无论用户在哪应用操作都不算空闲，
 /// 且播放视频/音乐时即使无输入也不触发锁定。
+/// 锁屏未启用时事件无消费者：降频至 5 秒轮询开关，音频枚举（COM，开销较大）随之暂停。
 pub fn start_lock_idle_monitor(app: AppHandle) {
     std::thread::spawn(move || {
         // 空闲时长每秒都发（及时）；音频枚举开销较大，每 3 秒做一次并缓存结果
         let mut audio_playing = false;
         let mut tick = 0u32;
         loop {
-            if tick % 3 == 0 {
-                audio_playing = is_audio_playing();
+            if LOCK_MONITOR_ON.load(Ordering::Relaxed) {
+                if tick % 3 == 0 {
+                    audio_playing = is_audio_playing();
+                }
+                tick = tick.wrapping_add(1);
+                let _ = app.emit(
+                    "system-idle",
+                    serde_json::json!({
+                        "idleMs": last_input_idle_ms(),
+                        "audioPlaying": audio_playing,
+                    }),
+                );
+                std::thread::sleep(Duration::from_secs(1));
+            } else {
+                // 锁屏未启用：无消费者，低频轮询开关即可
+                std::thread::sleep(Duration::from_secs(5));
             }
-            tick = tick.wrapping_add(1);
-            let _ = app.emit(
-                "system-idle",
-                serde_json::json!({
-                    "idleMs": last_input_idle_ms(),
-                    "audioPlaying": audio_playing,
-                }),
-            );
-            std::thread::sleep(Duration::from_secs(1));
         }
     });
 }
