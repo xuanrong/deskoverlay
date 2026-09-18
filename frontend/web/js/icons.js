@@ -57,6 +57,8 @@ export const ICON_PAUSE = `<svg viewBox="0 0 24 24"><path d="M8 4v16"/><path d="
 export const ICON_LIST = `<svg viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13"/><path d="M3.5 6h.01M3.5 12h.01M3.5 18h.01"/></svg>`;
 export const ICON_MORE = `<svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>`;
 export const ICON_VOLUME = `<svg viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>`;
+// 静音：喇叭 + 斜杠（覆盖原声波弧线）
+export const ICON_VOLUME_MUTE = `<svg viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="m16 9 6 6"/><path d="m22 9-6 6"/></svg>`;
 // 桌面歌词（条状浮层 + 两行歌词文本）
 export const ICON_LYRICS = `<svg viewBox="0 0 24 24"><rect x="2.5" y="5" width="19" height="14" rx="2.5"/><path d="M6.5 10h7"/><path d="M6.5 14h11"/></svg>`;
 

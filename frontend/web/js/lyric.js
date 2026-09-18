@@ -34,11 +34,13 @@ const textEl = document.getElementById("text");
 const fillEl = document.getElementById("fill");
 const line2El = document.getElementById("line2");
 const text2El = document.getElementById("text2");
+const btnLock = document.getElementById("btn-lock");
 
 const FONT_MIN = 12, FONT_MAX = 28, FONT_STEP = 2;
 const DEFAULT_TEXT = "桌面歌词 · 待播放";
 const FORMS = ["single", "double"];
 const STYLES = ["stroke", "capsule", "bold"];
+const ALIGNS = ["left", "center", "right"];
 
 // ───────────────────────── 显示状态 ─────────────────────────
 // locked / fontSize / form / style 都只在本页保存「当前生效值」，权威来源是 state.json。
@@ -51,6 +53,7 @@ let fontSize = 22;
 let playing = false;
 let form = "single";         // single | double（决定窗口高度，由 Rust 侧实际改尺寸）
 let styleMode = "stroke";    // stroke | capsule | bold
+let align = "center";        // 歌词对齐方式：left | center | right（参考网易云）
 let colorText = "";          // 文字颜色（#RGB/#RRGGBB；空 = 默认近白）
 let colorFill = "";          // 卡拉OK染色色（空 = 跟随主题品牌色）
 let offsetVal = 0;           // 歌词时间偏移（秒；正 = 提前，负 = 延后）
@@ -205,17 +208,40 @@ function setFontSize(px) {
   // 不重算的话，染色会按旧宽度的边界裁切，与文字本体错位。
   refreshWordCuts();
 }
+
+// 重算当前行的字符宽度表（字号 / 字体变化后调用）。
+// 用当前实际渲染样式量取，保证与文字本体的度量完全一致。
+function refreshWordCuts() {
+  if (!words || !textEl.textContent) return;
+  const cs = getComputedStyle(textEl);
+  const font = `${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
+  const cuts = measureCharWidths(textEl.textContent, font);
+  wordCuts = cuts && cuts.length === words.length ? cuts : null;
+  if (!wordCuts) words = null;   // 度量失败则回退整行线性扫描，宁可粗也不能错位
+}
+
+// 字号增减：本地即时应用 + 交 Rust 广播持久化。
+// 到边界时不再调用（否则每次点击都会白推一次 IPC）。
+function bumpFont(delta) {
+  const next = Math.min(FONT_MAX, Math.max(FONT_MIN, fontSize + delta));
+  if (next === fontSize) return;
+  commitDisplay({ fontSize: next });
+}
 // ───────────────────────── 显示形态 / 视觉模式 ─────────────────────────
 // 本页只负责 **CSS 层面**的切换（data-form / data-style）。
 // 单双行的**窗口高度**（56 → 88）必须由 Rust 侧真的改窗口尺寸 ——
 // 留一块透明区来「假装双行」会让条下方那段区域吞掉鼠标，破坏穿透。
 // 故这里只更新本地状态与 DOM，尺寸变更与持久化都交给 Rust
 // （lyric_commit_display 会改尺寸并广播出去，由主窗口落盘）。
-function applyDisplay(f, s, size, ct, cf, off) {
+function applyDisplay(cfg) {
+  const f = cfg?.form, s = cfg?.style, al = cfg?.align;
+  const size = cfg?.fontSize, ct = cfg?.colorText, cf = cfg?.colorFill, off = cfg?.offset;
   form = FORMS.includes(f) ? f : "single";
   styleMode = STYLES.includes(s) ? s : "stroke";
+  align = ALIGNS.includes(al) ? al : "center";
   bar.dataset.form = form;
   bar.dataset.style = styleMode;
+  bar.dataset.align = align;
   if (typeof size === "number") setFontSize(size);
   // 配色："" = 回到默认（文字近白 / 染色跟随主题品牌色）。
   // 回退必须用 removeProperty 而非 setProperty(name, "") —— 空值的自定义属性
@@ -231,93 +257,23 @@ function applyDisplay(f, s, size, ct, cf, off) {
   }
   // 时间偏移：半秒步进，clamp ±5。本页只存生效值；推送节奏由主窗口驱动。
   if (typeof off === "number" && isFinite(off)) offsetVal = Math.max(-5, Math.min(5, Math.round(off * 2) / 2));
-  // 面板色板的高亮跟随生效值（变量/档位可能来自 Rust 广播）
-  syncPanelUI();
-  // 按钮文字跟随生效值：Rust 广播（设置页改动 / 新建窗口）与本页点击都走这里，
-  // 保证「按钮上写的」与「实际生效的」永不脱节。
-  syncToolLabels();
+  syncLockBtn();
 }
 
-// ───────────────────────── 设置面板（网易云样式） ─────────────────────────
-// 色板点选（不搞连点循环）+ 偏移 ± 步进。展开时窗口向上加高、底边锚定，
-// 歌词条在屏幕上不动 —— 尺寸变化全部交 Rust（panel_height 事件），页面只改 data-panel。
-const panelEl = document.getElementById("panel");
-const swTextEl = document.getElementById("sw-text");
-const swFillEl = document.getElementById("sw-fill");
-const offValEl = document.getElementById("off-val");
-const TEXT_PRESETS = ["", "#FFE9A8", "#B8F1E0", "#FFD6E0", "#CFE3FF"];
-const FILL_PRESETS = ["", "#58A6FF", "#3FBF7F", "#FF9F43", "#FF6B9D", "#8B7CF6"];
-
-function renderSwatches(host, list, cur, field) {
-  if (!host) return;
-  host.innerHTML = list.map((c) => `
-    <button class="ly-sw ${c === "" ? "def" : ""} ${c === cur ? "active" : ""}"
-            data-v="${c}" title="${c === "" ? "跟随默认" : c}"
-            style="${c ? `background:${c}` : ""}"></button>`).join("");
-  host.querySelectorAll(".ly-sw").forEach((b) => b.addEventListener("click", () => {
-    commitDisplay({ [field]: b.dataset.v });
-  }));
-}
-
-function syncPanelUI() {
-  renderSwatches(swTextEl, TEXT_PRESETS, colorText, "colorText");
-  renderSwatches(swFillEl, FILL_PRESETS, colorFill, "colorFill");
-  if (offValEl) offValEl.textContent = offsetVal === 0 ? "同步" : `${offsetVal > 0 ? "+" : ""}${offsetVal}s`;
-}
-
-function panelOpen() { return bar.dataset.panel === "open"; }
-function setPanelOpen(v) {
-  if (panelOpen() === v) return;
-  bar.dataset.panel = v ? "open" : "closed";
-  // 通知 Rust 改窗口高度（面板行高 ≈ 36px）。失败则回滚标记，避免「面板显示了
-  // 但窗口没加高」——那会把工具条和歌词挤出窗口外。
-  invoke("lyric_panel", { open: v }).catch(() => { bar.dataset.panel = v ? "closed" : "open"; });
-}
-
-// 用户主动改配置 → 本地先应用（即时反馈），再交 Rust 改尺寸并广播持久化。
-// payload 恒带全部字段：主窗口/歌词页任一入口改动，另一侧都能拿到完整配置。
+// 用户/弹窗改配置 → 本地先应用（即时反馈），再交 Rust 广播持久化（主窗口落盘）。
+// payload 恒带全部字段：任一入口改动，另一侧都能拿到完整配置。
 function commitDisplay(patch) {
   const payload = {
     form: patch.form ?? form,
     style: patch.style ?? styleMode,
+    align: patch.align ?? align,
     fontSize: patch.fontSize ?? fontSize,
     colorText: patch.colorText ?? colorText,
     colorFill: patch.colorFill ?? colorFill,
     offset: patch.offset ?? offsetVal,
   };
-  applyDisplay(payload.form, payload.style, payload.fontSize, payload.colorText, payload.colorFill, payload.offset);
+  applyDisplay(payload);
   invoke("lyric_commit_display", payload).catch(() => {});
-}
-
-function setForm(f) {
-  const next = FORMS.includes(f) ? f : "single";
-  if (next === form) return;
-  commitDisplay({ form: next });
-}
-
-function setStyleMode(s) {
-  const next = STYLES.includes(s) ? s : "stroke";
-  if (next === styleMode) return;
-  commitDisplay({ style: next });
-}
-
-// 字号增减：本地即时应用 + 交 Rust 广播持久化。
-// 到边界时不再调用（否则每次点击都会白推一次 IPC）。
-function bumpFont(delta) {
-  const next = Math.min(FONT_MAX, Math.max(FONT_MIN, fontSize + delta));
-  if (next === fontSize) return;
-  commitDisplay({ fontSize: next });
-}
-
-// 重算当前行的字符宽度表（字号 / 字体变化后调用）。
-// 用当前实际渲染样式量取，保证与文字本体的度量完全一致。
-function refreshWordCuts() {
-  if (!words || !textEl.textContent) return;
-  const cs = getComputedStyle(textEl);
-  const font = `${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
-  const cuts = measureCharWidths(textEl.textContent, font);
-  wordCuts = cuts && cuts.length === words.length ? cuts : null;
-  if (!wordCuts) words = null;   // 度量失败则回退整行线性扫描，宁可粗也不能错位
 }
 
 // ───────────────────────── 锁定 / 穿透 ─────────────────────────
@@ -360,6 +316,10 @@ let drag = null;
 async function onDown(e) {
   if (locked || !win) return;
   if (e.button !== 0) return;
+  // 工具条按钮与设置菜单区域都不触发拖动：菜单项是 .ly-mi（非 .ly-btn），
+  // 不排除的话按下菜单项会启动拖动并 setPointerCapture —— 后续 click 被重定向到
+  // #bar，菜单项的 click 处理器永远收不到（「点菜单没反应」的根源），
+  // 且鼠标稍动整个歌词条就被拖走（「菜单位置不对」的同一根源）。
   if (e.target.closest(".ly-btn")) return;   // 工具条按钮不触发拖动
   let pos, scale;
   try {
@@ -372,16 +332,29 @@ async function onDown(e) {
     px: pos.x, py: pos.y,              // 窗口起点（物理 px）
     scale: scale || 1,
     tx: null, ty: null, raf: 0,
+    moved: false,                      // 未实际移动前不算拖动（见 onMove）
   };
-  bar.classList.add("dragging");
+  // 按下瞬间**不加** dragging 视觉态：dragging = opacity 0.85（半透明发灰），
+  // 单纯点击歌词也会闪一下灰 ——「点击一闪一闪变灰」的根源。
+  // 拖动视觉态延迟到 onMove 里位移超过阈值才进入（见 DRAG_THRESHOLD）。
   try { bar.setPointerCapture(e.pointerId); } catch {}
 }
 
+// 位移超过该值（CSS px）才视为拖动：区分「点击」与「拖动」，点击零视觉变化
+const DRAG_THRESHOLD = 3;
+
 function onMove(e) {
   if (!drag) return;
+  const dx = e.screenX - drag.sx;
+  const dy = e.screenY - drag.sy;
+  if (!drag.moved) {
+    if (Math.abs(dx) < DRAG_THRESHOLD && Math.abs(dy) < DRAG_THRESHOLD) return;
+    drag.moved = true;
+    bar.classList.add("dragging");     // 真拖动才进入半透明视觉态
+  }
   // screenX/Y 是 CSS px，乘 scaleFactor 换成物理 px 才能与窗口坐标同量纲
-  drag.tx = drag.px + (e.screenX - drag.sx) * drag.scale;
-  drag.ty = drag.py + (e.screenY - drag.sy) * drag.scale;
+  drag.tx = drag.px + dx * drag.scale;
+  drag.ty = drag.py + dy * drag.scale;
   if (drag.raf) return;
   drag.raf = requestAnimationFrame(() => {
     if (!drag) return;
@@ -396,7 +369,8 @@ function onUp() {
   drag = null;
   if (d.raf) cancelAnimationFrame(d.raf);
   bar.classList.remove("dragging");
-  const apply = d.tx != null
+  // 未实际拖动（纯点击）不提交位置：省一次 IPC，也避免落盘抖动
+  const apply = d.moved && d.tx != null
     ? invoke("lyric_move", { x: Math.round(d.tx), y: Math.round(d.ty) })
     : Promise.resolve();
   apply.then(commitPos).catch(() => {});
@@ -425,24 +399,6 @@ async function commitPos() {
   } catch { /* 位置提交失败不影响显示 */ }
 }
 
-// ───────────────────────── 形态 / 样式切换按钮 ─────────────────────────
-// 曾经这里是一套右键菜单，已移除：歌词条默认穿透锁定，鼠标事件到不了页面，
-// 右键毫无反应；必须先悬停解锁，等于要求用户先猜一个隐藏前提。
-// 现在改成工具条上的可见按钮 —— 悬停解锁后直接点，状态还常驻可见。
-const btnForm = document.getElementById("btn-form");
-const btnStyle = document.getElementById("btn-style");
-const btnLock = document.getElementById("btn-lock");
-
-// 按钮文字 = 当前生效值（而不是「点一下会变成什么」）：
-// 用户扫一眼就知道现在是什么状态，不用先点一次试探。
-const STYLE_LABEL = { stroke: "描边", capsule: "胶囊", bold: "加粗" };
-
-function syncToolLabels() {
-  if (btnForm) btnForm.textContent = form === "double" ? "双行" : "单行";
-  if (btnStyle) btnStyle.textContent = STYLE_LABEL[styleMode] || "描边";
-  syncLockBtn();
-}
-
 // ───────────────────────── 事件接线 ─────────────────────────
 bar.addEventListener("pointerdown", onDown);
 bar.addEventListener("pointermove", onMove);
@@ -454,21 +410,9 @@ bar.addEventListener("pointercancel", onUp);
 btnLock.addEventListener("click", () => setLocked(!locked));
 document.getElementById("btn-smaller").addEventListener("click", () => bumpFont(-FONT_STEP));
 document.getElementById("btn-bigger").addEventListener("click", () => bumpFont(FONT_STEP));
-// 形态：单行 ⇄ 双行；样式：描边 → 胶囊 → 加粗 循环。
-// 都走 commitDisplay（Rust 改窗口高度 + 全局广播持久化），而非只改本地 DOM。
-btnForm.addEventListener("click", () => setForm(form === "double" ? "single" : "double"));
-btnStyle.addEventListener("click", () => setStyleMode(STYLES[(STYLES.indexOf(styleMode) + 1) % STYLES.length]));
-// 时间偏移：面板内 ± 步进（0.5s），clamp ±5；正 = 提前，负 = 延后
-document.getElementById("btn-panel").addEventListener("click", () => setPanelOpen(!panelOpen()));
-document.getElementById("off-plus").addEventListener("click", () => commitDisplay({ offset: Math.min(5, offsetVal + 0.5) }));
-document.getElementById("off-minus").addEventListener("click", () => commitDisplay({ offset: Math.max(-5, offsetVal - 0.5) }));
-// 点击面板外 / Esc → 收起（面板展开时窗口处于加高态，常开会挡住下方内容）
-document.addEventListener("pointerdown", (e) => {
-  if (panelOpen() && !e.target.closest(".ly-panel") && !e.target.closest("#btn-panel")) setPanelOpen(false);
-});
-document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape" && panelOpen()) setPanelOpen(false);
-});
+// 设置：切换独立设置弹窗（lyric_menu 窗口）的显示/隐藏 —— 菜单是独立窗口，
+// 歌词条窗口自身不做任何尺寸变化（「点设置闪一下」的机制性根治）
+document.getElementById("btn-panel").addEventListener("click", () => invoke("lyric_menu_toggle"));
 document.getElementById("btn-close").addEventListener("click", () => {
   invoke("hide_lyric").catch(() => {});
 });
@@ -478,8 +422,7 @@ document.getElementById("btn-close").addEventListener("click", () => {
 // 反过来的话，Rust 侧在 ready 后立即 emit，事件会在 listener 注册完成前发出而丢失
 // （reminder.js 用同一套握手规避过这个竞态）。
 setFontSize(fontSize);
-// 初始按钮文字与 HTML 默认值对齐（真实锁定态随后由 Rust 的 lyric://locked 下发修正）
-syncToolLabels();
+syncLockBtn();
 // 先渲染占位行，确保「窗口可见 ⟺ 有内容」：即便 lyric_ready 后没有任何推送，
 // 用户看到的也是一条有意义的占位歌词，而不是空白透明窗。
 renderLine({ text: "", idle: true });
@@ -521,14 +464,15 @@ Promise.all([
   listen("lyric://display", (e) => {
     const p = e?.payload || {};
     // 权威配置由 Rust 下发（新建窗口、设置页改动、歌词页自身改动的回执都走这里）
-    applyDisplay(
-      p.form,
-      p.style,
-      typeof p.fontSize === "number" ? p.fontSize : undefined,
-      typeof p.colorText === "string" ? p.colorText : undefined,
-      typeof p.colorFill === "string" ? p.colorFill : undefined,
-      typeof p.offset === "number" ? p.offset : undefined,
-    );
+    applyDisplay({
+      form: p.form,
+      style: p.style,
+      align: p.align,
+      fontSize: typeof p.fontSize === "number" ? p.fontSize : undefined,
+      colorText: typeof p.colorText === "string" ? p.colorText : undefined,
+      colorFill: typeof p.colorFill === "string" ? p.colorFill : undefined,
+      offset: typeof p.offset === "number" ? p.offset : undefined,
+    });
   }),
   // 主窗口收起歌词（点音乐页按钮 / 设置里关开关）→ 本页无需动作，Rust 已销毁窗口。
 ])

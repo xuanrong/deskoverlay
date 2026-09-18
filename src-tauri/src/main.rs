@@ -302,6 +302,12 @@ fn hide_reminder(app: tauri::AppHandle) {
 
 /// 歌词窗口页面就绪标志（对齐 REMINDER_PAGE_READY）。
 static LYRIC_PAGE_READY: AtomicBool = AtomicBool::new(false);
+/// 设置弹窗（lyric_menu 独立窗口）的就绪 / 待显示标记。
+/// 弹窗创建是异步的（WebView 初始化），toggle 时未就绪就先记下，就绪后补显示。
+static LYRIC_MENU_READY: AtomicBool = AtomicBool::new(false);
+static LYRIC_MENU_PENDING: AtomicBool = AtomicBool::new(false);
+/// 弹窗当前是否可见（供探测线程做「光标移出弹窗 → 自动收起」判定）。
+static LYRIC_MENU_VISIBLE: AtomicBool = AtomicBool::new(false);
 /// 页面未就绪时暂存的歌词 payload（对齐 PENDING_REMINDER）。
 static PENDING_LYRIC: Mutex<Option<serde_json::Value>> = Mutex::new(None);
 /// 当前**真实**锁定态（穿透中 = true）。
@@ -355,12 +361,6 @@ fn lyric_height_for(form: &str) -> i32 {
 fn lyric_physical_size(scale: f64, form: &str) -> (i32, i32) {
     let (w, h) = (LYRIC_W as f64, lyric_height_for(form) as f64);
     ((w * scale).round() as i32, (h * scale).round() as i32)
-}
-
-/// 设置面板展开时的额外高度（逻辑像素）：面板行高 ≈ 36，与页面 CSS 保持一致。
-/// 展开时窗口向上加高、**底边锚定** —— 歌词条在屏幕上的位置纹丝不动。
-fn lyric_panel_height_for(open: bool) -> i32 {
-    if open { 36 } else { 0 }
 }
 
 /// 取显示器工作区（物理像素）：`(x, y, w, h)`。
@@ -520,31 +520,136 @@ fn is_lyric_color(v: &str) -> bool {
     (b.len() == 4 || b.len() == 7) && b[0] == b'#' && b[1..].iter().all(|c| c.is_ascii_hexdigit())
 }
 
-/// 展开/收起歌词条的设置面板（时间偏移 + 配色）。
-/// 展开时窗口向上加高、底边锚定：先取当前位置，加高后把 y 上移加高量，
-/// 歌词条底部在屏幕上不动 —— 与单双行切换同一套锚定策略。
+/// 设置弹窗（独立窗口 lyric_menu）的尺寸（逻辑像素）：内容 = 菜单卡片本体。
+const LYRIC_MENU_W: i32 = 410;
+const LYRIC_MENU_H: i32 = 162;
+
+/// 显示/隐藏设置弹窗。歌词条窗口自身**不做任何尺寸变化** —— 菜单是独立置顶窗口，
+/// 出现在工具条正上方（底边贴工具条顶边），从机制上杜绝「点设置闪一下」。
 #[tauri::command]
-fn lyric_panel(app: tauri::AppHandle, open: bool) {
-    let Some(win) = app.get_webview_window("lyric") else { return };
-    let scale = win.scale_factor().unwrap_or(1.0);
-    let extra = ((lyric_panel_height_for(open) as f64) * scale).round() as i32;
-    // 已处于目标态则不动（面板开关连点时避免窗口抖动）
-    let target_h = win.outer_size().map(|s| s.height as i32).unwrap_or(0);
-    let st = read_lyric_state(&app);
-    let form = st.get("form").and_then(|v| v.as_str()).unwrap_or("single").to_string();
-    let (_, base_h) = lyric_physical_size(scale, &form);
-    let want_h = base_h + extra;
-    if target_h == want_h {
-        return;
+fn lyric_menu_toggle(app: tauri::AppHandle) {
+    let Some(bar) = app.get_webview_window("lyric") else { return };
+    match app.get_webview_window("lyric_menu") {
+        Some(menu) => {
+            if menu.is_visible().unwrap_or(false) {
+                let _ = menu.hide();
+                LYRIC_MENU_VISIBLE.store(false, Ordering::SeqCst);
+                return;
+            }
+            position_lyric_menu(&bar, &menu);
+            if LYRIC_MENU_READY.load(Ordering::SeqCst) {
+                let _ = menu.show();
+                LYRIC_MENU_VISIBLE.store(true, Ordering::SeqCst);
+            } else {
+                // 弹窗页面尚未就绪（首次创建中）：就绪握手后补显示
+                LYRIC_MENU_PENDING.store(true, Ordering::SeqCst);
+            }
+        }
+        None => {
+            // 首次使用：创建隐藏弹窗（位置在 ready 握手时按歌词条当前位置设置）
+            LYRIC_MENU_PENDING.store(true, Ordering::SeqCst);
+            let app2 = app.clone();
+            tauri::async_runtime::spawn(async move {
+                let r = ensure_lyric_menu(&app2);
+                if r.is_err() {
+                    LYRIC_MENU_PENDING.store(false, Ordering::SeqCst);
+                }
+            });
+        }
     }
-    let old_pos = win.outer_position().ok();
-    let _ = win.set_size(tauri::PhysicalSize::new(
-        (LYRIC_W as f64 * scale).round() as u32,
-        want_h as u32,
+}
+
+/// 弹窗创建（隐藏起步，位置按歌词条当前位置换算）。显示交给 lyric_menu_ready 握手
+/// （页面 listener 就绪后 show），维持「可见 ⟺ 有内容」不变量。
+fn ensure_lyric_menu(app: &tauri::AppHandle) -> Result<(), tauri::Error> {
+    let scale = app
+        .get_webview_window("lyric")
+        .and_then(|w| w.scale_factor().ok())
+        .unwrap_or(1.0);
+    // 位置：弹窗底边贴工具条顶边，主列中心（左缘 + 95 逻辑 px）对齐按钮组中心。
+    // builder.position 取逻辑像素，按 scale 换算。
+    let (mut px, mut py) = (100.0, 100.0);
+    if let Some(bar) = app.get_webview_window("lyric") {
+        if let (Ok(bp), Ok(bs)) = (bar.outer_position(), bar.outer_size()) {
+            let group_cx = bp.x as f64 + bs.width as f64 / 2.0;
+            px = (group_cx - 95.0 * scale) / scale;
+            py = (bp.y as f64 - LYRIC_MENU_H as f64 * scale) / scale;
+        }
+    }
+    WebviewWindowBuilder::new(
+        app,
+        "lyric_menu",
+        WebviewUrl::App("lyric-menu.html".into()),
+    )
+    .title("桌面歌词设置")
+    .inner_size(LYRIC_MENU_W as f64, LYRIC_MENU_H as f64)
+    .position(px, py)
+    .decorations(false)
+    .transparent(true)
+    .resizable(false)
+    .shadow(false)
+    .always_on_top(true)
+    .skip_taskbar(true)
+    // 不可激活：点击弹窗绝不抢键盘焦点（与歌词条同一考量）
+    .focusable(false)
+    .visible(false)
+    .build()
+    .map(|_| ())
+}
+
+/// 把弹窗摆到歌词条正上方：底边贴工具条顶边，主列中心对齐按钮组中心。
+fn position_lyric_menu(bar: &tauri::WebviewWindow, menu: &tauri::WebviewWindow) {
+    let scale = bar.scale_factor().unwrap_or(1.0);
+    let (Ok(bp), Ok(bs)) = (bar.outer_position(), bar.outer_size()) else {
+        return;
+    };
+    let group_cx = bp.x as f64 + bs.width as f64 / 2.0;   // 按钮组中心（按钮组在窗口内居中）
+    let mx = group_cx - 95.0 * scale;                      // 主列中心 = 弹窗左缘 + 95 逻辑 px
+    let my = bp.y as f64 - LYRIC_MENU_H as f64 * scale;    // 底边贴工具条顶边
+    let _ = menu.set_size(tauri::PhysicalSize::new(
+        (LYRIC_MENU_W as f64 * scale).round() as u32,
+        (LYRIC_MENU_H as f64 * scale).round() as u32,
     ));
-    if let Some(p) = old_pos {
-        // 底边锚定：加高 Δ → 顶边上移 Δ；收起时下移回原位
-        let _ = win.set_position(tauri::PhysicalPosition::new(p.x, p.y - extra));
+    let _ = menu.set_position(tauri::PhysicalPosition::new(mx.round() as i32, my.round() as i32));
+}
+
+/// 隐藏设置弹窗（歌词条被拖动 / 手动锁定 / 隐藏时调用）。
+fn hide_lyric_menu(app: &tauri::AppHandle) {
+    LYRIC_MENU_PENDING.store(false, Ordering::SeqCst);
+    if let Some(menu) = app.get_webview_window("lyric_menu") {
+        if menu.is_visible().unwrap_or(false) {
+            let _ = menu.hide();
+        }
+    }
+    LYRIC_MENU_VISIBLE.store(false, Ordering::SeqCst);
+}
+
+/// 弹窗页 listener 就绪握手：下发当前配置 + 按需补显示。
+#[tauri::command]
+fn lyric_menu_ready(app: tauri::AppHandle) {
+    LYRIC_MENU_READY.store(true, Ordering::SeqCst);
+    let st = read_lyric_state(&app);
+    let form = st.get("form").and_then(|v| v.as_str()).unwrap_or("single");
+    let style = st.get("style").and_then(|v| v.as_str()).unwrap_or("stroke");
+    let align = st.get("align").and_then(|v| v.as_str()).unwrap_or("center");
+    let font_size = st.get("fontSize").and_then(|v| v.as_u64()).unwrap_or(22).clamp(12, 28);
+    let color_text = st.get("colorText").and_then(|v| v.as_str()).filter(|v| is_lyric_color(v)).unwrap_or("");
+    let color_fill = st.get("colorFill").and_then(|v| v.as_str()).filter(|v| is_lyric_color(v)).unwrap_or("");
+    let offset = st.get("offset").and_then(|v| v.as_f64()).unwrap_or(0.0);
+    let _ = app.emit_to(
+        "lyric_menu",
+        "lyric://display",
+        serde_json::json!({
+            "form": form, "style": style, "align": align, "fontSize": font_size,
+            "colorText": color_text, "colorFill": color_fill, "offset": offset,
+        }),
+    );
+    if LYRIC_MENU_PENDING.swap(false, Ordering::SeqCst) {
+        if let (Some(bar), Some(menu)) = (app.get_webview_window("lyric"), app.get_webview_window("lyric_menu")) {
+            position_lyric_menu(&bar, &menu);
+            let _ = menu.show();
+            LYRIC_MENU_VISIBLE.store(true, Ordering::SeqCst);
+        }
     }
 }
 
@@ -562,6 +667,7 @@ fn lyric_commit_display(
     app: tauri::AppHandle,
     form: Option<String>,
     style: Option<String>,
+    align: Option<String>,
     font_size: Option<u32>,
     color_text: Option<String>,
     color_fill: Option<String>,
@@ -575,6 +681,10 @@ fn lyric_commit_display(
     let style = style
         .filter(|s| matches!(s.as_str(), "stroke" | "capsule" | "bold"))
         .unwrap_or_else(|| st.get("style").and_then(|v| v.as_str()).unwrap_or("stroke").to_string());
+    // 对齐方式：left | center | right（参考网易云桌面歌词）。非法值回落 state / 默认居中。
+    let align = align
+        .filter(|a| matches!(a.as_str(), "left" | "center" | "right"))
+        .unwrap_or_else(|| st.get("align").and_then(|v| v.as_str()).unwrap_or("center").to_string());
     let font_size = font_size
         .map(|n| n.clamp(12, 28))
         .or_else(|| st.get("fontSize").and_then(|v| v.as_u64()).map(|n| (n as u32).clamp(12, 28)))
@@ -621,7 +731,7 @@ fn lyric_commit_display(
         let _ = app.emit(
             "lyric://display",
             serde_json::json!({
-                "form": form, "style": style, "fontSize": font_size,
+                "form": form, "style": style, "align": align, "fontSize": font_size,
                 "colorText": color_text, "colorFill": color_fill, "offset": offset,
             }),
         );
@@ -633,6 +743,7 @@ fn lyric_commit_display(
 fn hide_lyric(app: tauri::AppHandle) {
     LYRIC_PAGE_READY.store(false, Ordering::SeqCst);
     *PENDING_LYRIC.lock().unwrap() = None;
+    hide_lyric_menu(&app);
     if let Some(win) = app.get_webview_window("lyric") {
         let _ = win.hide();
         let _ = win.destroy();
@@ -652,16 +763,24 @@ fn lyric_ready(app: tauri::AppHandle) {
             return;
         }
     };
-    // 先下发形态/样式/字号：新建窗口的页面默认是 single+stroke+22，
-    // 若 state 里存的是 double，不推一次就会「窗口高 88 但只画一行」。
+    // 先下发显示配置：新建窗口的页面默认是 single+stroke+center+22+默认配色，
+    // 若 state 里存的是别的值，不推一次就会出现「窗口高 88 但只画一行」「自定义配色丢失」。
+    // 这里下发**完整**配置（含颜色/对齐）—— 旧版只推 form/style/fontSize，
+    // 重开歌词窗口后自定义配色会被页面默认值覆盖（实测丢失），故一并修复。
     let st = read_lyric_state(&app);
     let form = st.get("form").and_then(|v| v.as_str()).unwrap_or("single");
     let style = st.get("style").and_then(|v| v.as_str()).unwrap_or("stroke");
+    let align = st.get("align").and_then(|v| v.as_str()).unwrap_or("center");
     let font_size = st.get("fontSize").and_then(|v| v.as_u64()).unwrap_or(22).clamp(12, 28);
+    let color_text = st.get("colorText").and_then(|v| v.as_str()).filter(|v| is_lyric_color(v)).unwrap_or("");
+    let color_fill = st.get("colorFill").and_then(|v| v.as_str()).filter(|v| is_lyric_color(v)).unwrap_or("");
     let _ = app.emit_to(
         "lyric",
         "lyric://display",
-        serde_json::json!({ "form": form, "style": style, "fontSize": font_size }),
+        serde_json::json!({
+            "form": form, "style": style, "align": align, "fontSize": font_size,
+            "colorText": color_text, "colorFill": color_fill,
+        }),
     );
     // 下发**真实**锁定态：OS 级穿透状态只有 Rust 知道。缺了这一步，页面会停在
     // HTML 里的 data-locked="true" 默认值，出现「页面显示锁定、实际可交互」的错位。
@@ -705,6 +824,10 @@ fn lyric_set_locked(app: tauri::AppHandle, locked: bool) {
     // 手动锁定：悬停**不**自动解锁 —— 只有把鼠标移到顶部工具条区域才会临时放行
     // （见探测线程 manual 分支）。否则锁定后鼠标一划过歌词条就又解锁了，锁定形同虚设。
     LYRIC_MANUAL_LOCK.store(locked, Ordering::SeqCst);
+    // 手动锁定时收起设置弹窗（锁定语义 = 歌词条让位给桌面，弹窗不该悬着）
+    if locked {
+        hide_lyric_menu(&app);
+    }
     if let Some(win) = app.get_webview_window("lyric") {
         let _ = win.set_ignore_cursor_events(locked);
         LYRIC_LOCKED.store(locked, Ordering::SeqCst);
@@ -719,8 +842,10 @@ fn lyric_set_locked(app: tauri::AppHandle, locked: bool) {
 }
 
 /// 拖动歌词条：由歌词页在 pointermove 时**按 rAF 节流**调用，避免高频 IPC + SetWindowPos 卡顿。
+/// 拖动开始（第一次移动）即收起设置弹窗 —— 弹窗位置固定于旧位置，跟随拖动会错位。
 #[tauri::command]
 fn lyric_move(app: tauri::AppHandle, x: i32, y: i32) {
+    hide_lyric_menu(&app);
     if let Some(win) = app.get_webview_window("lyric") {
         let _ = win.set_position(tauri::PhysicalPosition::new(x, y));
     }
@@ -809,6 +934,8 @@ fn start_lyric_hover_watch(app: &tauri::AppHandle) {
         let mut leave_acc: u64 = 0;
         // 上一轮「光标是否在工具条区域」——手动锁定模式下据此切换穿透开关（见下）
         let mut tools_prev = false;
+        // 设置弹窗：光标移出（弹窗+歌词条之外）的轮询累计（≥4 轮 ≈ 480ms → 收起）
+        let mut menu_out_acc: u32 = 0;
         loop {
             std::thread::sleep(std::time::Duration::from_millis(POLL_MS));
             // 窗口不存在 → 重置全部状态，线程继续等（不退出，避免反复创建线程）
@@ -830,16 +957,50 @@ fn start_lyric_hover_watch(app: &tauri::AppHandle) {
             // 命中测试（物理像素，避免 DPI 换算误差）：
             //   hit       —— 光标是否在窗口矩形内
             //   hit_tools —— 光标是否在**顶部工具条区域**内（窗口顶部 LYRIC_TOOLS_H 像素）
-            let (hit, hit_tools) = match (app.cursor_position(), win.outer_position(), win.outer_size()) {
-                (Ok(c), Ok(p), Ok(s)) => {
-                    let inside = c.x >= p.x as f64
-                        && c.x <= (p.x + s.width as i32) as f64
-                        && c.y >= p.y as f64
-                        && c.y <= (p.y + s.height as i32) as f64;
-                    let in_tools = inside && (c.y - p.y as f64) < LYRIC_TOOLS_H as f64;
-                    (inside, in_tools)
+            //   in_menu   —— 光标是否在设置弹窗内（弹窗打开期间视为「仍在操作」）
+            let (hit, hit_tools, _in_menu) = {
+                let (c, p, s) = match (app.cursor_position(), win.outer_position(), win.outer_size()) {
+                    (Ok(c), Ok(p), Ok(s)) => (c, p, s),
+                    _ => {
+                        leave_acc = 0;
+                        continue;
+                    }
+                };
+                let inside = c.x >= p.x as f64
+                    && c.x <= (p.x + s.width as i32) as f64
+                    && c.y >= p.y as f64
+                    && c.y <= (p.y + s.height as i32) as f64;
+                let in_tools = inside && (c.y - p.y as f64) < LYRIC_TOOLS_H as f64;
+                // 设置弹窗：独立窗口，命中其矩形即视为「正在操作设置」
+                let mut in_menu = false;
+                if LYRIC_MENU_VISIBLE.load(Ordering::SeqCst) {
+                    if let Some(menu) = app.get_webview_window("lyric_menu") {
+                        if menu.is_visible().unwrap_or(false) {
+                            if let (Ok(mp), Ok(ms)) = (menu.outer_position(), menu.outer_size()) {
+                                in_menu = c.x >= mp.x as f64
+                                    && c.x <= (mp.x + ms.width as i32) as f64
+                                    && c.y >= mp.y as f64
+                                    && c.y <= (mp.y + ms.height as i32) as f64;
+                            }
+                            // 光标在弹窗外（且不在歌词条上）累计 4 轮（≈480ms）→ 自动收起
+                            if !in_menu && !inside {
+                                menu_out_acc += 1;
+                                if menu_out_acc >= 4 {
+                                    menu_out_acc = 0;
+                                    let _ = menu.hide();
+                                    LYRIC_MENU_VISIBLE.store(false, Ordering::SeqCst);
+                                }
+                            } else {
+                                menu_out_acc = 0;
+                            }
+                        }
+                    } else {
+                        LYRIC_MENU_VISIBLE.store(false, Ordering::SeqCst);
+                    }
+                } else {
+                    menu_out_acc = 0;
                 }
-                _ => (false, false),
+                (inside || in_menu, in_tools, in_menu)
             };
             let was_hit = LYRIC_HOVERED.swap(hit, Ordering::SeqCst);
             let manual = LYRIC_MANUAL_LOCK.load(Ordering::SeqCst);
@@ -1782,7 +1943,7 @@ fn main() {
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![quit_app, show_reminder, hide_reminder, reminder_ready, show_lyric, hide_lyric, lyric_ready, lyric_sync, lyric_set_locked, lyric_move, lyric_pos_commit, lyric_apply_cfg, lyric_commit_display, lyric_panel, read_text_file, export_text_file, run_wasm_backend, install_plugin_package, build_wasm_backend, http_get, http_post, fetch_favicon, load_state, save_state, backup_data, restore_data, get_theme, broadcast_theme, read_bg_data_url, prepare_wallpaper, list_desktop_files, image_thumbnail, open_file, open_path, pick_folder, pick_file, reveal_file, delete_file, rename_file, reveal_path, delete_path, rename_path, show_lock, hide_lock, file_index::index_status, file_index::search_files, file_index::rebuild_index, sys_bridge::start_system_sampling, sys_bridge::stop_system_sampling, sys_bridge::check_media_playing, sys_bridge::set_lock_monitor_enabled, sedentary::set_sedentary_config])
+        .invoke_handler(tauri::generate_handler![quit_app, show_reminder, hide_reminder, reminder_ready, show_lyric, hide_lyric, lyric_ready, lyric_sync, lyric_set_locked, lyric_move, lyric_pos_commit, lyric_apply_cfg, lyric_commit_display, lyric_menu_toggle, lyric_menu_ready, read_text_file, export_text_file, run_wasm_backend, install_plugin_package, build_wasm_backend, http_get, http_post, fetch_favicon, load_state, save_state, backup_data, restore_data, get_theme, broadcast_theme, read_bg_data_url, prepare_wallpaper, list_desktop_files, image_thumbnail, open_file, open_path, pick_folder, pick_file, reveal_file, delete_file, rename_file, reveal_path, delete_path, rename_path, show_lock, hide_lock, file_index::index_status, file_index::search_files, file_index::rebuild_index, sys_bridge::start_system_sampling, sys_bridge::stop_system_sampling, sys_bridge::check_media_playing, sys_bridge::set_lock_monitor_enabled, sedentary::set_sedentary_config])
         .run(tauri::generate_context!())
         .expect("DeskOverlay 运行失败");
 }

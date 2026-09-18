@@ -2,7 +2,7 @@
 // 全局播放器（音乐页 / 在线音乐页共享）：音频由 musicAudio 单例承载，UI 由各视图自行渲染。
 import { Bus, invoke } from "../bus.js";
 import { state, saveState } from "../state.js";
-import { ICON_MUSIC, ICON_SHUFFLE, ICON_REPEAT, ICON_HEART, ICON_PREV, ICON_NEXT, ICON_PLAY, ICON_PAUSE, ICON_LIST, ICON_MORE, ICON_VOLUME, ICON_LOCATE, ICON_CLOSE, ICON_BACK, ICON_ALBUM, ICON_LYRICS } from "../icons.js";
+import { ICON_MUSIC, ICON_SHUFFLE, ICON_REPEAT, ICON_HEART, ICON_PREV, ICON_NEXT, ICON_PLAY, ICON_PAUSE, ICON_LIST, ICON_MORE, ICON_VOLUME, ICON_VOLUME_MUTE, ICON_LOCATE, ICON_CLOSE, ICON_BACK, ICON_ALBUM, ICON_LYRICS } from "../icons.js";
 import { esc, normalizeSongs } from "./common.js";
 import { createSelect } from "../selectbox.js";
 
@@ -214,6 +214,7 @@ Bus.on("lyric://display", (p) => {
   if (!state.lyric || typeof state.lyric !== "object") state.lyric = {};
   if (["single", "double"].includes(p.form)) state.lyric.form = p.form;
   if (["stroke", "capsule", "bold"].includes(p.style)) state.lyric.style = p.style;
+  if (["left", "center", "right"].includes(p.align)) state.lyric.align = p.align;
   if (typeof p.fontSize === "number") state.lyric.fontSize = Math.max(12, Math.min(28, Math.round(p.fontSize)));
   // 自定义颜色（空串 = 回到默认）。格式已在 Rust 侧校验，这里照单落盘。
   if (typeof p.colorText === "string") state.lyric.colorText = p.colorText;
@@ -330,6 +331,8 @@ function savePlayback() {
     playing: !!musicAudio.src && !musicAudio.paused,
     currentTime: musicAudio.currentTime || 0,
     volume: state.playback.volume ?? musicAudio.volume ?? 0.8,
+    muted: !!state.playback.muted,
+    preMuteVolume: state.playback.preMuteVolume ?? 0.8,
   };
   saveState();
 }
@@ -919,8 +922,8 @@ export function renderMusic(view) {
           <button class="mc-btn mc-pill" id="mc-online" title="在线音乐（音源搜索/歌单/排行榜）">在线</button>
           <button class="mc-btn" id="mc-lyric" title="桌面歌词（在桌面最上层显示歌词条）">${ICON_LYRICS}</button>
           <div class="mc-vol" title="音量">
-            <span>${ICON_VOLUME}</span>
-            <input type="range" id="mc-vol-range" min="0" max="100" value="${Math.round((state.playback.volume ?? 0.8) * 100)}" />
+            <button class="mc-btn" id="mc-vol-icon" title="静音/恢复（点击切换）">${state.playback.muted ? ICON_VOLUME_MUTE : ICON_VOLUME}</button>
+            <input type="range" id="mc-vol-range" min="0" max="100" value="${Math.round((state.playback.muted ? 0 : (state.playback.volume ?? 0.8)) * 100)}" />
           </div>
           <button class="mc-btn" id="mc-more" title="更多">${ICON_MORE}</button>
         </div>
@@ -1026,17 +1029,44 @@ export function renderMusic(view) {
     pushLyric(true);
   });
 
-  body.querySelector("#mc-vol-range").addEventListener("input", (e) => {
-    musicAudio.volume = e.target.value / 100;
-    // 音量跟随持久化状态：切视图/重启后保持一致
-    state.playback.volume = musicAudio.volume;
-  });
-  // 每次渲染用持久化音量同步播放器与滑杆（不再硬编码覆盖用户设置）
-  musicAudio.volume = state.playback.volume ?? 0.8;
+  // ── 音量区：图标 = 静音/恢复开关，滑杆 = 精确音量 ──
+  // muted=true 时实际音量恒为 0，恢复时回到静音前的音量（preMuteVolume）。
+  // 拖滑杆会自动解除静音 —— 拖了滑杆却没声音会让用户困惑。
   const volRange = body.querySelector("#mc-vol-range");
-  if (volRange && Math.abs(+volRange.value - Math.round(musicAudio.volume * 100)) > 1) {
-    volRange.value = Math.round(musicAudio.volume * 100);
-  }
+  const volIcon = body.querySelector("#mc-vol-icon");
+  const applyVolumeUI = () => {
+    const muted = !!state.playback.muted;
+    const vol = muted ? 0 : (state.playback.volume ?? 0.8);
+    musicAudio.volume = vol;
+    if (volRange && Math.abs(+volRange.value - Math.round(vol * 100)) > 0) volRange.value = Math.round(vol * 100);
+    if (volIcon) volIcon.innerHTML = muted ? ICON_VOLUME_MUTE : ICON_VOLUME;
+  };
+  volIcon?.addEventListener("click", () => {
+    if (state.playback.muted) {
+      // 恢复：回到静音前的音量
+      state.playback.muted = false;
+      state.playback.volume = state.playback.preMuteVolume || 0.8;
+    } else {
+      // 静音：记住当前音量（音量本身>0 才有恢复意义）
+      state.playback.preMuteVolume = state.playback.volume || musicAudio.volume || 0.8;
+      state.playback.muted = true;
+      state.playback.volume = 0;
+    }
+    saveState();
+    applyVolumeUI();
+  });
+  volRange?.addEventListener("input", (e) => {
+    const v = e.target.value / 100;
+    // 拖滑杆自动解除静音
+    if (state.playback.muted && v > 0) state.playback.muted = false;
+    else if (state.playback.muted && v === 0) return; // 静音态下滑到 0 不改状态
+    state.playback.volume = v;
+    if (v > 0) state.playback.preMuteVolume = v;
+    musicAudio.volume = v;
+    if (volIcon) volIcon.innerHTML = state.playback.muted ? ICON_VOLUME_MUTE : ICON_VOLUME;
+  });
+  // 每次渲染用持久化状态同步播放器与滑杆（不再硬编码覆盖用户设置）
+  applyVolumeUI();
 
   // 底部功能按钮：喜欢/随机/上一首/下一首/队列/在线
   const likeBtn = body.querySelector("#mc-like");

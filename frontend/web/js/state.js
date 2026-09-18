@@ -46,6 +46,7 @@ export const state = {
     autoLockMs: 3000, // 移出后多久锁回（毫秒，0 = 立即）
     form: "single", // 显示形态：single | double
     style: "stroke", // 视觉模式：stroke（描边）| capsule（胶囊底板）| bold（加粗）
+    align: "center", // 歌词对齐方式：left | center | right（参考网易云桌面歌词）
     fontSize: 22, // 字号 px（12–28）
     offset: 0, // 歌词时间偏移（秒，-5~+5）：正 = 歌词提前，负 = 延后
     colorText: "", // 歌词文字颜色（#RGB/#RRGGBB；空 = 默认近白）
@@ -169,6 +170,10 @@ export async function loadState() {
   if (typeof state.playback.index !== "number") state.playback.index = -1;
   if (typeof state.playback.volume !== "number") state.playback.volume = 0.8;
   state.playback.volume = Math.max(0, Math.min(1, state.playback.volume));
+  // 静音态：muted=true 时实际音量为 0，恢复时回到 preMuteVolume
+  if (typeof state.playback.muted !== "boolean") state.playback.muted = false;
+  if (typeof state.playback.preMuteVolume !== "number") state.playback.preMuteVolume = state.playback.volume || 0.8;
+  state.playback.preMuteVolume = Math.max(0, Math.min(1, state.playback.preMuteVolume));
   // 快捷访问分组：结构校验
   if (!Array.isArray(state.qaGroups)) state.qaGroups = [];
   state.qaGroups = state.qaGroups.filter((g) => g && typeof g === "object" && typeof g.id === "string" && typeof g.name === "string");
@@ -179,7 +184,7 @@ export async function loadState() {
   );
   // 桌面歌词：结构校验 + 枚举回落 + 数值 clamp（老用户无该字段时补默认）
   if (!state.lyric || typeof state.lyric !== "object" || Array.isArray(state.lyric)) {
-    state.lyric = { enabled: false, locked: true, form: "single", style: "stroke", fontSize: 22, followTheme: true, pos: {} };
+    state.lyric = { enabled: false, locked: true, form: "single", style: "stroke", align: "center", fontSize: 22, followTheme: true, pos: {} };
   }
   const ly = state.lyric;
   if (typeof ly.enabled !== "boolean") ly.enabled = false;
@@ -190,6 +195,7 @@ export async function loadState() {
   ly.autoLockMs = Math.max(0, Math.min(60000, Math.round(ly.autoLockMs)));
   if (!["single", "double"].includes(ly.form)) ly.form = "single";
   if (!["stroke", "capsule", "bold"].includes(ly.style)) ly.style = "stroke";
+  if (!["left", "center", "right"].includes(ly.align)) ly.align = "center";
   if (typeof ly.fontSize !== "number" || !isFinite(ly.fontSize)) ly.fontSize = 22;
   ly.fontSize = Math.max(12, Math.min(28, Math.round(ly.fontSize)));
   // 时间偏移：半秒步进，clamp 到 ±5（偏太多没有意义，还会让歌词完全对不上）
