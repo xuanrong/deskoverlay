@@ -8,7 +8,7 @@
 //   - onChange 选中后回调 (value) => {}
 // 交互：点击整框弹出日历；点外部 / Esc / 滚动关闭；支持今天与清除。
 
-const WEEK = ["一", "二", "三", "四", "五", "六", "日"];
+const WEEK = ["日", "一", "二", "三", "四", "五", "六"];
 const pad = (n) => String(n).padStart(2, "0");
 const toStr = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 const parse = (s) => {
@@ -67,7 +67,7 @@ export function createDatePicker({ el, value = "", onChange = null }) {
 
     function draw() {
       const first = new Date(viewY, viewM, 1);
-      const offset = (first.getDay() + 6) % 7; // 周一为一周起点
+      const offset = first.getDay(); // 周日为一周起点（getDay：周日=0）
       const cells = [];
       for (let i = 0; i < 42; i++) {
         const d = new Date(viewY, viewM, 1 - offset + i);

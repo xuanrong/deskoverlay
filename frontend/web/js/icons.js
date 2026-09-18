@@ -23,6 +23,11 @@ export const ICON_EDIT = `<svg viewBox="0 0 24 24"><path d="M12 20h9"/><path d="
 export const ICON_TRASH = `<svg viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/></svg>`;
 export const ICON_CHECK = `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M8 12.5l2.5 2.5L16 9.5"/></svg>`;
 export const ICON_PLUS = `<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>`;
+export const ICON_CLOSE = `<svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>`;
+export const ICON_BACK = `<svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>`;
+export const ICON_REFRESH = `<svg viewBox="0 0 24 24"><path d="M21 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L21 10"/></svg>`;
+export const ICON_ALBUM = `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.5"/></svg>`;
+export const ICON_CHEV = `<svg viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>`;
 
 // 系统健康
 export const ICON_GEAR = `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1"/></svg>`;
@@ -40,6 +45,8 @@ export const ICON_BELL = `<svg viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0
 // 音乐播放模式
 export const ICON_SHUFFLE = `<svg viewBox="0 0 24 24"><path d="M16 3h5v5"/><path d="M4 20 20 4"/><path d="M21 15v6h-6"/><path d="M4 4l5 5"/></svg>`;
 export const ICON_REPEAT = `<svg viewBox="0 0 24 24"><path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></svg>`;
+// 定位当前歌曲（准星：外圈 + 中心点 + 四向刻度）
+export const ICON_LOCATE = `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="1.6"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>`;
 
 // 音乐播放控制（统一线性风格）
 export const ICON_HEART = `<svg viewBox="0 0 24 24"><path d="M19 14c1.5-1.5 3-3.2 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.8 0-3 .5-4.5 2-1.5-1.5-2.7-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4 3 5.5l7 7Z"/></svg>`;
@@ -50,6 +57,8 @@ export const ICON_PAUSE = `<svg viewBox="0 0 24 24"><path d="M8 4v16"/><path d="
 export const ICON_LIST = `<svg viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13"/><path d="M3.5 6h.01M3.5 12h.01M3.5 18h.01"/></svg>`;
 export const ICON_MORE = `<svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>`;
 export const ICON_VOLUME = `<svg viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>`;
+// 桌面歌词（条状浮层 + 两行歌词文本）
+export const ICON_LYRICS = `<svg viewBox="0 0 24 24"><rect x="2.5" y="5" width="19" height="14" rx="2.5"/><path d="M6.5 10h7"/><path d="M6.5 14h11"/></svg>`;
 
 // 休息一下 / 小游戏
 export const ICON_GAME = `<svg viewBox="0 0 24 24"><path d="M6 11h4"/><path d="M8 9v4"/><path d="M15 12.5h.01M17.5 10h.01"/><rect x="2" y="6" width="20" height="12" rx="4"/></svg>`;

@@ -17,16 +17,21 @@ use windows::Win32::Storage::FileSystem::{
 use windows::Win32::System::IO::DeviceIoControl;
 use windows::Win32::System::Ioctl::{FSCTL_ENUM_USN_DATA, MFT_ENUM_DATA_V0};
 
-use crate::file_index::{Hit, SKIP};
+use crate::file_index::{Hit, MAX_ENTRIES, SKIP};
 
 const FILE_ATTRIBUTE_DIRECTORY: u32 = 0x10;
 
 /// 逐卷用 USN 枚举建全盘索引；任一卷失败即回退（返回 None）。
+/// 全局受 MAX_ENTRIES 约束：凑满即停止，不给内存无界增长的机会。
 pub fn try_build() -> Option<Vec<Hit>> {
     let mut out = Vec::new();
     for root in crate::file_index::fixed_drives() {
         let hits = enumerate_volume(&root)?;
-        out.extend(hits);
+        let room = MAX_ENTRIES.saturating_sub(out.len());
+        out.extend(hits.into_iter().take(room));
+        if out.len() >= MAX_ENTRIES {
+            break;
+        }
     }
     if out.is_empty() { None } else { Some(out) }
 }
@@ -118,7 +123,17 @@ fn enumerate_volume(root: &str) -> Option<Vec<Hit>> {
                     wide.push(unsafe { core::ptr::read_unaligned(p.add(i)) });
                 }
                 let nm = String::from_utf16_lossy(&wide);
-                name.insert(fre, (nm, attrs & FILE_ATTRIBUTE_DIRECTORY != 0));
+                let is_dir = attrs & FILE_ATTRIBUTE_DIRECTORY != 0;
+                // 插入期提前剪枝：SKIP 命中的目录不进 HashMap，省掉
+                // 构建期的临时峰值（Windows/Program Files 等目录的子树记录不再驻留）。
+                // 这些目录在 DFS 阶段本来就会被跳过，结果完全一致。
+                if is_dir && SKIP.contains(&nm.to_ascii_lowercase().as_str()) {
+                    last = fre;
+                    parsed += 1;
+                    off += rec_len;
+                    continue;
+                }
+                name.insert(fre, (nm, is_dir));
                 children.entry(pfre).or_default().push(fre);
                 any = true;
             }
@@ -151,6 +166,9 @@ fn enumerate_volume(root: &str) -> Option<Vec<Hit>> {
         let Some((nm, isdir)) = name.get(&refno) else { continue };
         if SKIP.contains(&nm.to_ascii_lowercase().as_str()) {
             continue; // 跳过该目录及其整棵子树
+        }
+        if result.len() >= MAX_ENTRIES {
+            break; // 硬上界：达到即停止 DFS
         }
         result.push(Hit {
             path: if dir.is_empty() { nm.clone() } else { format!("{dir}\\{nm}") },

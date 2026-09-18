@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>桌面歌词</title>
+  <style>
+    /* TraeCode Design tokens — inlined for standalone Tauri window（与 reminder.html 同源） */
+    :root {
+      --bg-base-default: #1A1B1D; --bg-base-secondary: #222427;
+      --text-default: #D1D3DB; --text-secondary: #9599A6; --text-tertiary: #666B75;
+      --text-onbrand: #0C0C0D;
+      --bg-brand: #32F08C; --bg-brand-hover: #0FDC78;
+      --bg-brand-popup: rgba(50,240,140,0.12);
+      --border-neutral-l1: rgba(224,226,242,0.1);
+      --border-neutral-l2: rgba(224,226,242,0.16);
+      --radius-6: 6px; --radius-8: 8px; --radius-10: 10px; --radius-12: 12px;
+      --radius-full: 9999px;
+      --spacer-4: 4px; --spacer-6: 6px; --spacer-8: 8px; --spacer-12: 12px;
+    }
+    html, body {
+      margin: 0; padding: 0;
+      width: 100%; height: 100%;
+      background: transparent;
+      overflow: hidden;
+      font-family: "SF Pro Text", "Microsoft YaHei UI", system-ui, -apple-system, sans-serif;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    /* 歌词条本体：**紧贴窗口矩形**（窗口 760×56，此处 inset:0）。
+       不留透明内边距 —— WebView2 里透明区域同样会吞鼠标消息，
+       只有可见区域与窗口矩形一致，穿透行为才可预期。 */
+    #bar {
+      position: absolute; inset: 0;
+      /* 纵向两段：顶部工具条（34px，Rust 同步计入窗口高度）+ 下方歌词区。
+         **不能**加 gap —— Rust 的窗口高度 = 歌词高 + LYRIC_TOOLS_H，不含间隙；
+         多 4px 间隙就会把歌词内容压出窗口（切单双行时挤在一起）。
+         工具条放上方（网易云样式）：歌词区永远全宽、不遮挡句尾。 */
+      display: flex; flex-direction: column;
+      border-radius: var(--radius-12);
+      /* 默认描边模式：无底板，靠文字描边在任意壁纸上保证可读 */
+      background: transparent;
+      transition: background 160ms ease, box-shadow 160ms ease;
+    }
+    /* 胶囊模式：半透明深色底板 + 毛玻璃，适配浅色壁纸 */
+    #bar[data-style="capsule"] {
+      background: rgba(26, 27, 29, 0.72);
+      border: 1px solid var(--border-neutral-l1);
+      box-shadow: 0 4px 20px rgba(0,0,0,0.32);
+      backdrop-filter: blur(20px) saturate(1.2);
+      -webkit-backdrop-filter: blur(20px) saturate(1.2);
+    }
+
+    /* 歌词行容器：单行时只有一个孩子；双行时两行纵向排列。
+       注意这里是 **flex column**，而 .ly-line 内部是 grid —— 两层容器各司其职：
+       column 负责行间距与纵向居中，grid 负责底层/染色层的像素级叠放。 */
+    .ly-lines {
+      flex: 1 1 auto;
+      min-width: 0; min-height: 0;
+      /* 水平留白随歌词区走（#bar 不再统一设 padding：工具条要贴窗口顶、可用整条宽度） */
+      padding: 0 18px;
+      display: flex; flex-direction: column;
+      justify-content: center;
+      gap: 2px;
+    }
+    /* 第二行（下一句）：仅双行形态显示。无染色层 —— 未播到的句子不应预先染色。 */
+    #bar[data-form="single"] .ly-next { display: none; }
+    .ly-next .ly-text { color: var(--text-secondary); font-weight: 400; opacity: .55; }
+    #bar[data-style="capsule"] .ly-next .ly-text { opacity: .62; }
+
+    /* 歌词行：底层文本 + 上层染色副本精确叠加。
+       用 **grid 单格叠放**（两子元素共用 grid-area 1/1）而非 absolute ——
+       绝对定位元素无 top/bottom 时取 static position，在 flex 容器里纵向位置不可靠，
+       两层会错位；grid 叠放让两者共享同一布局单元，盒模型必然一致。 */
+    .ly-line {
+      position: relative;
+      min-width: 0;
+      display: grid; place-items: center;
+      /* 关键：显式把唯一隐式列设为整行宽。
+         只写 place-items:center 是不够的 —— 单隐式列是 auto 尺寸（= 内容宽度），
+         而 justify-content 默认 start，该列会贴在行首，place-items 只在列内部居中，
+         视觉上整块歌词贴左（这是「宽度有问题」的第二个表现）。
+         列占满整行后，居中才是相对整条而言的。 */
+      grid-template-columns: 100%;
+      text-align: center;
+      /* 字号由 JS 按 state 写入 --ly-size */
+      font-size: var(--ly-size, 22px);
+      font-weight: 500;
+      line-height: 1.2;
+      letter-spacing: 0.02em;
+      /* 单行不换行：过长时由 JS 先缩字号，仍超出才由 CSS 省略/跑马灯兜底 */
+      white-space: nowrap;
+      overflow: hidden;
+    }
+    /* 双行时主行略小：两行共享 88px 高，主行过大会把下一行挤没 */
+    #bar[data-form="double"] .ly-line { font-size: calc(var(--ly-size, 22px) * 0.86); }
+    #bar[data-form="double"] .ly-next { font-size: calc(var(--ly-size, 22px) * 0.72); }
+    .ly-text, .ly-fill {
+      grid-area: 1 / 1;
+      display: block;
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    /* 底层：文字颜色可由设置页自定义（--ly-color-text），默认近白；
+       多向深色描边（8 方向 1px，模糊 2px）保证任意壁纸上都可读 */
+    .ly-text {
+      color: var(--ly-color-text, #F5F9FE);
+      text-shadow:
+        -1px -1px 2px rgba(0,0,0,.85), 1px -1px 2px rgba(0,0,0,.85),
+        -1px  1px 2px rgba(0,0,0,.85), 1px  1px 2px rgba(0,0,0,.85),
+         0   -1px 2px rgba(0,0,0,.85), 0    1px 2px rgba(0,0,0,.85),
+        -1px  0   2px rgba(0,0,0,.85), 1px  0   2px rgba(0,0,0,.85);
+    }
+    #bar[data-style="capsule"] .ly-text { text-shadow: none; }
+    #bar[data-style="bold"] .ly-text,
+    #bar[data-style="bold"] .ly-fill { font-weight: 700; }
+    /* 未播放 / 无歌词时的占位：弱化显示 */
+    .ly-line[data-idle="1"] .ly-text { color: var(--text-secondary); font-weight: 400; }
+
+    /* 上层：品牌色副本，用 clip-path 横向裁切表示进度。
+       用 clip-path 而非 scaleX —— 后者会把文字横向拉伸变形。
+       两层各自带描边：clip-path 会连同 text-shadow 一起裁切，
+       染色部分若不带描边，在复杂壁纸上会不如底层清晰。 */
+    /* 上层：染色副本，颜色可由设置页自定义（默认跟随主题品牌色），
+       用 clip-path 横向裁切表示进度。
+       用 clip-path 而非 scaleX —— 后者会把文字横向拉伸变形。
+       两层各自带描边：clip-path 会连同 text-shadow 一起裁切，
+       染色部分若不带描边，在复杂壁纸上会不如底层清晰。 */
+    .ly-fill {
+      color: var(--ly-color-fill, var(--bg-brand));
+      /* --p: 0..1，由 JS 按 rAF 插值写入 */
+      clip-path: inset(0 calc((1 - var(--p, 0)) * 100%) 0 0);
+      text-shadow:
+        -1px -1px 2px rgba(0,0,0,.85), 1px -1px 2px rgba(0,0,0,.85),
+        -1px  1px 2px rgba(0,0,0,.85), 1px  1px 2px rgba(0,0,0,.85);
+      pointer-events: none;
+    }
+    #bar[data-style="capsule"] .ly-fill { text-shadow: none; }
+
+    /* 设置面板：盖在工具条**上方**。展开时窗口由 Rust 向上加高、底边锚定，
+       页面侧只需把「工具条+歌词」整体下推面板高度即可，歌词条在屏幕上纹丝不动。
+       面板自身带底板（解锁态才有，见下方 data-panel 规则）。 */
+    .ly-panel {
+      flex: 0 0 auto;
+      display: none;                 /* 默认收起，不占布局高度 */
+      align-items: center;
+      gap: var(--spacer-8);
+      padding: 6px 12px;
+      background: rgba(20, 21, 23, 0.88);
+      border: 1px solid var(--border-neutral-l1);
+      border-radius: var(--radius-8);
+      margin: 0 8px 4px;
+      backdrop-filter: blur(12px) saturate(1.2);
+      -webkit-backdrop-filter: blur(12px) saturate(1.2);
+    }
+    #bar[data-panel="open"] .ly-panel { display: flex; }
+
+    .ly-prow { display: flex; align-items: center; gap: 8px; }
+    .ly-plabel { font-size: 11px; color: var(--text-secondary); white-space: nowrap; }
+    .ly-pval {
+      min-width: 44px; text-align: center;
+      font-size: 12px; color: var(--text-default);
+      font-variant-numeric: tabular-nums;
+    }
+    .ly-phint { font-size: 10px; color: var(--text-secondary); opacity: .7; white-space: nowrap; }
+    .ly-panel .ly-btn { width: 24px; height: 24px; font-size: 12px; }
+    .ly-panel .ly-btn.text { width: auto; min-width: 0; padding: 0 6px; }
+
+    /* 色板：圆点色块，点选即生效；当前生效色带白圈高亮 */
+    .ly-swatches { display: flex; align-items: center; gap: 6px; }
+    .ly-sw {
+      width: 16px; height: 16px;
+      border-radius: 50%;
+      border: 1px solid rgba(255,255,255,.35);
+      cursor: pointer;
+      padding: 0;
+      background: transparent;
+    }
+    .ly-sw.active { box-shadow: 0 0 0 2px rgba(255,255,255,.85); }
+    .ly-sw.def {
+      background:
+        linear-gradient(135deg, transparent 42%, #F5F9FE 42%, #F5F9FE 58%, var(--bg-brand) 58%);
+      /* 「默认」双色斜块：白=文字默认色，主题色=染色默认色 */
+    }
+
+    /* 工具条：在歌词**上方**，占固定 34px（与 Rust 的 LYRIC_TOOLS_H 严格一致 ——
+       两边不一致会让窗口多出一块透明区，穿透行为不可预期）。
+       未悬停时 opacity:0 且 pointer-events:none，不拦鼠标；
+       悬停时淡入并可点。放上方后不再需要绝对定位浮动。 */
+    .ly-tools {
+      flex: 0 0 auto;
+      height: 34px;
+      display: flex; align-items: center; justify-content: center;
+      gap: var(--spacer-4);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 160ms ease;
+    }
+    /* 锁定态下**不再** display:none —— 穿透时页面收不到任何鼠标事件，:hover 永不触发，
+       opacity 自然停在 0，工具条本就不可见。原来那条 display:none 是多余的，
+       还会在「窗口已解锁但状态标记滞后」时把按钮整个藏掉，用户找不到解锁入口。 */
+    #bar:hover .ly-tools { opacity: 1; pointer-events: auto; }
+
+    .ly-btn {
+      width: 28px; height: 28px;
+      display: inline-flex; align-items: center; justify-content: center;
+      background: rgba(224,226,242,0.08);
+      border: 1px solid var(--border-neutral-l1);
+      border-radius: var(--radius-6);
+      color: var(--text-default);
+      cursor: pointer;
+      padding: 0;
+      line-height: 0;
+      transition: background 120ms ease, color 120ms ease;
+    }
+    .ly-btn:hover { background: rgba(224,226,242,0.16); color: #F5F9FE; }
+    .ly-btn:active { transform: scale(0.94); }
+    .ly-btn svg { display: block; width: 15px; height: 15px; }
+    .ly-btn.danger:hover { background: rgba(255,123,114,0.2); color: #ff7b72; }
+
+    /* 带文字的切换按钮（形态 / 样式）：宽度自适应，直接显示**当前生效值**。
+       为什么不做右键菜单：歌词条默认处于穿透锁定态，鼠标事件到不了页面，
+       右键根本没反应 —— 必须先悬停解锁，等于要求用户先猜一个隐藏前提；
+       且 56px 高的窗口里浮层会盖住正在看的那句词。可见按钮把状态直接摊开。 */
+    .ly-btn.text {
+      width: auto; min-width: 34px;
+      padding: 0 7px;
+      font-family: inherit;
+      font-size: 11px;
+      line-height: 1;
+      white-space: nowrap;
+    }
+    /* 保持解锁：处于激活态时高亮，一眼看出「现在不会被自动锁回」 */
+    .ly-btn.text.active {
+      background: rgba(88,166,255,0.22);
+      border-color: rgba(88,166,255,0.55);
+      color: #9ecbff;
+    }
+    /* 不可用（例如「悬停解锁」关掉后没有回到可交互的途径）：明确置灰，不假装可点 */
+    .ly-btn[disabled] { opacity: .35; cursor: default; }
+    .ly-btn[disabled]:hover { background: rgba(224,226,242,0.08); color: var(--text-default); }
+
+    /* 锁定（穿透）态：工具条里只留「解锁」一个按钮。
+       其余（形态/样式/偏移/配色/字号/关闭）此时不可交互，继续显示只会让人以为歌词条没锁。 */
+    #bar[data-locked="true"] .ly-tools .ly-btn:not(#btn-lock) { display: none; }
+
+    /* 偏移 / 配色的色点：颜色由 CSS 变量驱动（--ly-color-*），变量一变圆点跟着变，
+       无需 JS 手动刷新按钮外观 */
+    .ly-btn.dot { width: 36px; }
+    .ly-dot {
+      width: 13px; height: 13px;
+      border-radius: 50%;
+      display: block;
+      border: 1px solid rgba(255,255,255,.4);
+    }
+
+    /* 拖动提示：解锁态下鼠标为 move，表明可拖 */
+    #bar[data-locked="false"] .ly-line { cursor: move; }
+    #bar.dragging { opacity: .85; }
+
+  </style>
+</head>
+<body>
+  <!-- data-locked="true"  = 穿透中（鼠标完全穿过，点到底下的桌面图标）
+       data-locked="false" = 解锁（可拖动、工具条可点）
+       data-style           = stroke | capsule | bold
+       data-form            = single | double（双行时窗口高 88，单行 56） -->
+  <div id="bar" data-locked="true" data-style="stroke" data-form="single" data-playing="false">
+    <!-- 设置面板：点工具条「设置」展开（窗口由 Rust 向上加高，底边锚定、歌词不动）。
+         交互参考网易云：色板直接点选（不用连点循环），偏移用 ± 步进微调。 -->
+    <div class="ly-panel" id="panel">
+      <div class="ly-prow">
+        <span class="ly-plabel">时间偏移</span>
+        <button class="ly-btn" id="off-minus" title="延后 0.5 秒">−</button>
+        <span class="ly-pval" id="off-val">同步</span>
+        <button class="ly-btn" id="off-plus" title="提前 0.5 秒">＋</button>
+        <span class="ly-phint">正 = 歌词提前，负 = 延后（±5 秒）</span>
+      </div>
+      <div class="ly-prow">
+        <span class="ly-plabel">文字颜色</span>
+        <div class="ly-swatches" id="sw-text"></div>
+      </div>
+      <div class="ly-prow">
+        <span class="ly-plabel">染色颜色</span>
+        <div class="ly-swatches" id="sw-fill"></div>
+      </div>
+    </div>
+    <!-- 工具条在歌词**上方**（网易云样式）：
+         放右侧曾把歌词宽度压到 ~478px，悬浮又会在悬停时盖住长句句尾。
+         放上方则歌词区永远全宽、永不遮挡；窗口高度由 Rust 按形态加上工具条高度。 -->
+    <div class="ly-tools" id="tools">
+      <!-- 形态 / 样式：按钮直接显示当前生效值，点一下切换。
+           放最左，因为它们是「看歌词时最常临时改一下」的两项。 -->
+      <button class="ly-btn text" id="btn-form" title="切换单行 / 双行（双行多显示下一句）">单行</button>
+      <button class="ly-btn text" id="btn-style" title="切换视觉模式：描边 / 胶囊 / 加粗">描边</button>
+      <!-- 设置：弹出面板（时间偏移 + 配色色板），参考网易云「点开面板直接选」的交互 -->
+      <button class="ly-btn text" id="btn-panel" title="时间偏移与配色设置">设置</button>
+      <!-- 锁定 / 解锁：**双向**切换。
+           只做单向锁定会把人锁死 —— 锁定后窗口穿透、页面收不到鼠标事件，
+           而工具条又随锁定隐藏，用户再也没有入口回到可交互状态。
+           点「解锁」置 sticky，悬停探测线程不再自动锁回。 -->
+      <button class="ly-btn text" id="btn-lock" title="锁定：穿透鼠标，可点到底下的窗口/图标">锁定</button>
+      <button class="ly-btn text" id="btn-smaller" title="减小字号">A-</button>
+      <button class="ly-btn text" id="btn-bigger" title="增大字号">A+</button>
+      <button class="ly-btn danger" id="btn-close" title="关闭桌面歌词">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M18 6 6 18M6 6l12 12"/>
+        </svg>
+      </button>
+    </div>
+    <div class="ly-lines">
+      <div class="ly-line" id="line" data-idle="1">
+        <span class="ly-text" id="text"></span>
+        <span class="ly-fill" id="fill" aria-hidden="true"></span>
+      </div>
+      <!-- 第二行：仅双行形态显示，展示下一句（预读用）。无逐字染色 —— 未播到不预先染色。 -->
+      <div class="ly-line ly-next" id="line2" data-idle="1">
+        <span class="ly-text" id="text2"></span>
+      </div>
+    </div>
+  </div>
+  <script src="./js/lyric.js"></script>
+  <!-- 主题快照：拉取 get_theme + 监听 theme://updated（与主窗口方案/主题色保持一致） -->
+  <script type="module">
+    import { applyThemeSnapshot } from "./js/theme.js";
+    applyThemeSnapshot(document).catch((e) => console.warn("[lyric] 主题快照失败", e));
+  </script>
+</body>
+</html>

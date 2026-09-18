@@ -6,6 +6,7 @@ import { state, saveState } from "../state.js";
 import { esc, fitTextarea } from "./common.js";
 import { createDatePicker } from "../datepicker.js";
 import { createSelect } from "../selectbox.js";
+import { ICON_CLOSE } from "../icons.js";
 
 // 快捷录入 textarea 最大自适应高度（与 CSS max-height 对齐，超出后内部滚动）
 const INPUT_MAX_H = 130;
@@ -80,7 +81,7 @@ function streakDays() {
   return n;
 }
 
-// 周历热力：近 4 周（周一为首），28 格，行=周(旧在上)，列=一~日
+// 周历热力：近 4 周（周日为首），28 格，行=周(旧在上)，列=日~六
 function heatCells() {
   const counts = new Map();
   for (const log of state.workLogs || []) {
@@ -88,11 +89,10 @@ function heatCells() {
     counts.set(k, (counts.get(k) || 0) + 1);
   }
   const today = new Date();
-  const dow = (today.getDay() + 6) % 7; // 周一=0
-  const thisMon = addDays(today, -dow);
+  const thisSun = addDays(today, -today.getDay()); // 本周周日（getDay：周日=0）
   const cells = [];
   for (let w = 3; w >= 0; w--) {
-    const ws = addDays(thisMon, -w * 7);
+    const ws = addDays(thisSun, -w * 7);
     for (let i = 0; i < 7; i++) {
       const d = addDays(ws, i);
       const k = dateKey(d);
@@ -173,7 +173,7 @@ function heatCardHTML() {
         <span class="wb-card-t">记录热力</span>
         ${streak > 0 ? `<span class="wb-chip">连续 ${streak} 天</span>` : ""}
       </div>
-      <div class="wb-week"><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span><span>日</span></div>
+      <div class="wb-week"><span>日</span><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span></div>
       <div class="wb-heat">${grid}</div>
       <div class="wb-hnote">近 4 周 · 颜色越亮当日记录越多 · 今日描边</div>
     </section>`;
@@ -193,7 +193,7 @@ function logItem(log) {
       </div>
       <div class="wb-actions">
         <button class="wb-edit" data-id="${esc(log.id)}" title="编辑">✎</button>
-        <button class="wb-del" data-id="${esc(log.id)}" title="删除">✕</button>
+        <button class="wb-del" data-id="${esc(log.id)}" title="删除">${ICON_CLOSE}</button>
       </div>
     </div>`;
 }

@@ -1,6 +1,6 @@
 // 笔记列表视图：左侧笔记列表 + 右侧编辑/阅读双态 Markdown 面板，支持导出为 .md。
-// 交互：打开视图或切换笔记均显示编辑页但不自动聚焦；仅用户主动操作（点模式按钮、
-// 双击正文）才进入输入；工具栏可切到 Markdown 阅读态；新建笔记直接聚焦标题。
+// 交互：打开视图或切换笔记均按 navState.notes.noteModes 恢复该笔记上次的状态（编辑/预览），
+// 均不自动聚焦；仅用户主动操作（点模式按钮、双击正文）才进入输入；新建笔记直接聚焦标题。
 import { state, saveState } from "../state.js";
 import { invoke } from "../bus.js";
 import { toast } from "../toast.js";
@@ -9,10 +9,22 @@ const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replac
 
 // ─── marked.js 初始化 ───
 let _markedReady = false;
+// ==高亮== 扩展：GFM 原生不支持，自定义 tokenizer 让预览态渲染 <mark>
+const highlightExt = {
+  name: "highlight",
+  level: "inline",
+  start(src) { const i = src.indexOf("=="); return i < 0 ? undefined : i; },
+  tokenizer(src) {
+    const m = /^==(?=\S)([\s\S]*?\S)==/.exec(src);
+    if (m) return { type: "highlight", raw: m[0], tokens: this.lexer.inlineTokens(m[1]) };
+  },
+  renderer(token) { return `<mark>${this.parser.parseInline(token.tokens)}</mark>`; },
+};
 function ensureMarked() {
   if (_markedReady) return true;
   if (typeof marked === "undefined") return false;
   marked.setOptions({ gfm: true, breaks: true, async: false });
+  marked.use({ extensions: [highlightExt] });
   _markedReady = true;
   return true;
 }
@@ -32,6 +44,20 @@ const SVG = {
   edit: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>',
   // 导出：向下箭头落入托盘（下载 / 另存为语义）
   export: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v11"/><path d="m7.5 9.5 4.5 4.5 4.5-4.5"/><path d="M4 19.5h16"/></svg>',
+  // ─── Editing Toolbar 图标 ───
+  chevD: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>',
+  chevU: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6"/></svg>',
+  check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>',
+  code: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>',
+  ul: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="9" y1="6" x2="21" y2="6"/><line x1="9" y1="12" x2="21" y2="12"/><line x1="9" y1="18" x2="21" y2="18"/><circle cx="4.5" cy="6" r="1" fill="currentColor" stroke="none"/><circle cx="4.5" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="4.5" cy="18" r="1" fill="currentColor" stroke="none"/></svg>',
+  ol: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="10" y1="6" x2="21" y2="6"/><line x1="10" y1="12" x2="21" y2="12"/><line x1="10" y1="18" x2="21" y2="18"/><text x="2.5" y="8.5" font-size="8" font-weight="700" fill="currentColor" stroke="none">1</text><text x="2.5" y="14.5" font-size="8" font-weight="700" fill="currentColor" stroke="none">2</text><text x="2.5" y="20.5" font-size="8" font-weight="700" fill="currentColor" stroke="none">3</text></svg>',
+  task: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 8 2 2 3.5-4"/><path d="m3 17 2 2 3.5-4"/><line x1="13" y1="7.5" x2="21" y2="7.5"/><line x1="13" y1="16.5" x2="21" y2="16.5"/></svg>',
+  quote: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 11c0 5-2.5 7-6 7"/><path d="M10 5v6"/><path d="M21 11c0 5-2.5 7-6 7"/><path d="M21 5v6"/></svg>',
+  codeblock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><polyline points="10 9 7.5 12 10 15"/><polyline points="14 9 16.5 12 14 15"/></svg>',
+  link: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>',
+  table: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="10" y1="4" x2="10" y2="20"/></svg>',
+  hr: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="8" x2="7" y2="8" opacity=".4"/><line x1="17" y1="8" x2="20" y2="8" opacity=".4"/></svg>',
+  more: '<svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>',
 };
 
 // ─── 时间格式化 ───
@@ -101,7 +127,7 @@ export function renderNotes(view) {
   let activeId = null;
   let searchQuery = "";
   let saveTimer = 0;
-  let isPreviewMode = false; // 默认编辑页；切换笔记保持编辑页，但不自动聚焦
+  let isPreviewMode = false; // 默认编辑页；每篇笔记的状态记录在 navState.notes.noteModes，切换/重启后恢复
   let dirty = false; // 是否有未保存的编辑
 
   // ─── 构建 DOM ───
@@ -127,6 +153,8 @@ export function renderNotes(view) {
           <button id="nt-pin" class="nt-tool pin" title="置顶">${SVG.pin}</button>
           <button id="nt-del" class="nt-tool del" title="删除笔记">${SVG.del}</button>
         </div>
+        <!-- Editing Toolbar：编辑格式栏（一期，仅编辑态显示） -->
+        <div id="nt-fmt" class="et-row disabled" hidden></div>
         <div class="nt-editor-wrap">
           <textarea id="nt-textarea" class="nt-editor-edit" spellcheck="false" placeholder="开始输入…（支持 Markdown）"></textarea>
           <div id="nt-preview" class="nt-editor-preview" hidden></div>
@@ -155,6 +183,263 @@ export function renderNotes(view) {
   const elCount = body.querySelector("#nt-count");
   const elReadtime = body.querySelector("#nt-readtime");
   const elSaved = body.querySelector("#nt-saved");
+
+  // ═══ Editing Toolbar（一期：固定格式栏）═══
+  const elFmt = body.querySelector("#nt-fmt");
+  let fmtCollapsed = localStorage.getItem("notes.toolbarCollapsed") === "1";
+
+  elFmt.innerHTML = `
+    <div class="et-full">
+      <div class="et-menuwrap">
+        <button class="et-btn" id="et-h" title="标题 Ctrl+1~4"><span class="et-h">H</span>${SVG.chevD}</button>
+        <div class="et-menu" id="et-h-menu" hidden>
+          ${[0, 1, 2, 3, 4].map((lv) => `<div class="et-mi" data-h="${lv}"><span class="chk"></span>${lv ? `标题 ${lv}` : "正文"}<span class="sp"></span><span class="et-kbd">Ctrl+${lv}</span></div>`).join("")}
+        </div>
+      </div>
+      <span class="et-sep"></span>
+      <button class="et-btn" data-fmt="bold" title="加粗 Ctrl+B"><span class="et-g">B</span></button>
+      <button class="et-btn" data-fmt="italic" title="斜体 Ctrl+I"><span class="et-g it">I</span></button>
+      <button class="et-btn" data-fmt="strike" title="删除线 Ctrl+Shift+X"><span class="et-g st">S</span></button>
+      <button class="et-btn" data-fmt="highlight" title="高亮 Ctrl+Shift+H"><span class="et-g hl">高</span></button>
+      <button class="et-btn" data-fmt="icode" title="行内代码 Ctrl+E">${SVG.code}</button>
+      <span class="et-sep"></span>
+      <button class="et-btn" data-fmt="ul" title="无序列表 Ctrl+Shift+8">${SVG.ul}</button>
+      <button class="et-btn" data-fmt="ol" title="有序列表">${SVG.ol}</button>
+      <button class="et-btn" data-fmt="task" title="任务列表">${SVG.task}</button>
+      <span class="et-sep"></span>
+      <button class="et-btn" data-fmt="quote" title="引用">${SVG.quote}</button>
+      <button class="et-btn" data-fmt="codeblock" title="代码块">${SVG.codeblock}</button>
+      <button class="et-btn" data-fmt="link" title="链接 Ctrl+K">${SVG.link}</button>
+      <button class="et-btn" data-fmt="table" title="表格">${SVG.table}</button>
+      <button class="et-btn" data-fmt="hr" title="分割线">${SVG.hr}</button>
+      <div class="et-flex"></div>
+      <div class="et-menuwrap">
+        <button class="et-btn" id="et-more" title="更多">${SVG.more}</button>
+        <div class="et-menu et-menu-right" id="et-more-menu" hidden>
+          <div class="et-mi" data-fmt="ts"><span class="chk"></span>插入时间戳<span class="sp"></span><span class="et-kbd">Ctrl+;</span></div>
+          <div class="et-mi" data-fmt="toc"><span class="chk"></span>插入目录 TOC</div>
+          <div class="et-mi dis"><span class="chk"></span>字号<span class="sp"></span><span class="tag2">二期</span></div>
+          <div class="et-mi dis"><span class="chk"></span>文字颜色<span class="sp"></span><span class="tag2">二期</span></div>
+          <div class="et-mi dis"><span class="chk"></span>插入图片<span class="sp"></span><span class="tag2">二期</span></div>
+        </div>
+      </div>
+      <button class="et-btn" id="et-collapse" title="收起工具栏">${SVG.chevU}</button>
+    </div>
+    <button class="et-btn et-expand" id="et-expand" title="展开工具栏">${SVG.chevD}</button>`;
+
+  // ─── 选区工具：优先 execCommand，保留 textarea 原生撤销栈 ───
+  function replaceRange(start, end, text, selStart, selEnd) {
+    elTextarea.focus();
+    elTextarea.setSelectionRange(start, end);
+    if (!document.execCommand("insertText", false, text)) {
+      elTextarea.setRangeText(text, start, end, "end");
+    }
+    if (selStart != null) elTextarea.setSelectionRange(selStart, selEnd ?? selStart);
+    onInput();
+  }
+
+  // 行内样式：包裹选区；已包裹则取消；无选区插入占位文本并选中
+  function wrapInline(pre, post, placeholder) {
+    const v = elTextarea.value;
+    const s = elTextarea.selectionStart, e = elTextarea.selectionEnd;
+    if (s === e) {
+      const ph = placeholder || "文本";
+      replaceRange(s, e, pre + ph + post, s + pre.length, s + pre.length + ph.length);
+      return;
+    }
+    const before = v.slice(Math.max(0, s - pre.length), s);
+    const after = v.slice(e, e + post.length);
+    if (before === pre && after === post) {
+      replaceRange(s - pre.length, e + post.length, v.slice(s, e), s - pre.length, e - pre.length);
+      return;
+    }
+    replaceRange(s, e, pre + v.slice(s, e) + post, s + pre.length, e + pre.length);
+  }
+
+  // 块级样式：对选区覆盖的每一行做变换（再点一次取消）
+  function mapLines(fn) {
+    const v = elTextarea.value;
+    const s = elTextarea.selectionStart, e = elTextarea.selectionEnd;
+    const ls = v.lastIndexOf("\n", s - 1) + 1;
+    let le = v.indexOf("\n", e); if (le < 0) le = v.length;
+    const lines = v.slice(ls, le).split("\n");
+    const out = fn(lines).join("\n");
+    replaceRange(ls, le, out, ls, ls + out.length);
+  }
+
+  const FMT = {
+    bold: () => wrapInline("**", "**", "加粗文字"),
+    italic: () => wrapInline("*", "*", "斜体文字"),
+    strike: () => wrapInline("~~", "~~", "删除文字"),
+    highlight: () => wrapInline("==", "==", "高亮文字"),
+    icode: () => wrapInline("`", "`", "代码"),
+    ul: () => mapLines((lines) => {
+      const all = lines.filter((l) => l.trim()).every((l) => { const t = l.trimStart(); return t.startsWith("- ") || t.startsWith("- [ ] "); });
+      return lines.map((l) => !l.trim() ? l : all ? l.replace(/^(\s*)- (?:\[ \] )?/, "$1") : l.replace(/^(\s*)/, "$1- "));
+    }),
+    ol: () => mapLines((lines) => {
+      const all = lines.filter((l) => l.trim()).every((l) => /^\s*\d+\. /.test(l));
+      let n = 0;
+      return lines.map((l) => !l.trim() ? l
+        : all ? l.replace(/^(\s*)\d+\. /, "$1")
+        : l.replace(/^(\s*)/, (m) => m + (++n) + ". "));
+    }),
+    task: () => mapLines((lines) => lines.map((l) => {
+      if (!l.trim()) return l;
+      const t = l.trimStart();
+      if (t.startsWith("- [ ] ")) return l.replace(/^(\s*)- \[ \] /, "$1");
+      if (t.startsWith("- ")) return l.replace(/^(\s*)- /, "$1- [ ] ");
+      return l.replace(/^(\s*)/, "$1- [ ] ");
+    })),
+    quote: () => mapLines((lines) => {
+      const all = lines.filter((l) => l.trim()).every((l) => l.trimStart().startsWith("> "));
+      return lines.map((l) => !l.trim() ? l : all ? l.replace(/^(\s*)> ?/, "$1") : l.replace(/^(\s*)/, "$1> "));
+    }),
+    heading: (lv) => mapLines((lines) => lines.map((l) => {
+      const m = l.match(/^(\s*)(#{1,6})\s+/);
+      const cur = m ? m[2].length : 0;
+      const stripped = l.replace(/^(\s*)#{1,6}\s+/, "$1");
+      if (cur === lv || lv === 0) return stripped; // 同级再点 → 回到正文
+      const pad = (stripped.match(/^\s*/) || [""])[0];
+      return pad + "#".repeat(lv) + " " + stripped.slice(pad.length);
+    })),
+    hr: () => {
+      const s = elTextarea.selectionStart;
+      replaceRange(s, elTextarea.selectionEnd, "\n\n---\n\n");
+    },
+    codeblock: () => {
+      const v = elTextarea.value, s = elTextarea.selectionStart, e = elTextarea.selectionEnd;
+      const inner = v.slice(s, e) || "// 代码";
+      replaceRange(s, e, "```\n" + inner + "\n```", s + 4, s + 4 + inner.length);
+    },
+    table: () => {
+      const s = elTextarea.selectionStart;
+      const tpl = "\n| 列1 | 列2 | 列3 |\n| --- | --- | --- |\n|  |  |  |\n";
+      replaceRange(s, elTextarea.selectionEnd, tpl);
+    },
+    link: () => {
+      const v = elTextarea.value, s = elTextarea.selectionStart, e = elTextarea.selectionEnd;
+      const sel = v.slice(s, e) || "链接文字";
+      replaceRange(s, e, `[${sel}](url)`, s + sel.length + 3, s + sel.length + 6);
+    },
+    ts: () => {
+      const d = new Date();
+      const pad = (n) => String(n).padStart(2, "0");
+      const stamp = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+      const s = elTextarea.selectionStart;
+      replaceRange(s, elTextarea.selectionEnd, stamp, s + stamp.length);
+    },
+    toc: () => {
+      const heads = [...elTextarea.value.matchAll(/^#{1,4}\s+(.+)$/gm)]
+        .map((m) => m[1].trim()).filter((t) => t && t !== "目录");
+      if (!heads.length) { toast("还没有可用的标题，先写几个标题吧"); return; }
+      const s = elTextarea.selectionStart;
+      replaceRange(s, elTextarea.selectionEnd, "\n\n## 目录\n\n" + heads.map((t) => "- " + t).join("\n") + "\n");
+    },
+  };
+
+  // ─── 菜单开合 ───
+  function closeMenus() {
+    elFmt.querySelector("#et-h-menu").hidden = true;
+    elFmt.querySelector("#et-more-menu").hidden = true;
+  }
+  elFmt.addEventListener("click", (e) => {
+    const mi = e.target.closest(".et-mi:not(.dis)");
+    const btn = e.target.closest(".et-btn");
+    if (mi) {
+      if (mi.dataset.h != null) FMT.heading(+mi.dataset.h);
+      else if (mi.dataset.fmt && FMT[mi.dataset.fmt]) FMT[mi.dataset.fmt]();
+      closeMenus();
+      syncActive();
+      return;
+    }
+    if (!btn) return;
+    if (btn.id === "et-h") {
+      const m = elFmt.querySelector("#et-h-menu");
+      m.hidden = !m.hidden;
+      elFmt.querySelector("#et-more-menu").hidden = true;
+      return;
+    }
+    if (btn.id === "et-more") {
+      const m = elFmt.querySelector("#et-more-menu");
+      m.hidden = !m.hidden;
+      elFmt.querySelector("#et-h-menu").hidden = true;
+      return;
+    }
+    if (btn.id === "et-collapse") {
+      fmtCollapsed = true;
+      localStorage.setItem("notes.toolbarCollapsed", "1");
+      syncFmtRow();
+      return;
+    }
+    if (btn.id === "et-expand") {
+      fmtCollapsed = false;
+      localStorage.setItem("notes.toolbarCollapsed", "0");
+      syncFmtRow();
+      elTextarea.focus();
+      return;
+    }
+    if (btn.dataset.fmt && FMT[btn.dataset.fmt]) {
+      FMT[btn.dataset.fmt]();
+      closeMenus();
+      syncActive();
+    }
+  });
+  const onDocClickFmt = (e) => { if (!e.target.closest(".et-menuwrap")) closeMenus(); };
+  document.addEventListener("click", onDocClickFmt);
+
+  // ─── 按钮状态回显：随光标/选区点亮已命中的样式 ───
+  function syncActive() {
+    if (isPreviewMode || !activeId || elTextarea.disabled) return;
+    const v = elTextarea.value;
+    const s = elTextarea.selectionStart, e = elTextarea.selectionEnd;
+    const ls = v.lastIndexOf("\n", s - 1) + 1;
+    let le = v.indexOf("\n", s); if (le < 0) le = v.length;
+    const line = v.slice(ls, le);
+    const set = (sel, on) => { const b = elFmt.querySelector(sel); if (b) b.classList.toggle("on", !!on); };
+    const surround = (pre, post) =>
+      v.slice(Math.max(0, s - pre.length), s) === pre && v.slice(e, e + post.length) === post;
+    set('[data-fmt="bold"]', surround("**", "**"));
+    set('[data-fmt="italic"]', v.slice(s - 1, s) === "*" && v.slice(s - 2, s) !== "**" && v.slice(e, e + 1) === "*");
+    set('[data-fmt="strike"]', surround("~~", "~~"));
+    set('[data-fmt="highlight"]', surround("==", "=="));
+    set('[data-fmt="icode"]', surround("`", "`"));
+    const hm = line.match(/^\s*(#{1,6})\s+/);
+    const lv = hm ? hm[1].length : 0;
+    set("#et-h", lv > 0);
+    const hlab = elFmt.querySelector("#et-h .et-h");
+    if (hlab) hlab.textContent = lv > 0 && lv <= 4 ? "H" + lv : "H";
+    elFmt.querySelectorAll("#et-h-menu .et-mi").forEach((mi) => {
+      mi.querySelector(".chk").innerHTML = +mi.dataset.h === lv ? SVG.check : "";
+      mi.classList.toggle("sel", +mi.dataset.h === lv);
+    });
+  }
+  ["keyup", "mouseup", "input", "focus"].forEach((ev) => elTextarea.addEventListener(ev, syncActive));
+
+  // ─── 快捷键（与 Obsidian 对齐）───
+  elTextarea.addEventListener("keydown", (e) => {
+    if (isPreviewMode || elTextarea.disabled) return;
+    if (!(e.ctrlKey || e.metaKey)) return;
+    const k = e.key.toLowerCase();
+    const run = (fn) => { e.preventDefault(); e.stopPropagation(); fn(); syncActive(); };
+    if (e.shiftKey && k === "x") return run(FMT.strike);
+    if (e.shiftKey && k === "h") return run(FMT.highlight);
+    if (e.shiftKey && k === "8") return run(FMT.ul);
+    if (!e.shiftKey && k === "b") return run(FMT.bold);
+    if (!e.shiftKey && k === "i") return run(FMT.italic);
+    if (!e.shiftKey && k === "e") return run(FMT.icode);
+    if (!e.shiftKey && k === "k") return run(FMT.link);
+    if (!e.shiftKey && k === ";") return run(FMT.ts);
+    if (!e.shiftKey && /^[0-4]$/.test(e.key)) return run(() => FMT.heading(+e.key));
+  });
+
+  // ─── 格式栏显隐：预览态隐藏；收起态只留展开按钮 ───
+  function syncFmtRow() {
+    elFmt.hidden = isPreviewMode;
+    elFmt.classList.toggle("collapsed", fmtCollapsed);
+    if (!isPreviewMode) syncActive();
+  }
+
 
   // ─── 渲染笔记列表 ───
   function renderList() {
@@ -249,6 +534,7 @@ export function renderNotes(view) {
     elTitle.disabled = true;
     elTitle.placeholder = "—";
     elExport.disabled = true;
+    elFmt.classList.add("disabled");
   }
 
   // ─── 有笔记时的正常态 ───
@@ -258,12 +544,31 @@ export function renderNotes(view) {
     elTitle.disabled = false;
     elTitle.placeholder = "笔记标题…";
     elExport.disabled = false;
+    elFmt.classList.remove("disabled");
   }
 
   // ─── 切换编辑 / 阅读（预览）模式 ───
-  // focus 仅在用户主动切换（点按钮 / 双击正文）时为 true；切换笔记时保持编辑页但不抢焦点。
-  function setMode(preview, { focus = false } = {}) {
+  // focus 仅在用户主动切换（点按钮 / 双击正文）时为 true。
+  // remember=true 时把该笔记的模式记入 navState.notes.noteModes（只记 "preview" 偏差，
+  // 缺省即编辑态），切换笔记 / 重启后由 selectNote 恢复；恢复路径传 remember=false 避免多余写盘。
+  function rememberMode(id, preview) {
+    if (!state.navState) state.navState = {};
+    if (!state.navState.notes || typeof state.navState.notes !== "object") state.navState.notes = {};
+    if (!state.navState.notes.noteModes || typeof state.navState.notes.noteModes !== "object") {
+      state.navState.notes.noteModes = {};
+    }
+    if (preview) state.navState.notes.noteModes[id] = "preview";
+    else delete state.navState.notes.noteModes[id];
+    saveState();
+  }
+  function savedModeIsPreview(id) {
+    return state.navState?.notes?.noteModes?.[id] === "preview";
+  }
+
+  function setMode(preview, { focus = false, remember = true } = {}) {
     isPreviewMode = preview;
+    if (remember && activeId) rememberMode(activeId, preview);
+    syncFmtRow();
     if (preview) {
       // 退出编辑前落盘
       if (activeId) { clearTimeout(saveTimer); saveCurrent(); }
@@ -377,14 +682,21 @@ export function renderNotes(view) {
     const note = (state.notes || []).find((n) => n.id === id);
     if (!note) return;
     activeId = id;
+    // 记住上次查看的笔记：切换到其他模块再回来时恢复到这里
+    if (!state.navState) state.navState = {};
+    if (!state.navState.notes || typeof state.navState.notes !== "object") state.navState.notes = {};
+    if (state.navState.notes.lastId !== id) {
+      state.navState.notes.lastId = id;
+      saveState();
+    }
     elTitle.value = note.title || extractTitle(note.content);
     elPin.classList.toggle("active", note.pinned);
     elPin.innerHTML = note.pinned ? SVG.pinFill : SVG.pin;
     elPin.title = note.pinned ? "取消置顶" : "置顶";
     elTextarea.value = note.content;
-    // 保持编辑页，但不进入焦点：不弹光标、不滚到文末
+    // 恢复该笔记上次的状态：上次停在预览则进预览，否则保持编辑页；均不抢焦点
     renderNoteState();
-    setMode(false);
+    setMode(savedModeIsPreview(id), { remember: false });
     // 若编辑器仍持有焦点（上一篇正在编辑），切换时主动交还，避免光标残留在旧位置
     if (document.activeElement === elTextarea) elTextarea.blur();
     elTextarea.scrollTop = 0;
@@ -434,6 +746,10 @@ export function renderNotes(view) {
     const idx = state.notes.findIndex((n) => n.id === id);
     if (idx < 0) return;
     state.notes.splice(idx, 1);
+    // 清理该笔记的模式记录（navState.notes.noteModes 只存预览态偏差）
+    if (state.navState?.notes?.noteModes) {
+      delete state.navState.notes.noteModes[id];
+    }
     if (id === activeId) {
       activeId = null;
       if (state.notes.length > 0) {
@@ -473,11 +789,14 @@ export function renderNotes(view) {
   ensureMarked();
   renderList();
   if (state.notes && state.notes.length > 0) {
-    selectNote(state.notes[0].id); // 打开即编辑页，但不抢焦点
+    // 恢复上次查看的笔记（navState.notes.lastId）；记录不存在或笔记已删则回退到列表第一篇
+    const lastId = state.navState?.notes?.lastId;
+    const last = lastId ? (state.notes || []).find((n) => n.id === lastId) : null;
+    selectNote(last ? last.id : state.notes[0].id); // 打开即恢复上次状态，但不抢焦点
   } else {
     renderEmptyState();
     setMode(false);
   }
 
-  view.onDestroy(() => { clearTimeout(saveTimer); });
+  view.onDestroy(() => { clearTimeout(saveTimer); document.removeEventListener("click", onDocClickFmt); });
 }

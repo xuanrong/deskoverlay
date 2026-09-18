@@ -69,4 +69,17 @@ if (TAURI && TAURI.event && typeof TAURI.event.listen === "function") {
   TAURI.event
     .listen("sedentary-fire", (e) => Bus.emit("sedentary-fire", e.payload))
     .catch((err) => console.warn("[bridge] sedentary-fire 监听失败：", err));
+  // 桌面歌词窗口拖动结束的位置回写：桥接进 Bus，由音乐模块写入 state（主窗口是唯一写者）。
+  TAURI.event
+    .listen("lyric://moved", (e) => Bus.emit("lyric://moved", e.payload))
+    .catch((err) => console.warn("[bridge] lyric://moved 监听失败：", err));
+  // 歌词窗口被其自身关闭按钮销毁 → 桥接进 Bus，供主窗口复位「桌面歌词」按钮态。
+  TAURI.event
+    .listen("lyric-hidden", (e) => Bus.emit("lyric-hidden", e.payload))
+    .catch((err) => console.warn("[bridge] lyric-hidden 监听失败：", err));
+  // 歌词条形态/样式/字号变更（歌词页右键菜单发起）→ 桥接进 Bus，由主窗口落盘。
+  // 歌词页不能自己写 state.json（它是整体覆盖写，且歌词页只有启动时的旧快照）。
+  TAURI.event
+    .listen("lyric://display", (e) => Bus.emit("lyric://display", e.payload))
+    .catch((err) => console.warn("[bridge] lyric://display 监听失败：", err));
 }

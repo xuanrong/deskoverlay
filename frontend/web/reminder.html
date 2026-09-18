@@ -175,7 +175,12 @@
       </div>
     </div>
     <div class="rm-progress"></div>
-  </div>
+  <div>
   <script src="./js/reminder.js"></script>
+  <!-- 主题快照：拉取 get_theme + 监听 theme://updated（与主窗口方案/主题色保持一致） -->
+  <script type="module">
+    import { applyThemeSnapshot } from "./js/theme.js";
+    applyThemeSnapshot(document).catch((e) => console.warn("[reminder] 主题快照失败", e));
+  </script>
 </body>
 </html>

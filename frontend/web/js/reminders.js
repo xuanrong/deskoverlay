@@ -1,7 +1,7 @@
 // 提醒功能：时钟块右侧提醒区（每日定时 / 间隔）、到期置顶提醒、配置弹窗。
 import { invoke, Heartbeat } from "./bus.js";
 import { state, saveState } from "./state.js";
-import { ICON_CLOCK, ICON_WATER } from "./icons.js";
+import { ICON_CLOCK, ICON_WATER, ICON_CLOSE } from "./icons.js";
 import { esc } from "./views/common.js";
 
 const mcReminders = document.getElementById("mc-reminders");
@@ -286,7 +286,7 @@ function openReminderSettings() {
         <input class="rm-name" data-i="${i}" value="${esc(r.label)}" placeholder="提醒名称" />
         <input class="rm-time" type="time" data-i="${i}" value="${esc(r.time || "")}" title="每日触发时刻" />
         <label class="rm-toggle"><input type="checkbox" data-i="${i}" ${r.enabled ? "checked" : ""} /><span>启用</span></label>
-        <button class="rm-del" data-i="${i}" title="删除">✕</button>
+        <button class="rm-del" data-i="${i}" title="删除">${ICON_CLOSE}</button>
       </div>`;
     }).join("");
 

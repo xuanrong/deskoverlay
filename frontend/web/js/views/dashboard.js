@@ -3,7 +3,7 @@ import { Bus, invoke } from "../bus.js";
 import { Tasks } from "../tasks.js";
 import { state, saveState, pushRecentOp, onRecentOp } from "../state.js";
 import { STATUS_LABEL, TASK_STATUSES, PRIORITY_LABEL } from "../config.js";
-import { ICON_EXTERNAL, ICON_SEARCH, ICON_EDIT, ICON_TRASH, ICON_CHECK, ICON_BELL, ICON_FOLDER, ICON_PAPERCLIP } from "../icons.js";
+import { ICON_EXTERNAL, ICON_SEARCH, ICON_EDIT, ICON_TRASH, ICON_CHECK, ICON_BELL, ICON_FOLDER, ICON_PAPERCLIP, ICON_REFRESH } from "../icons.js";
 import { ICON_TOMATO } from "../pomodoro.js";
 import { FILE_CATEGORIES, FILE_ICONS } from "../filetypes.js";
 import { esc, showDialog } from "./common.js";
@@ -415,7 +415,7 @@ async function renderFilesBlock(el, view) {
     if (!tabs.includes(currentTab)) currentTab = tabs[0];
     el.innerHTML = `
     <div class="sec-title">文件中心
-      <span class="file-search"><input id="d-file-search" type="text" placeholder="全盘搜文件名…" spellcheck="false" autocomplete="off" /><button class="file-reindex" id="d-file-reindex" title="重建索引" type="button">↻</button></span>
+      <span class="file-search" id="d-file-search-box"><input id="d-file-search" type="text" placeholder="全盘搜文件名…" spellcheck="false" autocomplete="off" /><button class="file-reindex" id="d-file-reindex" title="重建索引" type="button">${ICON_REFRESH}</button><button class="file-search-toggle" id="d-file-search-btn" title="全盘搜文件" type="button">${ICON_SEARCH}</button></span>
       <button class="file-layout-toggle" id="d-file-layout" title="切换布局">${layout === "grid" ? LAYOUT_LIST_ICON : LAYOUT_GRID_ICON}</button>
     </div>
     <div class="file-tabs" id="d-file-tabs"></div>
@@ -444,6 +444,17 @@ async function renderFilesBlock(el, view) {
     // —— 全盘搜索（自建索引，后端 file_index）——
     const searchEl = el.querySelector("#d-file-search");
     const resultsEl = el.querySelector("#d-file-results");
+    // 收起/展开：默认只显示搜索图标，点击展开输入框
+    const searchBox = el.querySelector("#d-file-search-box");
+    const expandSearch = () => { searchBox.classList.add("open"); searchEl.focus(); };
+    const collapseSearch = () => {
+      searchBox.classList.remove("open");
+      if (searchEl.value) { searchEl.value = ""; runSearch(""); }
+      searchEl.blur();
+    };
+    el.querySelector("#d-file-search-btn").addEventListener("click", () => {
+      if (searchBox.classList.contains("open")) collapseSearch(); else expandSearch();
+    });
     let searchTimer = null;
     let indexPoll = null; // 建索引期间的轮询
     let readyOnce = false; // 索引就绪缓存：已就绪则后续击键跳过 index_status
@@ -471,7 +482,7 @@ async function renderFilesBlock(el, view) {
         if (st.ready) { readyOnce = true; }
         else {
           if (!st.building) {
-            resultsEl.innerHTML = `<div class="ev-hint">索引尚未就绪，点击右侧「↻」重建索引。</div>`;
+            resultsEl.innerHTML = `<div class="ev-hint">索引尚未就绪，点击右侧「刷新」按钮重建索引。</div>`;
             return;
           }
           resultsEl.innerHTML = `<div class="ev-hint">正在建立索引… 已扫描 ${st.scanned ?? 0} 项</div>`;
@@ -484,7 +495,7 @@ async function renderFilesBlock(el, view) {
         res = await invoke("search_files", { query: q, limit: 120 });
       } catch (err) {
         readyOnce = false; // 出错后重置状态缓存，下次重新探测
-        resultsEl.innerHTML = `<div class="ev-hint">搜索出错：${esc(String(err))}。可点「↻」重建索引或重试。</div>`;
+        resultsEl.innerHTML = `<div class="ev-hint">搜索出错：${esc(String(err))}。可点「刷新」按钮重建索引或重试。</div>`;
         return;
       }
       if (searchEl.value.trim() !== q) return; // 输入已变化，丢弃过期结果
@@ -518,7 +529,19 @@ async function renderFilesBlock(el, view) {
       searchTimer = setTimeout(() => runSearch(q), 200);
     });
     searchEl.addEventListener("keydown", (e) => {
-      if (e.key === "Escape") { clearTimeout(indexPoll); searchEl.value = ""; runSearch(""); searchEl.blur(); }
+      if (e.key === "Escape") {
+        clearTimeout(indexPoll);
+        // 第一段 Esc 清空查询回分类浏览；再按（已空）收起搜索框
+        if (searchEl.value) { searchEl.value = ""; runSearch(""); }
+        else searchBox.classList.remove("open");
+        searchEl.blur();
+      }
+    });
+    // 焦点移出且无查询内容时自动收起；延时以允许点击盒内的 ↻ 按钮（焦点先落在按钮上）
+    searchEl.addEventListener("blur", () => {
+      setTimeout(() => {
+        if (!searchBox.contains(document.activeElement) && !searchEl.value.trim()) searchBox.classList.remove("open");
+      }, 120);
     });
     el.querySelector("#d-file-reindex").addEventListener("click", async () => {
       await invoke("rebuild_index");

@@ -3,6 +3,7 @@
 // 自定义标签存于 state.ideaTags，统一用青色系。
 import { state, saveState } from "../state.js";
 import { esc, showDialog, fitTextarea } from "./common.js";
+import { ICON_CLOSE } from "../icons.js";
 
 // 随手记输入区最大自适应高度（超出后内部滚动）
 const INPUT_MAX_H = 200;
@@ -199,7 +200,7 @@ export function renderIdeabox(view) {
         <div class="idea-text">${esc(it.text)}</div>
         <div class="idea-acts">
           <button class="idea-edit" data-id="${esc(it.id)}" title="编辑">✎</button>
-          <button class="idea-del" data-id="${esc(it.id)}" title="删除">✕</button>
+          <button class="idea-del" data-id="${esc(it.id)}" title="删除">${ICON_CLOSE}</button>
         </div>
       </div>`;
   }

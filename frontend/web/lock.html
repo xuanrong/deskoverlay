@@ -81,7 +81,12 @@
     <div class="lock-hint">
       <h1>离开一会儿，马上回来</h1>
     </div>
-  </div>
+  <div>
   <script src="./js/lockpage.js"></script>
+  <!-- 主题快照：拉取 get_theme + 监听 theme://updated；锁屏强制深色（隐私优先于皮肤） -->
+  <script type="module">
+    import { applyThemeSnapshot } from "./js/theme.js";
+    applyThemeSnapshot(document, { lockMode: true }).catch((e) => console.warn("[lock] 主题快照失败", e));
+  </script>
 </body>
 </html>

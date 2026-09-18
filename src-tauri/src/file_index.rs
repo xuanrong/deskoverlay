@@ -86,10 +86,30 @@ static IDX_BUILDING: AtomicBool = AtomicBool::new(false);
 /// 已扫描条数（建索引过程实时递增，供前端展示进度）。
 static IDX_SCANNED: AtomicUsize = AtomicUsize::new(0);
 
-/// 无价值目录（任意盘根下直接跳过），保持索引精简。
+/// 无价值目录（按目录名匹配，任意层级生效），保持索引精简。
 /// 唯一定义处：目录遍历（walk_roots）与 USN 直读（usn_index::try_build）两条构建路径共用，
 /// 避免两份列表各自演化导致索引口径不一致。
-pub(crate) const SKIP: [&str; 3] = ["system volume information", "$recycle.bin", "windows"];
+///
+/// 2026-09-16 扩充：原 3 项只挡掉系统目录，实测 299 万条索引使宿主进程私有内存高达
+/// 584MB。新增程序目录 / 包管理 / 构建产物等「文件量大、文件名无检索价值」的目录名 ——
+/// 可执行文件的启动入口由开始菜单快捷方式与桌面文件覆盖，不依赖全路径检索。
+/// 注意：按名字匹配是全层级的，用户若真有名为 cache 的资料目录也会被跳过 ——
+/// 对启动器场景可接受，换来内存占用大幅下降。
+pub(crate) const SKIP: [&str; 13] = [
+    // 系统目录
+    "system volume information", "$recycle.bin", "windows", "perflogs", "recovery",
+    // 程序与全局组件（按文件名检索无意义，启动入口走开始菜单/桌面）
+    "program files", "program files (x86)", "programdata",
+    // 包管理与构建产物
+    "node_modules", ".git", "target",
+    // 缓存与临时目录（浏览器/工具缓存文件量极大）
+    "cache", "temp",
+];
+
+/// 索引总量上限：达到即停止扫描，给内存占用一个硬上界。
+/// 100 万条约对应 200MB 常驻内存（路径 String + 小写名缓冲）；配合 SKIP 过滤，
+/// 日常机器通常远达不到此值，上限只是兜底。
+pub(crate) const MAX_ENTRIES: usize = 1_000_000;
 
 /// 枚举本地固定盘（NTFS/FAT），返回类似 `C:\` 的根。
 pub(crate) fn fixed_drives() -> Vec<String> {
@@ -109,15 +129,19 @@ pub(crate) fn fixed_drives() -> Vec<String> {
 }
 
 /// 迭代遍历一个目录树，收集所有路径；`scanned` 实时递增。
+/// 达到 MAX_ENTRIES 即整体停止，保证内存上界。
 fn walk_roots(roots: &[String]) -> Vec<Hit> {
     let mut out = Vec::new();
     let mut stack: Vec<PathBuf> = roots.iter().map(PathBuf::from).collect();
-    while let Some(dir) = stack.pop() {
+    'outer: while let Some(dir) = stack.pop() {
         let rd = match std::fs::read_dir(&dir) {
             Ok(r) => r,
             Err(_) => continue,
         };
         for entry in rd {
+            if out.len() >= MAX_ENTRIES {
+                break 'outer;
+            }
             let entry = match entry {
                 Ok(e) => e,
                 Err(_) => continue,
@@ -163,6 +187,18 @@ fn load_snapshot(dir: &std::path::Path) -> Option<Vec<Hit>> {
         IDX_SCANNED.fetch_add(1, Ordering::Relaxed);
     }
     if out.is_empty() { None } else { Some(out) }
+    // 旧版无上限时生成的超限快照：按新口径作废，触发重建（commit 后会重写小快照）
+    // 注：判断放在读取完成后，避免边读边判造成口径混乱
+}
+
+fn load_snapshot_checked(dir: &std::path::Path) -> Option<Vec<Hit>> {
+    match load_snapshot(dir) {
+        Some(entries) if entries.len() > MAX_ENTRIES => {
+            println!("[file_index] 快照 {} 条超过上限 {}，作废重建", entries.len(), MAX_ENTRIES);
+            None
+        }
+        other => other,
+    }
 }
 
 fn commit(entries: Vec<Hit>, roots: Vec<String>) {
@@ -186,8 +222,9 @@ pub fn start_index(app: AppHandle) {
         IDX_SCANNED.store(0, Ordering::Relaxed);
         let roots = fixed_drives();
         let dir = app.path().app_data_dir().ok();
-        // 有快照则秒恢复，避免每次启动整盘重扫；否则首次全量建
-        let entries = dir.as_ref().map(|d| d.as_path()).and_then(load_snapshot).unwrap_or_else(build_entries);
+        // 有快照则秒恢复，避免每次启动整盘重扫；否则首次全量建。
+        // 超过 MAX_ENTRIES 的旧快照作废重建（load_snapshot_checked）。
+        let entries = dir.as_ref().map(|d| d.as_path()).and_then(load_snapshot_checked).unwrap_or_else(build_entries);
         commit(entries, roots);
         IDX_BUILDING.store(false, Ordering::Relaxed);
         if let Some(d) = dir {

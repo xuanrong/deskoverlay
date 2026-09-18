@@ -1,4 +1,5 @@
 // 2048：4×4 滑动合并，方向键/按钮控制，分数累计，自动判断胜负。
+import { ICON_CHEV } from "../../icons.js";
 
 const TILE_BG = {
   2: "rgba(88,166,255,0.35)", 4: "rgba(88,166,255,0.5)",
@@ -21,11 +22,11 @@ export function render2048(el) {
       <div class="t2048-board" id="t2048-board"></div>
       <div class="t2048-msg" id="t2048-msg"></div>
       <div class="t2048-pad">
-        <button class="sdk-num" data-dir="up">↑</button>
+        <button class="sdk-num" data-dir="up" title="上">${ICON_CHEV}</button>
         <div class="t2048-pad-mid">
-          <button class="sdk-num" data-dir="left">←</button>
-          <button class="sdk-num" data-dir="down">↓</button>
-          <button class="sdk-num" data-dir="right">→</button>
+          <button class="sdk-num" data-dir="left" title="左">${ICON_CHEV}</button>
+          <button class="sdk-num" data-dir="down" title="下">${ICON_CHEV}</button>
+          <button class="sdk-num" data-dir="right" title="右">${ICON_CHEV}</button>
         </div>
       </div>
     </div>`;

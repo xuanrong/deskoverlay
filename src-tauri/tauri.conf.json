@@ -26,7 +26,13 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": null,
+      "assetProtocol": {
+        "enable": true,
+        "scope": [
+          "$APPDATA/wallpaper_cache/*"
+        ]
+      }
     }
   },
   "bundle": {

@@ -9,6 +9,8 @@
 <body>
   <!-- 全屏覆盖背景：工作台的真实画布背景（不穿透，盖住桌面） -->
   <div id="desktop-backdrop"></div>
+  <!-- 主题背景层：自定义背景（图片/纯色/渐变）由 theme.js 渲染于此 -->
+  <div id="theme-backdrop" aria-hidden="true"><div class="tb-media"></div><div class="tb-dim"></div></div>
 
   <!-- 应用主体：侧边导航 + 主区域 -->
   <div id="app">
@@ -29,7 +31,7 @@
           <div class="mc-time" id="mc-time">--:--:--</div>
           <div class="mc-date-row">
             <div class="mc-date" id="mc-date"></div>
-            <div class="mc-week" id="mc-week" title="ISO 周次"></div>
+            <div class="mc-fest" id="mc-fest" hidden title="节日·节气·假期"></div>
           </div>
         </div>
         <div class="mc-reminders" id="mc-reminders"></div>

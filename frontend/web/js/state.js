@@ -38,6 +38,22 @@ export const state = {
   lock: { enabled: false, minutes: 5 }, // 隐私锁定：离开 enabled 分钟自动锁定全屏
   quickAccess: [], // 快捷访问：{ id, type:"url"|"folder"|"file", title, target, groupId }
   qaGroups: [], // 快捷访问分组：{ id, name }
+  lyric: {
+    // 桌面歌词浮层（独立窗口）。P1 仅用到 pos；其余字段在 P2/P4 接入。
+    enabled: false, // 是否启用桌面歌词
+    locked: true, // 锁定态：鼠标穿透歌词条（点到底下的窗口/图标）
+    hoverUnlock: true, // 悬停自动解锁（鼠标移入条内即可拖动/右键，移出后自动锁回）
+    autoLockMs: 3000, // 移出后多久锁回（毫秒，0 = 立即）
+    form: "single", // 显示形态：single | double
+    style: "stroke", // 视觉模式：stroke（描边）| capsule（胶囊底板）| bold（加粗）
+    fontSize: 22, // 字号 px（12–28）
+    offset: 0, // 歌词时间偏移（秒，-5~+5）：正 = 歌词提前，负 = 延后
+    colorText: "", // 歌词文字颜色（#RGB/#RRGGBB；空 = 默认近白）
+    colorFill: "", // 卡拉OK染色进度色（空 = 跟随应用主题色）
+    followTheme: true, // 是否跟随应用主题色
+    pos: { xRatio: 0.5, yRatio: 0.92, monitorIndex: 0 }, // 相对工作区的比例位置
+  },
+  theme: undefined, // 主题配置（见 js/theme.js DEFAULT_THEME；undefined = 升级前老数据，启动时归一化补默认）
 };
 
 let ready = false;
@@ -161,6 +177,33 @@ export async function loadState() {
   state.quickAccess = state.quickAccess.filter(
     (q) => q && typeof q === "object" && typeof q.id === "string" && typeof q.target === "string" && q.target.trim()
   );
+  // 桌面歌词：结构校验 + 枚举回落 + 数值 clamp（老用户无该字段时补默认）
+  if (!state.lyric || typeof state.lyric !== "object" || Array.isArray(state.lyric)) {
+    state.lyric = { enabled: false, locked: true, form: "single", style: "stroke", fontSize: 22, followTheme: true, pos: {} };
+  }
+  const ly = state.lyric;
+  if (typeof ly.enabled !== "boolean") ly.enabled = false;
+  if (typeof ly.locked !== "boolean") ly.locked = true;
+  if (typeof ly.hoverUnlock !== "boolean") ly.hoverUnlock = true;
+  if (typeof ly.followTheme !== "boolean") ly.followTheme = true;
+  if (typeof ly.autoLockMs !== "number" || !isFinite(ly.autoLockMs)) ly.autoLockMs = 3000;
+  ly.autoLockMs = Math.max(0, Math.min(60000, Math.round(ly.autoLockMs)));
+  if (!["single", "double"].includes(ly.form)) ly.form = "single";
+  if (!["stroke", "capsule", "bold"].includes(ly.style)) ly.style = "stroke";
+  if (typeof ly.fontSize !== "number" || !isFinite(ly.fontSize)) ly.fontSize = 22;
+  ly.fontSize = Math.max(12, Math.min(28, Math.round(ly.fontSize)));
+  // 时间偏移：半秒步进，clamp 到 ±5（偏太多没有意义，还会让歌词完全对不上）
+  if (typeof ly.offset !== "number" || !isFinite(ly.offset)) ly.offset = 0;
+  ly.offset = Math.max(-5, Math.min(5, Math.round(ly.offset * 2) / 2));
+  // 自定义颜色：只接受 #RGB / #RRGGBB；空串 = 跟随默认。脏值一律回落，防止注入垃圾到 CSS。
+  const isLyColor = (v) => typeof v === "string" && (v === "" || /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(v));
+  if (!isLyColor(ly.colorText)) ly.colorText = "";
+  if (!isLyColor(ly.colorFill)) ly.colorFill = "";
+  if (!ly.pos || typeof ly.pos !== "object" || Array.isArray(ly.pos)) ly.pos = {};
+  const num = (v, d) => (typeof v === "number" && isFinite(v) ? v : d);
+  ly.pos.xRatio = Math.max(0, Math.min(1, num(ly.pos.xRatio, 0.5)));
+  ly.pos.yRatio = Math.max(0, Math.min(1, num(ly.pos.yRatio, 0.92)));
+  ly.pos.monitorIndex = Math.max(0, Math.round(num(ly.pos.monitorIndex, 0)));
   ready = true;
   readyQueue.forEach((fn) => fn());
   readyQueue.length = 0;
