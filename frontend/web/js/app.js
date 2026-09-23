@@ -331,6 +331,4 @@ loadState().then(async () => {
 
   // 隐私锁定：离开设定时长后全屏遮罩
   startLockController();
-
-  console.log("[DeskOverlay] 工作台已就绪 · 模块:", state.currentModule);
 });

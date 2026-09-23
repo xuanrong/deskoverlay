@@ -149,27 +149,60 @@ function checkReminders() {
       }
     } else {
       if (!r.time) continue;
+      // 触发条件：仅在设定时刻那一分钟内触发（cur === r.time）。
+      // 不做错过补弹：应用没开/心跳停摆错过的提醒不补（用户明确要求）。
+      // 配套：改时间/重新启用会重置当日标记（避免脏标记锁死当天触发）；
+      // 标记延后到弹窗确认成功才写，失败仍在触发分钟内的心跳会自动重试。
       if (r.time === cur && r.lastTriggeredDate !== today) {
-        r.lastTriggeredDate = today;
+        showReminderToast(r).then((ok) => {
+          if (ok) {
+            r.lastTriggeredDate = today;
+            saveState();
+            renderReminders();
+          }
+          // 弹窗失败：不写标记，触发分钟内的下一次心跳自动重试
+        });
         changed = true;
-        showReminderToast(r);
       }
     }
   }
   if (changed) saveState();
 }
 
-// 提醒弹卡：桌面态用系统级置顶窗口（盖住浏览器等）；浏览器开发态用页面内 toast
+// 提醒弹卡：桌面态用系统级置顶窗口（盖住浏览器等）；浏览器开发态用页面内 toast。
+// 返回 Promise<boolean>：桌面态等后端「reminder-shown」确认（或失败）——
+// 之前是先标记后弹、弹窗失败当天静默丢失（用户反馈：到点没弹提醒）。
 function showReminderToast(r) {
   const isWater = r.label === "喝水";
   const msg = isWater
     ? "该喝水啦，补充一下水分吧"
     : r.type === "interval"
     ? `「${r.label}」时间到了，休息一下吧`
-    : `「${r.label}」快到了，准备一下吧`;
+    : `「${r.label}」时间快到了，准备一下吧`;
   if (window.__TAURI__) {
-    invoke("show_reminder", { icon: r.icon, title: `${r.label}提醒`, message: msg });
-    return;
+    return new Promise((resolve) => {
+      const payloadMatch = (p) => p && p.title === `${r.label}提醒` && p.message === msg;
+      const onShown = (e) => {
+        if (!payloadMatch(e.payload || {})) return;
+        cleanup();
+        resolve(true);
+      };
+      const onFailed = (e) => {
+        if (!payloadMatch(e.payload || {})) return;
+        cleanup();
+        resolve(false);
+      };
+      const cleanup = () => {
+        window.__TAURI__.event.unlisten?.(hShown);
+        window.__TAURI__.event.unlisten?.(hFailed);
+      };
+      let hShown = null, hFailed = null;
+      window.__TAURI__.event.listen("reminder-shown", onShown).then((h) => { hShown = h; }).catch(() => {});
+      window.__TAURI__.event.listen("reminder-failed", onFailed).then((h) => { hFailed = h; }).catch(() => {});
+      // 兜底超时：15s 内无确认视为失败（后端看门狗同周期）
+      setTimeout(() => { cleanup(); resolve(false); }, 16000);
+      invoke("show_reminder", { icon: r.icon, title: `${r.label}提醒`, message: msg }).catch(() => { cleanup(); resolve(false); });
+    });
   }
   const type = isWater ? "water" : r.type === "interval" ? "sedentary" : "general";
   const now = new Date();
@@ -303,6 +336,9 @@ function openReminderSettings() {
         const r = state.reminders[el.dataset.i];
         if (!r) return;
         r.time = el.value || "";
+        // 改时间必须重置当日触发标记：否则当天改时间后区间匹配看到「今天已触发过」
+        // 直接跳过，新设置的时刻永远不弹（用户实测踩中：改到 10:52 仍不弹）
+        r.lastTriggeredDate = "";
         saveState();
         renderReminders();
       });
@@ -312,6 +348,8 @@ function openReminderSettings() {
         const r = state.reminders[el.dataset.i];
         if (!r) return;
         r.enabled = el.checked;
+        // 重新启用也重置当日标记：用户关了又开通常是想立刻验证效果
+        if (el.checked) r.lastTriggeredDate = "";
         saveState();
         renderReminders();
       });

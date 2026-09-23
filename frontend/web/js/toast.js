@@ -6,7 +6,7 @@ export function toast(msg) {
   if (!t) {
     t = document.createElement("div");
     t.id = "do-toast";
-    t.style.cssText = "position:fixed;left:50%;bottom:60px;transform:translateX(-50%);z-index:12000;background:rgba(14,18,26,.92);border:1px solid var(--border-strong);color:var(--text);padding:10px 18px;border-radius:12px;font-size:13px;box-shadow:var(--shadow);backdrop-filter:blur(18px);transition:opacity .2s;";
+    t.style.cssText = "position:fixed;left:50%;bottom:60px;transform:translateX(-50%);z-index:12000;background:rgba(14,18,26,.92);border:1px solid var(--border-strong);color:var(--text);padding:10px 18px;border-radius:12px;font-size:13px;box-shadow:var(--shadow);backdrop-filter:blur(18px);transition:opacity .2s;pointer-events:none;";
     document.body.appendChild(t);
   }
   t.textContent = msg;

@@ -1442,6 +1442,30 @@ html {
 }
 .online-src-none { font-size: 12px; color: var(--text-faint); padding: 4px; }
 
+/* 阿里云盘授权引导（音乐页 · 云盘 tab 未绑定态） */
+.ad-auth-guide { text-align: center; padding: 28px 20px 20px; }
+.ad-auth-steps { margin: 14px auto 18px; max-width: 420px; text-align: left; }
+.ad-auth-steps p { font-size: 13px; color: var(--text-dim); line-height: 1.9; margin: 0; }
+.ad-auth-steps b { color: var(--text); }
+.ad-auth-input { display: flex; gap: 8px; margin: 16px auto 0; max-width: 460px; }
+.ad-auth-input input {
+  flex: 1; padding: 9px 12px; border-radius: 8px;
+  border: 1px solid var(--border-strong); background: var(--bg-hover);
+  color: var(--text); font-size: 13px; font-family: var(--font); outline: none;
+}
+.ad-auth-input input:focus { border-color: var(--blue); }
+.ad-auth-note { margin-top: 12px; font-size: 12px; color: var(--text-faint); }
+
+/* 云盘上传 tab：自动上传开关行 */
+.ad-auto-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 12px; margin-bottom: 10px;
+  border: 1px solid var(--border); border-radius: 8px;
+  font-size: 13px; color: var(--text-dim); cursor: pointer;
+}
+.ad-auto-row:hover { border-color: rgba(var(--accent-rgb),0.3); }
+.ad-auto-row input { accent-color: var(--blue); }
+
 .online-main {
   flex: 1 1 auto; min-width: 0;
   display: flex; flex-direction: column; gap: 12px;
@@ -1515,20 +1539,65 @@ html {
 .qi-artist { color: var(--text-dim); flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .q-random-on { font-size: 11px; color: var(--blue); margin-left: 8px; }
 
-/* 音源管理弹窗 */
-.source-modal { width: min(520px, 94vw); }
+/* 音源管理弹窗：双区布局（左列表 + 右添加面板） */
+.source-modal { width: min(960px, 94vw); }
+.sm-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 14px; }
+.sm-head h3 { margin: 0; }
+.sm-count { font-size: 11.5px; color: var(--text-faint); }
+.sm-body { display: grid; grid-template-columns: 1fr 230px; gap: 18px; min-height: 0; }
+.sm-sec-title {
+  font-size: 11.5px; font-weight: 600; color: var(--text-dim);
+  margin-bottom: 8px; letter-spacing: .3px;
+}
+.sm-tip { font-weight: 400; color: var(--text-faint); margin-left: 6px; }
+.sm-left { min-width: 0; display: flex; flex-direction: column; }
+.sm-right {
+  border-left: 1px solid var(--border); padding-left: 18px;
+  display: flex; flex-direction: column; gap: 12px;
+}
+.sm-add-field { display: flex; flex-direction: column; gap: 6px; }
+.sm-add-field label { font-size: 11px; color: var(--text-faint); }
+.sm-add-field input[type="text"] {
+  background: var(--bg-input); border: 1px solid var(--border-input); color: var(--text);
+  padding: 8px 10px; border-radius: var(--radius-sm); font-size: 12.5px;
+  outline: none; font-family: var(--font); width: 100%; box-sizing: border-box;
+}
+.sm-add-field input[type="text"]:focus { border-color: var(--blue); }
+.sm-add-btn { width: 100%; padding: 8px 0; font-size: 12.5px; }
+.sm-add-divider {
+  display: flex; align-items: center; gap: 10px;
+  color: var(--text-faint); font-size: 10.5px;
+}
+.sm-add-divider::before, .sm-add-divider::after {
+  content: ""; flex: 1; height: 1px; background: var(--border);
+}
+.sm-add-file {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 12px; border: 1.5px dashed var(--border-strong); border-radius: var(--radius-sm);
+  background: transparent; color: var(--text-dim); cursor: pointer;
+  font-size: 12.5px; font-family: var(--font);
+  transition: border-color var(--t-fast), color var(--t-fast), background var(--t-fast);
+}
+.sm-add-file:hover { border-color: var(--blue); color: var(--text); background: var(--bg-hover); }
+.sm-add-file-ico { font-size: 16px; line-height: 1; }
+.src-empty {
+  text-align: center; color: var(--text-faint); font-size: 12.5px;
+  padding: 36px 0; line-height: 2;
+}
+.src-empty span { font-size: 11px; }
 .src-list {
   display: flex; flex-direction: column; gap: 6px;
-  max-height: 200px; overflow-y: auto; margin-bottom: 12px;
+  max-height: 320px; overflow-y: auto;
 }
 .src-row {
-  display: flex; align-items: center; gap: 10px;
-  padding: 7px 10px; background: var(--bg-panel);
+  display: flex; align-items: center; gap: 8px;
+  padding: 9px 10px; background: var(--bg-panel);
   border: 1px solid var(--border); border-radius: var(--radius-sm);
 }
+.src-info { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .src-name { font-size: 13px; font-weight: 600; color: var(--text); flex: 0 0 auto; }
 .src-src {
-  flex: 1 1 auto; min-width: 0; font-size: 11px; color: var(--text-faint);
+  flex: 1 1 auto; min-width: 0; font-size: 10.5px; color: var(--text-faint);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .src-del {
@@ -1537,24 +1606,109 @@ html {
   border-radius: var(--radius-xs);
 }
 .src-del:hover { color: var(--danger); background: var(--bg-hover); }
-.src-add {
-  display: flex; align-items: center; gap: 8px; margin-bottom: 10px;
+/* 音源排序：拖拽把手 + 序号 + 拖拽态（指针事件自实现，非 HTML5 drag） */
+.src-row { user-select: none; }
+.src-drag {
+  flex: 0 0 auto; cursor: grab; color: var(--text-faint);
+  font-size: 10px; letter-spacing: -1px; user-select: none;
+  padding: 0 2px;
 }
-.src-add input[type="text"] {
-  flex: 1 1 auto; min-width: 0;
-  background: var(--bg-input); border: 1px solid var(--border-input); color: var(--text);
-  padding: 8px 10px; border-radius: var(--radius-sm); font-size: 12.5px;
-  outline: none; font-family: var(--font);
+.src-row.dragging { opacity: .35; }
+.src-row.drag-over { outline: 1.5px dashed var(--blue, #58a6ff); outline-offset: -1.5px; }
+.src-order {
+  flex: 0 0 auto; width: 20px; text-align: center;
+  font-size: 11px; color: var(--text-faint); font-variant-numeric: tabular-nums;
 }
-.src-add input[type="text"]:focus { border-color: var(--blue); }
-.src-hint {
-  font-size: 11px; line-height: 1.7; color: var(--text-faint);
-  margin-bottom: 6px;
+
+/* 下载管理弹窗（Tab 页，固定尺寸） */
+.dl-modal { width: 960px; height: 560px; max-width: 94vw; max-height: 90vh; }
+.dl-tabs {
+  display: flex; gap: 4px; margin-bottom: 12px;
+  border-bottom: 1px solid var(--border); flex: 0 0 auto;
 }
-.src-hint code {
-  background: var(--bg-hover-strong); border-radius: 4px; padding: 1px 5px;
-  color: var(--text-dim); font-size: 10.5px;
+.dl-tab {
+  position: relative; background: transparent; border: 0; cursor: pointer;
+  font-family: var(--font); font-size: 13px; font-weight: 600; color: var(--text-faint);
+  padding: 8px 16px 10px; display: inline-flex; align-items: center; gap: 6px;
+  border-radius: 8px 8px 0 0;
+  transition: color var(--t-fast), background var(--t-fast);
 }
+.dl-tab:hover { color: var(--text-dim); background: var(--bg-hover); }
+.dl-tab.active { color: var(--text); }
+.dl-tab.active::after {
+  content: ""; position: absolute; left: 12px; right: 12px; bottom: -1px;
+  height: 2px; background: var(--blue, #58a6ff); border-radius: 2px;
+}
+.dl-tab-badge {
+  min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px;
+  display: inline-grid; place-items: center;
+  background: var(--bg-hover-strong); color: var(--text-dim);
+  font-size: 10.5px; font-weight: 600; font-variant-numeric: tabular-nums;
+}
+.dl-tab.active .dl-tab-badge { background: var(--blue, #58a6ff); color: #fff; }
+.dl-tab-badge:empty { display: none; }
+.dl-tab-pane { display: none; flex: 1 1 auto; min-height: 0; }
+.dl-tab-pane.active { display: flex; flex-direction: column; }
+.dl-done-list { max-height: 320px; }
+.dl-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 10px; background: var(--bg-panel);
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+}
+.dl-card { flex-direction: column; align-items: stretch; gap: 6px; }
+.dl-card.dl-failed { border-color: var(--danger, #e5534b); }
+.dl-row-head { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.dl-row-head .src-name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dl-artist { font-size: 11px; color: var(--text-faint); flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dl-row-foot { display: flex; align-items: center; gap: 10px; }
+.dl-item.dl-play { cursor: pointer; }
+.dl-item.dl-play:hover { background: var(--bg-hover); }
+.dl-play-ico {
+  flex: 0 0 auto; width: 28px; height: 28px; border-radius: 50%;
+  display: grid; place-items: center;
+  background: var(--bg-hover); color: var(--text-dim);
+}
+.dl-item.dl-play:hover .dl-play-ico { background: var(--blue, #58a6ff); color: #fff; }
+.dl-play-ico svg { width: 12px; height: 12px; fill: currentColor; stroke: none; display: block; margin-left: 1px; }
+.dl-bar { flex: 1 1 auto; height: 6px; background: var(--bg-input); border-radius: 3px; overflow: hidden; }
+.dl-bar-in { height: 100%; background: var(--accent, #4a9eff); border-radius: 3px; transition: width .2s; }
+.dl-pct { flex: 0 0 auto; font-size: 11px; color: var(--text-faint); min-width: 52px; text-align: right; font-variant-numeric: tabular-nums; }
+.dl-err { flex: 1 1 auto; font-size: 11px; color: var(--danger); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dl-ok { flex: 1 1 auto; font-size: 11px; color: var(--ok, #4caf50); }
+
+/* 列表行下载按钮（与 mr-fav 同位、同线性风格） */
+.mr-dl {
+  background: transparent; border: 0; color: var(--text-faint); cursor: pointer;
+  padding: 3px 6px; border-radius: var(--radius-xs); flex: 0 0 auto; display: inline-flex;
+  transition: color var(--t-fast), background var(--t-fast);
+}
+.mr-dl:hover { color: var(--accent, #4a9eff); background: var(--bg-hover); }
+.mr-dl:disabled { opacity: .4; cursor: default; }
+.mr-dl svg {
+  width: 13px; height: 13px; display: block;
+  fill: none; stroke: currentColor; stroke-width: 1.8;
+  stroke-linecap: round; stroke-linejoin: round;
+}
+
+/* 下载音质选择菜单 */
+#dl-qmenu {
+  position: fixed; z-index: 16000;
+  min-width: 180px; padding: 4px;
+  background: var(--bg-elevated, rgba(20,24,32,.96));
+  border: 1px solid var(--border-strong); border-radius: 10px;
+  box-shadow: 0 10px 28px rgba(0,0,0,.45);
+  backdrop-filter: blur(18px);
+}
+.dl-q-item {
+  display: flex; flex-direction: column; gap: 1px;
+  padding: 8px 12px; border-radius: 7px; cursor: pointer;
+}
+.dl-q-item:hover { background: var(--bg-hover); }
+.dl-q-label { font-size: 13px; font-weight: 600; color: var(--text); }
+.dl-q-desc { font-size: 11px; color: var(--text-faint); }
+
+
+
 .music-stage {
   flex: 1 1 auto; display: flex; flex-direction: column;
   align-items: center; justify-content: center; gap: 16px;

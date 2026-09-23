@@ -68,3 +68,6 @@ export const ICON_GRID = `<svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" 
 
 // 灵感碎片
 export const ICON_IDEA = `<svg viewBox="0 0 24 24"><path d="M9 18h6"/><path d="M10 21h4"/><path d="M12 3a6 6 0 0 1 3.6 10.8c-.7.5-1.1 1.3-1.2 2.2h-4.8c-.1-.9-.5-1.7-1.2-2.2A6 6 0 0 1 12 3z"/><path d="M12 8v2"/><path d="M12 13h.01"/></svg>`;
+
+// 音乐下载（向下箭头入托盘）
+export const ICON_DOWNLOAD = `<svg viewBox="0 0 24 24"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>`;

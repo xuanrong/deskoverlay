@@ -105,6 +105,13 @@ export function renderSettings(view) {
           </div>
           <label class="set-toggle"><input type="checkbox" id="set-remember" ${state.settings?.rememberModule ? "checked" : ""} /><span></span></label>
         </div>
+        <div class="set-row">
+          <div class="set-info">
+            <div class="set-name">开机自动启动</div>
+            <div class="set-desc">随 Windows 登录静默启动；可在任务管理器 → 启动应用中管理</div>
+          </div>
+          <label class="set-toggle"><input type="checkbox" id="set-autostart" /><span></span></label>
+        </div>
       </div>
 
       <div class="set-panel">
@@ -280,6 +287,35 @@ export function renderSettings(view) {
       state.settings.rememberModule = e.target.checked;
       saveState();
     });
+    // 开机自启：开关状态以注册表实态为准（autostart_status），不信任本地记忆，
+    // 避免用户在任务管理器禁用启动项后 UI 与系统漂移。
+    const autoChk = body.querySelector("#set-autostart");
+    if (autoChk) {
+      invoke("autostart_status").then((s) => {
+        autoChk.checked = !!(s && s.enabled);
+      }).catch(() => {});
+      autoChk.addEventListener("change", async () => {
+        const want = autoChk.checked;
+        try {
+          await invoke("set_autostart", { enabled: want });
+          // 以回读的注册表实态回填，成功与否以实态为准
+          const s = await invoke("autostart_status");
+          autoChk.checked = !!(s && s.enabled);
+          if (autoChk.checked === want) {
+            if (!state.settings) state.settings = {};
+            state.settings.autostart = want;
+            if (!want) delete state.settings.autostart;
+            saveState();
+            toast(want ? "已注册开机自启" : "已取消开机自启");
+          } else {
+            toast("自启状态与系统不一致，请重试");
+          }
+        } catch (err) {
+          autoChk.checked = !want;
+          toast(typeof err === "string" ? err : "设置失败，请重试");
+        }
+      });
+    }
     body.querySelector("#set-lock").addEventListener("change", (e) => {
       if (!state.lock) state.lock = {};
       state.lock.enabled = e.target.checked;

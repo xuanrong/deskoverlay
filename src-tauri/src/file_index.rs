@@ -194,7 +194,8 @@ fn load_snapshot(dir: &std::path::Path) -> Option<Vec<Hit>> {
 fn load_snapshot_checked(dir: &std::path::Path) -> Option<Vec<Hit>> {
     match load_snapshot(dir) {
         Some(entries) if entries.len() > MAX_ENTRIES => {
-            println!("[file_index] 快照 {} 条超过上限 {}，作废重建", entries.len(), MAX_ENTRIES);
+            // eprintln 而非 println：release 为 GUI 子系统，stdout 句柄无效时 println 会 panic
+            eprintln!("[file_index] 快照 {} 条超过上限 {}，作废重建", entries.len(), MAX_ENTRIES);
             None
         }
         other => other,

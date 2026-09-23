@@ -15,8 +15,9 @@ const titleEl = document.getElementById("title");
 const msgEl = document.getElementById("msg");
 const timeEl = document.getElementById("time");
 
-// 自动关闭时长（ms）；到点销毁窗口，防止置顶透明窗长期占住右上角
-const AUTO_CLOSE_MS = 10000;
+// 自动关闭：由进度条动画结束事件（rm-countdown 走完）驱动，与进度条严格同步；
+// AUTO_CLOSE_MS 仅作兜底（比动画略长，动画事件异常丢失时也能关）。
+const AUTO_CLOSE_MS = 11000;
 let autoHideTimer = null;
 // 本页是否成功展示过内容（供孤儿窗口兜底判断）
 let shownOnce = false;
@@ -86,6 +87,12 @@ if (TAURI && TAURI.event && typeof TAURI.event.listen === "function") {
 }
 
 document.getElementById("ok").addEventListener("click", hide);
+
+// 进度条走完（rm-countdown 动画结束）→ 关闭弹窗：与进度条严格同步，
+// 避免 JS 计时先到导致「进度条还差一点就消失」的观感
+card.addEventListener("animationend", (e) => {
+  if (e.animationName === "rm-countdown") hide();
+});
 
 // 孤儿兜底：页面加载后始终未收到推送（listener 注册失败 / 事件丢失）时，
 // 主动请后端销毁窗口——绝不让「无内容却已显示」的窗口留在右上角拦截鼠标。

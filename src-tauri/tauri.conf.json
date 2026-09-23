@@ -30,7 +30,8 @@
       "assetProtocol": {
         "enable": true,
         "scope": [
-          "$APPDATA/wallpaper_cache/*"
+          "$APPDATA/wallpaper_cache/*",
+          "$APPDATA/music/*"
         ]
       }
     }

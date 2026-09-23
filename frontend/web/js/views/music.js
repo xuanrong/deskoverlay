@@ -2,8 +2,9 @@
 // 全局播放器（音乐页 / 在线音乐页共享）：音频由 musicAudio 单例承载，UI 由各视图自行渲染。
 import { Bus, invoke } from "../bus.js";
 import { state, saveState } from "../state.js";
-import { ICON_MUSIC, ICON_SHUFFLE, ICON_REPEAT, ICON_HEART, ICON_PREV, ICON_NEXT, ICON_PLAY, ICON_PAUSE, ICON_LIST, ICON_MORE, ICON_VOLUME, ICON_VOLUME_MUTE, ICON_LOCATE, ICON_CLOSE, ICON_BACK, ICON_ALBUM, ICON_LYRICS } from "../icons.js";
+import { ICON_MUSIC, ICON_SHUFFLE, ICON_REPEAT, ICON_HEART, ICON_PREV, ICON_NEXT, ICON_PLAY, ICON_PAUSE, ICON_LIST, ICON_MORE, ICON_VOLUME, ICON_VOLUME_MUTE, ICON_LOCATE, ICON_CLOSE, ICON_BACK, ICON_ALBUM, ICON_LYRICS, ICON_DOWNLOAD, ICON_TRASH } from "../icons.js";
 import { esc, normalizeSongs } from "./common.js";
+import { toast } from "../toast.js";
 import { createSelect } from "../selectbox.js";
 
 const musicAudio = new Audio();
@@ -371,6 +372,9 @@ function loadMeta({ title, artist, artwork, url, type, song, srcId }) {
   currentLyric = [];
   if (lyricEl) renderLyric();
   if (musicAudio.src && musicAudio.src.startsWith("blob:")) URL.revokeObjectURL(musicAudio.src);
+  musicAudio.pause();          // 换源前先停：避免上一首的加载/播放状态串到新 src
+  musicAudio.removeAttribute("src");
+  musicAudio.load();           // 显式重置媒体元素状态机（清 error/网络状态）
   musicAudio.src = url;
   musicAudio.play().catch(() => {});
   if (song && srcId) fetchLyric(song, srcId);
@@ -412,6 +416,20 @@ async function loadQueueItem(i, forceReload) {
       list.querySelector(`.queue-item[data-i="${i}"]`)?.classList.add("cur");
     }
   }
+  // 云盘项：直链带时效不可缓存，每次播放现取（在 item.url 缓存检查之前拦截）
+  if (item.type === "云盘" && item.song?.fileId) {
+    try {
+      const url = await invoke("ad_play_url", { fileId: item.song.fileId, ext: item.song.ext || null });
+      item.url = url;
+      loadMeta({ ...item.meta, url, type: item.type, song: item.song });
+      bindAdExpiryRetry();
+      fetchAdTrackMeta(item.song); // 异步补全内嵌歌词/封面
+      return;
+    } catch (e) {
+      if (onlineResultsEl) onlineResultsEl.innerHTML = `<div class="dash-empty">云盘播放失败：${esc(String(e && e.message || e))}</div>`;
+      return;
+    }
+  }
   if (item.url && !forceReload) { loadMeta({ ...item.meta, url: item.url, type: item.type, song: item.song, srcId: item.srcId }); return; }
   if (item.srcId) {
     const src = (state.musicSources || []).find((x) => x.id === item.srcId);
@@ -422,16 +440,19 @@ async function loadQueueItem(i, forceReload) {
       if (lyricEl) renderLyric();
       syncPlayerButtons?.();
       syncMusicUI?.();
+      let failMsg = "";
       try {
-        const plugin = loadMusicPlugin(src.code);
-        const ms = await plugin.getMediaSource(item.song, "standard");
-        const url = (ms && (ms.url || ms.src)) || (typeof ms === "string" ? ms : "");
-        if (url) {
-          item.url = url;
-          loadMeta({ ...item.meta, url, type: item.type, song: item.song, srcId: item.srcId });
-          return;
-        }
-      } catch (e) { /* 单曲失败，交给下方提示 */ }
+        // 多档音质回退 + 单档重试：部分歌曲只有 high/low 档资源，只试 standard 会被误判失效
+        const url = await getOnlineUrl(src, item.song);
+        item.url = url;
+        loadMeta({ ...item.meta, url, type: item.type, song: item.song, srcId: item.srcId });
+        return;
+      } catch (e) {
+        // 透出插件真实失败原因：区分「该歌曲无资源/VIP」和「音源接口挂了」
+        failMsg = String(e && e.message || e);
+      }
+      if (onlineResultsEl) onlineResultsEl.innerHTML = `<div class="dash-empty">播放失败：${esc(failMsg)}</div>`;
+      return;
     }
   }
   if (onlineResultsEl) onlineResultsEl.innerHTML = `<div class="dash-empty">播放失败（音源可能失效）</div>`;
@@ -502,6 +523,323 @@ function toggleFavorite() {
 
 // 在线弹窗「喜欢」tab 的结果区（openOnlineMusic 设置）
 let favEl = null;
+
+// -------------------- 音乐下载（Rust 流式落盘，设计见 .raccoon/music-download-design.md） --------------------
+
+// 统一取流：多档音质依次回退（部分歌曲只有某一档资源，只试 standard 会被误判「音源失效」），
+// 单档异常重试一次（瞬时网络抖动）。取不到时抛最后一个真实错误，便于 UI 区分「歌曲无资源」和「音源挂了」。
+// prefer 指定期望档位：从该档开始依次尝试，仍按 standard→high→low 的降级链兜底。
+async function getOnlineUrl(src, song, prefer) {
+  const plugin = loadMusicPlugin(src.code);
+  const chain = ["standard", "high", "low"];
+  const qualities = prefer && chain.includes(prefer)
+    ? [prefer, ...chain.filter((q) => q !== prefer)]
+    : chain;
+  let lastErr = null;
+  for (const q of qualities) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const ms = await plugin.getMediaSource(song, q);
+        const url = (ms && (ms.url || ms.src)) || (typeof ms === "string" ? ms : "");
+        if (url) return url;
+        break; // 该档返回空（无此资源），换下一档，不重试
+      } catch (e) {
+        lastErr = e;
+        if (attempt === 0) await new Promise((r) => setTimeout(r, 300));
+      }
+    }
+  }
+  // 全部失败后：尝试已安装的洛雪源换源取流（洛雪协议支持跨平台用歌曲 ID 取流）
+  const lxSrc = (state.musicSources || []).find((s) => s.code && isLxSource(s.code));
+  if (lxSrc && !src.__lx) {
+    try {
+      const lp = loadMusicPlugin(lxSrc.code);
+      const ms = await lp.getMediaSource(song, prefer || "standard");
+      const lxUrl = (ms && (ms.url || ms.src)) || (typeof ms === "string" ? ms : "");
+      if (lxUrl) return lxUrl;
+    } catch (_) { /* 洛雪换源失败，落到原始错误 */ }
+  }
+  throw lastErr || new Error("各音质档均未取到播放地址");
+}
+
+// 文件名安全化（Windows 非法字符；Rust 侧 sanitize 二次校验）
+function safeFilename(s) {
+  return String(s || "").replace(/[\\/:*?"<>|]/g, "").replace(/[\x00-\x1f]/g, "").trim().slice(0, 120);
+}
+// 下载任务表：id → { title, artist, received, total, status }（status: running/done/failed）
+const dlTasks = new Map();
+// 事件监听只挂一次（模块级）
+let dlEventsBound = false;
+function bindDownloadEvents(onChange) {
+  if (dlEventsBound) return;
+  dlEventsBound = true;
+  const { listen } = window.__TAURI__?.event || {};
+  if (!listen) return;
+  listen("download-progress", (e) => {
+    const p = e.payload || {};
+    const t = dlTasks.get(p.id);
+    if (t) { t.received = p.received; t.total = p.total; onChange?.(); }
+  }).catch(() => {});
+  listen("download-done", (e) => {
+    const p = e.payload || {};
+    const t = dlTasks.get(p.id);
+    if (t) { t.status = "done"; t.filename = p.filename; onChange?.(); }
+    // 自动上传：开启时下载完成即入云盘上传队列
+    if (state.ad_auto_upload && p.filename) {
+      invoke("ad_upload_start", { filename: p.filename }).catch(() => {});
+    }
+  }).catch(() => {});
+  listen("download-failed", (e) => {
+    const p = e.payload || {};
+    const t = dlTasks.get(p.id);
+    if (t) { t.status = "failed"; t.error = p.error || "下载失败"; onChange?.(); }
+  }).catch(() => {});
+}
+
+// 下载一首歌：song 为插件歌曲对象（含 id/typeEname 等），src 为音源记录。
+// quality：期望音质档（standard/high/low），选定档缺失时自动降级。
+// 流程：getMediaSource 取直链 → 查重 → download_start。返回 Promise<string>（提示文案）。
+async function downloadSong(song, src, quality = "standard") {
+  if (!song || !src) throw new Error("缺少歌曲或音源信息");
+  const plugin = loadMusicPlugin(src.code);
+  const url = await getOnlineUrl(src, song, quality);
+  // 查重：进行中 + 已完成（本次会话内，同曲同音质才视为重复）
+  const dlKey = `${src.id}:${songIdentity(song)}:${quality}`;
+  for (const t of dlTasks.values()) {
+    if (t.status !== "failed" && t.key === dlKey) {
+      return t.status === "done" ? "该歌曲已下载" : "该歌曲正在下载中";
+    }
+  }
+  const title = song.title || song.name || "未知";
+  const artist = song.artist || "未知歌手";
+  const qTag = quality === "high" ? " [HQ]" : quality === "low" ? " [LQ]" : "";
+  const filename = safeFilename(`${artist} - ${title}${qTag}`);
+  // 歌词同步落盘：取词失败不阻塞下载（离线只是没词，不影响听）
+  let lyric = null;
+  if (typeof plugin.getLyric === "function") {
+    try {
+      const l = await plugin.getLyric(song);
+      lyric = typeof l === "string" ? l : (l && (l.rawLrc || l.lyric || l.lrc)) || null;
+      if (lyric && typeof lyric !== "string") lyric = null;
+    } catch (_) { lyric = null; }
+  }
+  const id = await invoke("download_start", { url, filename, lyric, artworkUrl: songArtwork(song) || null });
+  dlTasks.set(id, { key: dlKey, title, artist, received: 0, total: 0, status: "running", id });
+  return "已加入下载";
+}
+
+// 下载音质选择菜单：在按钮旁弹出三档选项（含音质说明），点选后回调。
+function showQualityMenu(anchor, onPick) {
+  document.getElementById("dl-qmenu")?.remove();
+  const menu = document.createElement("div");
+  menu.id = "dl-qmenu";
+  menu.innerHTML = [
+    { q: "standard", label: "标准音质", desc: "128kbps · 体积小" },
+    { q: "high", label: "高品音质", desc: "320kbps · 推荐" },
+    { q: "low", label: "流畅音质", desc: "体积最小" },
+  ].map((o) => `<div class="dl-q-item" data-q="${o.q}"><span class="dl-q-label">${o.label}</span><span class="dl-q-desc">${o.desc}</span></div>`).join("");
+  document.body.appendChild(menu);
+  const r = anchor.getBoundingClientRect();
+  menu.style.left = Math.min(r.left, window.innerWidth - menu.offsetWidth - 8) + "px";
+  menu.style.top = Math.min(r.bottom + 4, window.innerHeight - menu.offsetHeight - 8) + "px";
+  const close = () => menu.remove();
+  menu.querySelectorAll(".dl-q-item").forEach((item) => {
+    item.addEventListener("click", () => { close(); onPick(item.dataset.q); });
+  });
+  setTimeout(() => {
+    document.addEventListener("click", close, { once: true });
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape") close(); }, { once: true });
+  }, 0);
+}
+
+// 下载管理面板（Tab 页：进行中 / 已下载，弹窗固定尺寸）
+function showDownloads() {
+  if (document.getElementById("dl-modal")) return;
+  const ov = document.createElement("div");
+  ov.className = "task-modal-overlay";
+  ov.innerHTML = `
+    <div class="task-modal source-modal dl-modal">
+      <div class="sm-head">
+        <h3>下载管理</h3>
+        <span class="sm-count" id="dl-count"></span>
+      </div>
+      <div class="dl-tabs">
+        <button class="dl-tab active" data-tab="running">进行中<span class="dl-tab-badge" id="dl-badge-running"></span></button>
+        <button class="dl-tab" data-tab="done">已下载<span class="dl-tab-badge" id="dl-badge-done"></span></button>
+        <button class="dl-tab" data-tab="cloud">云盘上传<span class="dl-tab-badge" id="dl-badge-upload"></span></button>
+      </div>
+      <div class="dl-tab-pane active" id="dl-running"></div>
+      <div class="dl-tab-pane" id="dl-done"></div>
+      <div class="dl-tab-pane" id="dl-upload"></div>
+      <div class="tm-actions"><button class="btn-primary cm-ok" id="dl-done-btn">完成</button></div>
+    </div>`;
+  document.body.appendChild(ov);
+  const close = () => { ov.remove(); };
+  ov.querySelector("#dl-done-btn").addEventListener("click", close);
+  ov.addEventListener("click", (e) => { if (e.target === ov) close(); });
+  ov.addEventListener("keydown", (e) => { if (e.key === "Escape") close(); });
+
+  // Tab 切换
+  const panes = {
+    running: ov.querySelector("#dl-running"),
+    done: ov.querySelector("#dl-done"),
+  };
+  ov.querySelectorAll(".dl-tab").forEach((tab) => {
+    tab.addEventListener("click", () => {
+      ov.querySelectorAll(".dl-tab").forEach((t) => t.classList.toggle("active", t === tab));
+      Object.entries(panes).forEach(([k, el]) => el.classList.toggle("active", k === tab.dataset.tab));
+    });
+  });
+  // 默认落在「已下载」tab；有任务进行中时切到「进行中」
+  const focusRunning = () => {
+    const has = [...dlTasks.values()].some((t) => t.status === "running");
+    if (has) ov.querySelector('.dl-tab[data-tab="running"]')?.click();
+    else ov.querySelector('.dl-tab[data-tab="done"]')?.click();
+  };
+  focusRunning();
+
+  const runningEl = panes.running;
+  const doneEl = panes.done;
+  const uploadEl = panes.upload;
+  const countEl = ov.querySelector("#dl-count");
+  const badgeRunning = ov.querySelector("#dl-badge-running");
+  const badgeDone = ov.querySelector("#dl-badge-done");
+  const badgeUpload = ov.querySelector("#dl-badge-upload");
+  const fmtSize = (n) => (n >= 1048576 ? (n / 1048576).toFixed(1) + " MB" : Math.max(1, Math.round(n / 1024)) + " KB");
+
+  const render = () => {
+    // 进行中：done 状态保留 5 秒后移出（给用户看到「已完成」的反馈窗口）
+    const tasks = [...dlTasks.values()].filter((t) => t.status !== "done" || Date.now() - (t.doneAt || 0) < 5000);
+    const active = tasks.filter((t) => t.status === "running").length;
+    countEl.textContent = active ? `${active} 个任务进行中` : "";
+    badgeRunning.textContent = tasks.length || "";
+    runningEl.innerHTML = tasks.length
+      ? tasks.map((t) => {
+          const pct = t.total ? Math.min(100, Math.round((t.received / t.total) * 100)) : 0;
+          const foot = t.status === "running"
+            ? `<div class="dl-row-foot"><div class="dl-bar"><div class="dl-bar-in" style="width:${pct}%"></div></div><span class="dl-pct">${t.total ? pct + "%" : fmtSize(t.received)}</span><button class="src-del" data-cancel="${t.id}" title="取消">${ICON_CLOSE}</button></div>`
+            : t.status === "failed"
+            ? `<div class="dl-row-foot"><span class="dl-err">${esc(t.error || "失败")}</span></div>`
+            : `<div class="dl-row-foot"><span class="dl-ok">已完成</span></div>`;
+          return `<div class="dl-item dl-card${t.status === "failed" ? " dl-failed" : ""}">
+            <div class="dl-row-head">
+              <span class="src-name">${esc(t.title)}</span>
+              <span class="dl-artist">${esc(t.artist)}</span>
+            </div>
+            ${foot}
+          </div>`;
+        }).join("")
+      : `<div class="src-empty">暂无下载任务<br /><span>在搜索结果或榜单里点下载图标即可</span></div>`;
+    runningEl.querySelectorAll("[data-cancel]").forEach((btn) => {
+      btn.addEventListener("click", () => invoke("download_cancel", { id: Number(btn.dataset.cancel) }).catch(() => {}));
+    });
+    // 已下载列表（实扫目录）
+    invoke("downloaded_list").then((list) => {
+      badgeDone.textContent = (list && list.length) || "";
+      doneEl.innerHTML = (list && list.length)
+        ? list.map((f) => `
+            <div class="dl-item dl-play" data-play="${esc(f.filename)}">
+              <span class="dl-play-ico">${ICON_PLAY}</span>
+              <div class="src-info">
+                <span class="src-name">${esc(f.filename.replace(/\.[^.]+$/, ""))}</span>
+              </div>
+              <button class="mr-dl" data-up="${esc(f.filename)}" title="上传到云盘 /音乐">⬆ 云盘</button>
+              <button class="src-del" data-del="${esc(f.filename)}" title="删除">${ICON_TRASH}</button>
+            </div>`).join("")
+        : `<div class="src-empty">还没有下载的歌曲<br /><span>下载完成后会出现在这里，可离线播放</span></div>`;
+      doneEl.querySelectorAll("[data-play]").forEach((row) => {
+        row.addEventListener("click", (e) => {
+          if (e.target.closest("[data-del]") || e.target.closest("[data-up]")) return;
+          playDownloaded(row.dataset.play);
+        });
+      });
+      doneEl.querySelectorAll("[data-up]").forEach((btn) => {
+        btn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          const fname = btn.dataset.up;
+          btn.disabled = true;
+          invoke("ad_upload_start", { filename: fname })
+            .then(() => {
+              toast("已加入云盘上传队列");
+              ov.querySelector('.dl-tab[data-tab="cloud"]')?.click();
+              render();
+            })
+            .catch((e) => toast("上传失败：" + String(e && e.message || e)))
+            .finally(() => { btn.disabled = false; });
+        });
+      });
+      doneEl.querySelectorAll("[data-del]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          invoke("downloaded_delete", { filename: btn.dataset.del }).then(render).catch((e) => toast(String(e)));
+        });
+      });
+    }).catch(() => { doneEl.innerHTML = `<div class="src-empty">读取下载目录失败</div>`; });
+
+    // 云盘上传 tab：auto 开关 + 任务列表（后端快照，500ms 轮询随 render 刷新）
+    invoke("ad_upload_list").then((tasks) => {
+      const active = (tasks || []).filter((t) => t.status === "hashing" || t.status === "uploading").length;
+      badgeUpload.textContent = active || "";
+      uploadEl.innerHTML = `
+        <label class="ad-auto-row" title="本地下载完成后自动上传到云盘 /音乐">
+          <input type="checkbox" id="ad-auto" ${state.ad_auto_upload ? "checked" : ""} />
+          <span>下载完成后自动上传到云盘</span>
+        </label>
+        ${tasks && tasks.length ? tasks.map((t) => {
+          const pct = t.total ? Math.min(100, Math.round(((t.sent || 0) / t.total) * 100)) : 0;
+          const statusText = { hashing: "计算哈希…", uploading: "上传中", done: "已完成", failed: "失败", cancelled: "已取消" }[t.status] || t.status;
+          const foot = t.status === "hashing" || t.status === "uploading"
+            ? `<div class="dl-row-foot"><div class="dl-bar"><div class="dl-bar-in" style="width:${pct}%"></div></div><span class="dl-pct">${pct}%</span><button class="src-del" data-upcancel="${t.id}" title="取消">${ICON_CLOSE}</button></div>`
+            : t.status === "failed"
+            ? `<div class="dl-row-foot"><span class="dl-err">${esc(t.error || "上传失败")}</span></div>`
+            : `<div class="dl-row-foot"><span class="dl-ok">已完成${t.note ? " · " + esc(t.note) : ""}</span></div>`;
+          return `<div class="dl-item dl-card${t.status === "failed" ? " dl-failed" : ""}">
+            <div class="dl-row-head"><span class="src-name">☁ ${esc(t.name.replace(/\.[^.]+$/, ""))}</span><span class="dl-artist">云盘</span></div>
+            ${foot}
+          </div>`;
+        }).join("")
+        : `<div class="src-empty">暂无上传任务<br /><span>在「已下载」里点 ⬆ 上传到云盘，或开启自动上传</span></div>`}`;
+      uploadEl.querySelector("#ad-auto")?.addEventListener("change", (e) => {
+        state.ad_auto_upload = !!e.target.checked;
+        saveState();
+        toast(state.ad_auto_upload ? "已开启：下载完成自动上传云盘" : "已关闭自动上传");
+      });
+      uploadEl.querySelectorAll("[data-upcancel]").forEach((btn) => {
+        btn.addEventListener("click", () => invoke("ad_upload_cancel", { id: Number(btn.dataset.upcancel) }).catch(() => {}));
+      });
+    }).catch(() => { uploadEl.innerHTML = `<div class="src-empty">读取上传任务失败</div>`; });
+  };
+  bindDownloadEvents(render);
+  render();
+  // 面板打开期间定时刷新进度（事件回调也触发，双保险）
+  const timer = setInterval(render, 500);
+  const obs = new MutationObserver(() => { if (!document.contains(ov)) { clearInterval(timer); obs.disconnect(); } });
+  obs.observe(document.body, { childList: true });
+}
+
+// 播放已下载的本地文件（convertFileSrc → asset 协议，不依赖音源；
+// 封面/歌词从下载时落盘的同名附属文件读取：.lrc + .jpg/.png/.webp）
+async function playDownloaded(filename) {
+  try {
+    const conv = window.__TAURI__?.core?.convertFileSrc;
+    if (!conv) throw new Error("convertFileSrc 不可用");
+    const { appDataDir } = window.__TAURI__?.path || {};
+    const dir = appDataDir ? await appDataDir() : "";
+    const url = conv(`${dir}\\music\\${filename}`);
+    // 资产先行：封面 data URL + 歌词文本，取不到则降级为无封面/无词
+    let assets = { lrc: null, cover: null };
+    try { assets = (await invoke("local_track_assets", { filename })) || assets; } catch (_) {}
+    loadMeta({ title: filename.replace(/\.[^.]+$/, ""), artist: "本地", artwork: assets.cover || null, url, type: "本地" });
+    // 本地歌词：注入播放链路（页面歌词区 + 桌面歌词窗口）
+    if (assets.lrc && currentSong) {
+      currentSong.lyric = assets.lrc;
+      currentLyric = parseLrc(assets.lrc);
+      if (lyricEl) renderLyric();
+      pushLyric(true);
+    }
+  } catch (e) {
+    toast("本地播放失败：" + String(e && e.message || e));
+  }
+}
 
 // 渲染收藏歌曲列表到指定容器（点击 → 整列表入队播放；右侧 ✕ 取消收藏）
 function renderFavoritesInto(el) {
@@ -629,8 +967,20 @@ function applyArtwork(el, artwork) {
 // 实例缓存：同一脚本只执行一次，避免每次搜索/取流/歌词都重新解析执行（脚本往往数百 KB 且混淆）。
 // 执行抛错不缓存（下次调用可重试，addSource 的正则兜底不受影响）。
 const pluginCache = new Map();
+// 剥离 accept-encoding：插件手动透传压缩头会导致响应以 gzip 字节返回，
+// 经文本通道读取报 "stream did not contain valid UTF-8"（Rust 侧同步剥离，双保险）
+function stripAE(headers) {
+  if (!headers || typeof headers !== "object") return headers;
+  const h = { ...headers };
+  for (const k of Object.keys(h)) {
+    if (k.toLowerCase() === "accept-encoding") delete h[k];
+  }
+  return h;
+}
 function loadMusicPlugin(code) {
   if (pluginCache.has(code)) return pluginCache.get(code);
+  // 洛雪音源走独立沙箱（协议完全不同）
+  if (isLxSource(code)) return loadLxPlugin(code);
   const mod = { exports: {} };
 
   const safeParse = (text) => { try { return JSON.parse(text); } catch { return text; } };
@@ -652,18 +1002,19 @@ function loadMusicPlugin(code) {
         method: (o.method || "GET").toUpperCase(),
         params: o.params,
         headers: o.headers,
+        responseType: o.responseType,
         body: d !== undefined
           ? (typeof d === "string" ? d : (typeof d.append === "function" ? d.toString() : JSON.stringify(d)))
           : (o.body || ""),
       };
     }
-    let params, headers, body = "";
+    let params, headers, body = "", responseType;
     if (method === "GET") {
       const cfg = b || {};
-      params = cfg.params; headers = cfg.headers;
+      params = cfg.params; headers = cfg.headers; responseType = cfg.responseType;
     } else {
       const cfg = c || {};
-      params = cfg.params; headers = cfg.headers;
+      params = cfg.params; headers = cfg.headers; responseType = cfg.responseType;
       const d = b; // axios.post(url, data, config) 第二参是请求体
       if (typeof d === "string") body = d;
       else if (d && typeof d === "object") {
@@ -677,13 +1028,36 @@ function loadMusicPlugin(code) {
         }
       }
     }
-    return { url: a, method, params, headers, body };
+    return { url: a, method, params, headers, body, responseType };
   }
+  // base64 → Uint8Array（http_get_bytes 返回体解码，供插件 responseType:"arraybuffer"）
+  const b64ToUint8Array = (b64) => {
+    const bin = atob(b64);
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  };
   // axios 既可作为函数调用 axios({url,method,...})，也可 axios.get/post(...)（Parcel 打包插件大量用前者）
   const axiosExec = (method, a, b, c) => {
     const r = normAxios(method, a, b, c);
     const full = r.url + toQuery(r.params);
-    const h = r.headers || {};
+    // accept-encoding 剥离：压缩响应走文本通道会报 UTF-8 错（Rust 侧同步剥离，双保险）
+    const h = { ...(r.headers || {}) };
+    for (const k of Object.keys(h)) {
+      if (k.toLowerCase() === "accept-encoding") delete h[k];
+    }
+    // 二进制响应：走 http_get_bytes（base64 传输）解码为 Uint8Array——
+    // 咪咕等音源的 VIP 加密取流用 responseType:"arraybuffer"，文本通道会损坏密文
+    if (r.responseType === "arraybuffer" || r.responseType === "uint8array") {
+      return invoke("http_get_bytes", { url: full, headers: h }).then((b64) => ({
+        data: b64ToUint8Array(b64),
+        status: 200,
+        statusText: "OK",
+        headers: {},
+        config: { url: full, method: r.method, headers: h },
+        request: {},
+      }));
+    }
     const p = r.method === "POST"
       ? invoke("http_post", { url: full, body: r.body, headers: h })
       : invoke("http_get", { url: full, headers: h });
@@ -761,24 +1135,238 @@ function loadMusicPlugin(code) {
 
   const sandbox = {
     axios: axiosMock,
+    // MusicFree 宿主协议全局：插件 userVariables（咪咕等插件的登录导入功能读取）
+    env: { getUserVariables: () => (state.settings?.pluginVars || {}) },
     http: {
-      get: (url, opts = {}) => invoke("http_get", { url, headers: opts.headers }),
-      post: (url, body = "", opts = {}) => invoke("http_post", { url, body, headers: opts.headers }),
+      get: (url, opts = {}) => invoke("http_get", { url, headers: stripAE(opts.headers) }),
+      post: (url, body = "", opts = {}) => invoke("http_post", { url, body, headers: stripAE(opts.headers) }),
       request: (url, opts = {}) =>
-        (opts.method === "POST" ? invoke("http_post", { url, body: opts.body || "", headers: opts.headers }) : invoke("http_get", { url, headers: opts.headers })),
+        (opts.method === "POST" ? invoke("http_post", { url, body: opts.body || "", headers: stripAE(opts.headers) }) : invoke("http_get", { url, headers: stripAE(opts.headers) })),
     },
     console, URL, URLSearchParams, encodeURIComponent, decodeURIComponent, JSON, Math, Date, Object, Array,
     String, Number, Boolean, Promise, parseInt, parseFloat, setTimeout, clearTimeout, Infinity, NaN,
   };
 
   const fn = new Function("module", "exports", "globalThis", "require", `'use strict';\n${code}\n`);
-  fn(mod, mod.exports, sandbox, require);
+  let execErr = null;
+  try {
+    fn(mod, mod.exports, sandbox, require);
+  } catch (e) {
+    execErr = e;
+  }
   const out = mod.exports || {};
-  // Parcel/ESM 打包的插件会把真实实例挂在 .default 上，需解包；
-  // 不解包则 plugin.search / getMediaSource 等全部为 undefined（表现为「缺少search」）
   const plugin = out.default && typeof out.default === "object" ? out.default : out;
+  // 洛雪混淆脚本的特征被字符串表隐藏，isLxSource 可能漏判——
+  // MusicFree 沙箱执行报错且代码含 globalThis 时，回落洛雪沙箱再试
+  if (execErr && /globalThis/.test(code)) {
+    try { return loadLxPlugin(code); } catch (_) { throw execErr; }
+  }
+  if (execErr) throw execErr;
   pluginCache.set(code, plugin);
   return plugin;
+}
+
+// ---- 洛雪（LX Music）自定义源兼容层 ----
+// 洛雪协议：脚本通过 globalThis.lx 获取宿主 API，on(EVENT_NAMES.request) 注册
+// musicUrl 处理器，send(EVENT_NAMES.inited, {sources}) 声明能力。与 MusicFree 协议
+// 完全不同（无 search，只做「取播放地址」一件事），故单独沙箱执行并包装为
+// MusicFree 形态：search 走内置酷狗聚合（洛雪源只管取流），getMediaSource 触发
+// musicUrl 事件。音质映射：standard→128k / high→320k / super→flac。
+const LX_EVENT_NAMES = { request: "request", inited: "inited" };
+// 洛雪源声明支持的平台 → 中文名（供搜索聚合展示来源）
+const LX_SOURCE_NAMES = { kw: "酷我", kg: "酷狗", tx: "QQ音乐", wy: "网易云", mg: "咪咕" };
+
+function loadLxPlugin(code) {
+  if (pluginCache.has(code)) return pluginCache.get(code);
+  const handlers = {}; // action → handler（musicUrl 等）
+  let inited = false;
+  let initedPayload = null;
+
+  // 从脚本头注释解析元数据（洛雪协议：@name/@version/@author/@description/@homepage）
+  const meta = {};
+  const header = code.slice(0, 2000).match(/\/\*!?\*?([\s\S]*?)\*\//);
+  if (header) {
+    for (const m of header[1].matchAll(/@(\w+)\s+(.+)/g)) {
+      meta[m[1].trim()] = m[2].trim();
+    }
+  }
+
+  const lx = {
+    EVENT_NAMES: LX_EVENT_NAMES,
+    env: "desktop",
+    version: "2.0.0",
+    // 洛雪宿主协议：脚本头注释元数据 + 原始脚本（野花等源用它做完整性校验/版本比对）
+    currentScriptInfo: {
+      name: meta.name || "洛雪音源",
+      description: meta.description || "",
+      version: meta.version || "1.0.0",
+      author: meta.author || "",
+      homepage: meta.homepage || "",
+      rawScript: code,
+    },
+    // request：洛雪宿主的 HTTP API（回调风格）→ 转 Rust 代理
+    request: (url, options = {}, callback) => {
+      const method = (options.method || "GET").toUpperCase();
+      const h = stripAE(options.headers || {});
+      const p = method === "POST"
+        ? invoke("http_post", { url, body: options.body || "", headers: h })
+        : invoke("http_get", { url, headers: h });
+      p.then((text) => {
+        // 洛雪 request 语义：resp.body 为响应体（字符串或 JSON 对象——JSON 自动解析）
+        let body = safeParse(text);
+        callback && callback(null, { body, statusCode: 200, headers: {}, raw: text });
+      }).catch((e) => callback && callback(e));
+    },
+    on: (event, handler) => {
+      if (event === LX_EVENT_NAMES.request) handlers.request = handler;
+    },
+    send: (event, payload) => {
+      if (event === LX_EVENT_NAMES.inited) { inited = true; initedPayload = payload; }
+    },    utils: {
+      buffer: { from: (s) => String(s), bufToString: (b) => String(b) },
+      // md5 是洛雪源最常用的校验工具（野花源 init 时校验脚本 md5），给真实现
+      crypto: {
+        md5: (s) => {
+          // 同步 MD5 不可得（Rust 代理是异步的）——常用场景是脚本完整性校验，
+          // 这里用轻量 JS 实现兜底（与 5sing 适配版同一实现思路）
+          return lxMd5(String(s));
+        },
+        aesEncrypt: () => { throw new Error("utils.crypto.aesEncrypt 未支持"); },
+        rsaEncrypt: () => { throw new Error("utils.crypto.rsaEncrypt 未支持"); },
+        randomBytes: (n) => Array.from({ length: n }, () => Math.floor(Math.random() * 256)),
+      },
+      randomBytes: (n) => Array.from({ length: n }, () => Math.floor(Math.random() * 256)),
+      zlib: { deflate: () => { throw new Error("utils.zlib 未支持"); }, inflate: () => { throw new Error("utils.zlib 未支持"); },
+        inflateRaw: () => { throw new Error("utils.zlib 未支持"); }, gzip: () => { throw new Error("utils.zlib 未支持"); }, ungzip: () => { throw new Error("utils.zlib 未支持"); } },
+    },
+  };
+
+  const sandbox = {
+    console, URL, URLSearchParams, encodeURIComponent, decodeURIComponent, JSON, Math, Date, Object, Array,
+    String, Number, Boolean, Promise, parseInt, parseFloat, setTimeout, clearTimeout, setInterval, clearInterval, Infinity, NaN,
+    atob, btoa, TextEncoder, TextDecoder, Headers, fetch, AbortController,
+  };
+  // 洛雪源 init 阶段的内部 Promise 链（如野花源拉配置失败重试）可能产生未捕获 rejection，
+  // 真实洛雪宿主有全局兜底——这里同样兜底，防止整个应用崩溃
+  const rejectionGuard = (e) => { console.warn("[lx] 未处理的 rejection:", String(e && e.message || e).slice(0, 80)); };
+  window.addEventListener("unhandledrejection", rejectionGuard);
+  const fn = new Function("globalThis", `'use strict';\n${code}\n`);
+  fn({ ...sandbox, lx });
+
+  if (!handlers.request) {
+    throw new Error("洛雪音源初始化失败（未注册 request 处理器）");
+  }
+  // 异步 init：部分源（如野花）init 时发网络请求拉配置，之后才 send(inited)。
+  // ready promise 承诺「init 完成（或 3s 超时）」，getMediaSource 内部等待之。
+  let resolveReady;
+  const ready = new Promise((r) => { resolveReady = r; });
+  if (inited) resolveReady();
+  const origSend = lx.send;
+  lx.send = (event, payload) => {
+    origSend(event, payload);
+    if (event === LX_EVENT_NAMES.inited && initedPayload) resolveReady();
+  };
+  setTimeout(() => resolveReady(), 3000); // 超时兜底：musicUrl 调用本身会再触发请求
+
+  const qualityMap = { standard: "128k", high: "320k", super: "flac" };
+  const plugin = {
+    platform: "洛雪音源" + (meta.name ? " · " + meta.name : ""),
+    version: meta.version || "lx-compat",
+    // 洛雪源只做取流，不提供搜索——搜索复用其它音源（UI 已有提示）
+    supportedSearchType: [],
+    async getMediaSource(song, quality) {
+      const handler = handlers.request;
+      if (!handler) throw new Error("洛雪音源未就绪");
+      await ready; // 等异步 init 完成（最多 3s）
+      const q = qualityMap[quality] || "128k";
+      // 换源取流：洛雪各平台处理器读取各自所需的 ID 字段（songmid/hash/copyrightId）。
+      // 歌曲可能来自其它音源（字段名不一致），统一补齐别名，让每个平台都有机会命中。
+      const musicInfo = {
+        ...song,
+        songmid: song.songmid ?? song.id,
+        hash: song.hash ?? song.id,
+        copyrightId: song.copyrightId ?? song.id,
+      };
+      // 平台尝试顺序：歌曲带 lxSource 标记则优先，否则按声明的平台逐个尝试
+      const declared = Object.keys((initedPayload && initedPayload.sources) || {});
+      const platforms = declared.length ? declared : ["kw", "kg", "tx", "wy", "mg"];
+      const preferred = song.lxSource;
+      const order = preferred && platforms.includes(preferred)
+        ? [preferred, ...platforms.filter((p) => p !== preferred)]
+        : platforms;
+      let lastErr = null;
+      for (const source of order) {
+        try {
+          const url = await Promise.resolve(
+            handler({ action: "musicUrl", source, info: { type: q, musicInfo } })
+          );
+          if (url) return { url };
+        } catch (e) {
+          lastErr = e;
+        }
+      }
+      throw new Error(lastErr && lastErr.message ? String(lastErr.message) : "洛雪音源各平台均未取到播放地址");
+    },
+    // 供 UI 展示声明的平台与音质（异步 init，读取时取最新）
+    get lxSources() { return (initedPayload && initedPayload.sources) || {}; },
+    __lx: true,
+  };
+  pluginCache.set(code, plugin);
+  return plugin;
+}
+
+// 轻量同步 MD5（hex），供洛雪源脚本完整性校验（与 5sing 适配版同一实现）
+function lxMd5(str) {
+  const S = [7,12,17,22,7,12,17,22,7,12,17,22,7,12,17,22,
+             5,9,14,20,5,9,14,20,5,9,14,20,5,9,14,20,
+             4,11,16,23,4,11,16,23,4,11,16,23,4,11,16,23,
+             6,10,15,21,6,10,15,21,6,10,15,21,6,10,15,21];
+  const K = new Array(64);
+  for (let i = 0; i < 64; i++) K[i] = Math.floor(Math.abs(Math.sin(i + 1)) * 4294967296);
+  let H0 = 0x67452301, H1 = 0xEFCDAB89, H2 = 0x98BADCFE, H3 = 0x10325476;
+  const ml = str.length, bitLen = ml * 8;
+  const len = Math.ceil((ml + 1 + 8) / 64) * 64;
+  const bytes = new Array(len).fill(0);
+  for (let i = 0; i < ml; i++) bytes[i] = str.charCodeAt(i) & 0xff;
+  bytes[ml] = 0x80;
+  bytes[len - 8] = bitLen & 0xff;
+  bytes[len - 7] = (bitLen >>> 8) & 0xff;
+  bytes[len - 6] = (bitLen >>> 16) & 0xff;
+  bytes[len - 5] = (bitLen >>> 24) & 0xff;
+  for (let off = 0; off < len; off += 64) {
+    const M = new Array(16);
+    for (let i = 0; i < 16; i++)
+      M[i] = bytes[off + i*4] | (bytes[off + i*4 + 1] << 8) | (bytes[off + i*4 + 2] << 16) | (bytes[off + i*4 + 3] << 24);
+    let A = H0, B = H1, C = H2, D = H3;
+    for (let i = 0; i < 64; i++) {
+      let F, g;
+      if (i < 16) { F = (B & C) | ((~B) & D); g = i; }
+      else if (i < 32) { F = (D & B) | ((~D) & C); g = (5*i + 1) % 16; }
+      else if (i < 48) { F = B ^ C ^ D; g = (3*i + 5) % 16; }
+      else { F = C ^ (B | (~D)); g = (7*i) % 16; }
+      F = (F + A + K[i] + M[g]) | 0;
+      A = D; D = C; C = B;
+      B = (B + ((F << S[i]) | (F >>> (32 - S[i])))) | 0;
+    }
+    H0 = (H0 + A) | 0; H1 = (H1 + B) | 0; H2 = (H2 + C) | 0; H3 = (H3 + D) | 0;
+  }
+  const hex = (n) => { let s = ""; for (let i = 0; i < 4; i++) s += ((n >>> (i*8)) & 0xff).toString(16).padStart(2, "0"); return s; };
+  return hex(H0) + hex(H1) + hex(H2) + hex(H3);
+}
+
+// 判断脚本是否为洛雪音源。注意混淆器会把特征字符串编码：
+// - 'lx' 存为 \x6c\x78（globalThis['\x6c\x78']）
+// - EVENT_NAMES/musicUrl 等收进字符串表
+// 故需要多特征组合，且执行失败时还有回落（见 loadMusicPlugin）
+function isLxSource(code) {
+  if (!/globalThis/.test(code)) return false;
+  if (/EVENT_NAMES/.test(code)) return true; // 明文协议特征
+  if (/globalThis\s*\[\s*['"]lx['"]\s*\]/.test(code)) return true; // globalThis['lx']
+  if (/\\x6c\\x78/.test(code)) return true; // 混淆的 'lx'（\x6c\x78）
+  if (/lx-music/.test(code)) return true; // UA 特征串
+  // 字符串表组合特征：musicUrl + inited 是洛雪协议独有
+  if (/musicUrl/.test(code) && /inited/.test(code)) return true;
+  return false;
 }
 
 // ---- 音源管理弹窗：添加（URL/本地 js）/ 移除 ----
@@ -789,30 +1377,63 @@ function showMusicSources(onDone) {
   ov.className = "task-modal-overlay";
   ov.innerHTML = `
     <div class="task-modal source-modal">
-      <h3>音源管理</h3>
-      <div class="src-list" id="src-list"></div>
-      <div class="src-add">
-        <input id="src-url" type="text" placeholder="音源 JS 地址（https://…）" autocomplete="off" spellcheck="false" />
-        <button class="tm-cancel" id="src-add-url">添加 URL</button>
-        <button class="tm-cancel" id="src-add-file">本地 .js</button>
-        <input type="file" id="src-file" accept=".js" hidden />
+      <div class="sm-head">
+        <h3>音源管理</h3>
+        <span class="sm-count" id="src-count"></span>
       </div>
-      <div class="src-hint">兼容 MusicFree 插件（含 jsjiami 混淆版，自动适配 axios/he）。音源自备，示例：<code>https://js.258008.xyz/nian/kg.js</code>（酷狗）、<code>https://js.258008.xyz/nian/kw.js</code>（酷我）。</div>
+      <div class="sm-body">
+        <div class="sm-left">
+          <div class="sm-sec-title">已安装 <span class="sm-tip">拖拽排序，靠前为默认</span></div>
+          <div class="src-list" id="src-list"></div>
+        </div>
+        <div class="sm-right">
+          <div class="sm-sec-title">添加音源</div>
+          <div class="sm-add-field">
+            <label>在线音源地址</label>
+            <input id="src-url" type="text" placeholder="https://…/xxx.js" autocomplete="off" spellcheck="false" />
+            <button class="btn-primary sm-add-btn" id="src-add-url">拉取并安装</button>
+          </div>
+          <div class="sm-add-divider"><span>或</span></div>
+          <button class="sm-add-file" id="src-add-file">
+            <span class="sm-add-file-ico">＋</span>
+            <span>选择本地 .js 文件</span>
+          </button>
+          <input type="file" id="src-file" accept=".js" hidden />
+        </div>
+      </div>
       <div class="tm-actions"><button class="btn-primary cm-ok" id="src-done">完成</button></div>
     </div>`;
   document.body.appendChild(ov);
   const list = ov.querySelector("#src-list");
+  const countEl = ov.querySelector("#src-count");
   const close = () => { ov.remove(); if (onDone) try { onDone(); } catch (e) {} };
 
   function renderList() {
-    list.innerHTML = (state.musicSources || []).length
+    const n = (state.musicSources || []).length;
+    countEl.textContent = n ? `${n} 个音源` : "";
+    list.innerHTML = n
       ? state.musicSources.map((s, i) => `
-        <div class="src-row">
-          <span class="src-name">${esc(s.name || "未命名")}</span>
-          <span class="src-src">${esc(s.src || "")}</span>
+        <div class="src-row" data-i="${i}">
+          <span class="src-drag" title="拖拽排序">⋮⋮</span>
+          <span class="src-order">${i + 1}</span>
+          <div class="src-info">
+            <span class="src-name">${esc(s.name || "未命名")}</span>
+            <span class="src-src">${esc(s.src || "本地文件")}</span>
+          </div>
           <button class="src-del" data-i="${i}" title="移除">${ICON_CLOSE}</button>
         </div>`).join("")
-      : `<div class="dash-empty">未安装音源</div>`;
+      : `<div class="src-empty">还没有安装音源<br /><span>从右侧添加在线地址或本地 .js 文件</span></div>`;
+    // 排序：指针事件自实现拖拽（mousedown 起拖 + ghost 跟随 + mouseup 落位）。
+    // 不用 HTML5 drag events——WebView2（尤其嵌入 WorkerW 的子窗口）里 drop 事件链不可靠，
+    // 幽灵图能出现但 drop 不触发，表现为「能拖但换不了顺序」。
+    const rowEls = [...list.querySelectorAll(".src-row")];
+    rowEls.forEach((row, idx) => {
+      row.addEventListener("mousedown", (e) => {
+        if (e.button !== 0 || e.target.closest(".src-del")) return; // 删除按钮不触发拖拽
+        e.preventDefault(); // 防止拖动时选中文本
+        startSrcDrag(e, idx, rowEls);
+      });
+    });
     list.querySelectorAll(".src-del").forEach((btn) => {
       btn.addEventListener("click", () => {
         state.musicSources.splice(Number(btn.dataset.i), 1);
@@ -820,6 +1441,45 @@ function showMusicSources(onDone) {
         renderList();
       });
     });
+  }
+
+  // 音源拖拽排序主体：ghost 克隆行跟随鼠标，落点行高亮，mouseup 提交顺序。
+  function startSrcDrag(e, fromIdx, rowEls) {
+    const rects = rowEls.map((r) => r.getBoundingClientRect());
+    const ghost = rowEls[fromIdx].cloneNode(true);
+    ghost.classList.add("drag-ghost");
+    ghost.style.cssText += `position:fixed;left:${rects[fromIdx].left}px;top:${rects[fromIdx].top}px;width:${rects[fromIdx].width}px;margin:0;z-index:17000;pointer-events:none;box-shadow:0 10px 28px rgba(0,0,0,.45);`;
+    document.body.appendChild(ghost);
+    rowEls[fromIdx].classList.add("dragging");
+    const ox = e.clientX - rects[fromIdx].left;
+    const oy = e.clientY - rects[fromIdx].top;
+    let hoverIdx = fromIdx;
+    const idxFromY = (y) => {
+      for (let i = 0; i < rects.length; i++) {
+        if (y >= rects[i].top && y <= rects[i].bottom) return i;
+      }
+      return fromIdx;
+    };
+    const onMove = (ev) => {
+      ghost.style.left = ev.clientX - ox + "px";
+      ghost.style.top = ev.clientY - oy + "px";
+      hoverIdx = idxFromY(ev.clientY);
+      rowEls.forEach((r, i) => r.classList.toggle("drag-over", i === hoverIdx && i !== fromIdx));
+    };
+    const onUp = () => {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+      ghost.remove();
+      rowEls.forEach((r) => r.classList.remove("dragging", "drag-over"));
+      if (hoverIdx !== fromIdx) {
+        const [item] = state.musicSources.splice(fromIdx, 1);
+        state.musicSources.splice(hoverIdx, 0, item);
+        saveState(); // 数组顺序即左侧音源栏与默认音源的顺序，持久化到 music.json
+      }
+      renderList();
+    };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
   }
 
   function addSource(src, code) {
@@ -838,17 +1498,21 @@ function showMusicSources(onDone) {
 
   ov.querySelector("#src-add-url").addEventListener("click", async () => {
     const url = ov.querySelector("#src-url").value.trim();
-    if (!url) return;
+    if (!url) { toast("请先输入音源地址"); return; }
+    const btn = ov.querySelector("#src-add-url");
+    btn.disabled = true;
     try {
       const code = await invoke("http_get", { url });
-      if (!code || !code.trim()) { window.alert("拉取内容为空"); return; }
+      if (!code || !code.trim()) { toast("拉取内容为空"); return; }
       addSource(url, code);
       ov.querySelector("#src-url").value = "";
+      toast("音源已安装");
     } catch (e) {
-      window.alert("拉取失败：" + e);
+      toast("拉取失败：" + e);
+    } finally {
+      btn.disabled = false;
     }
   });
-
   ov.querySelector("#src-add-file").addEventListener("click", () => ov.querySelector("#src-file").click());
   ov.querySelector("#src-file").addEventListener("change", (e) => {
     const f = e.target.files && e.target.files[0];
@@ -917,6 +1581,7 @@ export function renderMusic(view) {
           <button class="mc-btn mc-big" id="mc-play" title="播放/暂停">${ICON_PLAY}</button>
           <button class="mc-btn" id="mc-next" title="下一首">${ICON_NEXT}</button>
           <button class="mc-btn" id="mc-list" title="列表">${ICON_LIST}</button>
+          <button class="mc-btn" id="mc-dl" title="下载管理">${ICON_DOWNLOAD}</button>
         </div>
         <div class="music-right">
           <button class="mc-btn mc-pill" id="mc-online" title="在线音乐（音源搜索/歌单/排行榜）">在线</button>
@@ -1092,6 +1757,7 @@ export function renderMusic(view) {
   prevBtn.addEventListener("click", playPrev);
   nextBtn.addEventListener("click", playNext);
   listBtn.addEventListener("click", showQueue);
+  body.querySelector("#mc-dl").addEventListener("click", showDownloads);
   body.querySelector("#mc-online").addEventListener("click", openOnlineMusic);
   body.querySelector("#mc-more").addEventListener("click", () => {});
 
@@ -1126,6 +1792,223 @@ export function renderMusic(view) {
   syncUI();
   updatePlayBtn();
   syncPlayerButtons();
+}
+
+// -------------------- 阿里云盘（P1 播放链路） --------------------
+// 设计见 .raccoon/aliyundrive-music-design.md。
+// 社区授权（AList/OpenList 扫码页拿 refresh_token）→ 粘贴绑定 → 官方 OpenAPI 直调。
+// 音频文件类型过滤（云盘列表/搜索共用）
+const AD_AUDIO_EXT = new Set(["mp3", "flac", "m4a", "wav", "ape", "ogg", "wma", "aac"]);
+const AD_AUTH_URL = "https://alistgo.com/zh/guide/drivers/aliyundrive.html"; // 社区授权页入口（文档页含跳转）
+
+// 云盘文件 → 播放队列歌曲结构（title 去扩展名，artist 固定「云盘」）
+function adSongOf(f) {
+  return {
+    title: (f.name || "").replace(/\.[^.]+$/, ""),
+    artist: "云盘",
+    artwork: "",
+    // 队列项直接带 file_id + 扩展名，播放时 ad_play_url 现取直链（直链带时效，不能缓存）
+    fileId: f.file_id,
+    ext: f.ext || "",
+  };
+}
+
+// 云盘根目录：默认 /音乐（不存在时回退 root）
+let adMusicFolderId = null;
+async function adResolveMusicFolder() {
+  if (adMusicFolderId) return adMusicFolderId;
+  try {
+    const list = await invoke("ad_list", { folderId: "root" });
+    const music = list.find((f) => f.kind === "folder" && f.name === "音乐");
+    adMusicFolderId = music ? music.file_id : "root";
+  } catch (_) { adMusicFolderId = "root"; }
+  return adMusicFolderId;
+}
+
+// 云盘整列表入队播放：与 playList 对等（上一首/下一首/随机可覆盖云盘歌曲）。
+// 队列项不缓存 url —— type "云盘" 的取流走 loadQueueItem 的专用分支，每次现取直链。
+function playCloudList(list, index) {
+  if (!list || !list.length) return;
+  playQueue = list.map((s) => ({
+    meta: { title: s.title, artist: "云盘", artwork: null },
+    song: { fileId: s.fileId },
+    srcId: null,
+    url: null,
+    type: "云盘",
+  }));
+  queueIndex = Math.max(0, Math.min(index, playQueue.length - 1));
+  loadQueueItem(queueIndex);
+}
+
+// 云盘直链过期兜底：播放中触发媒体错误时，重签直链续播一次（仅云盘来源）。
+function bindAdExpiryRetry() {
+  if (currentSong?.type !== "云盘" || !currentSong.song?.fileId) return;
+  const fileId = currentSong.song.fileId;
+  const onErr = () => {
+    if (currentSong?.song?.fileId !== fileId) return;
+    invoke("ad_play_url", { fileId })
+      .then((fresh) => {
+        musicAudio.src = fresh;
+        musicAudio.play().catch(() => {});
+      })
+      .catch(() => {});
+  };
+  musicAudio.addEventListener("error", onErr, { once: true });
+}
+
+// 云盘歌曲元数据补全：从音频内嵌标签（ID3/Vorbis）提取歌词与封面。
+// 拉取失败/无内嵌时静默降级（无词无封面），不影响播放。
+// 延迟 3 秒执行：上游 OSS 单连接限速（~500KB/s），播放启动阶段音频流优先，
+// 元数据的头尾拉取错峰，避免抢带宽造成开头卡顿。
+async function fetchAdTrackMeta(song) {
+  if (!song?.fileId) return;
+  await new Promise((r) => setTimeout(r, 3000));
+  if (!currentSong || currentSong.song?.fileId !== song.fileId) return; // 延迟期间已切歌
+  try {
+    const meta = await invoke("ad_track_meta", { fileId: song.fileId, ext: song.ext || "" });
+    console.log("[ad-meta] result:", JSON.stringify({ hasLyric: !!meta?.lyric, hasCover: !!meta?.cover, debug: meta?.debug || null }));
+    if (!currentSong || currentSong.song?.fileId !== song.fileId) return; // 已切歌
+    if (meta?.lyric && currentSong && !currentSong.lyric) {
+      currentSong.lyric = meta.lyric;
+      currentLyric = parseLrc(meta.lyric);
+      if (lyricEl) renderLyric();
+      lastPushedIdx = -2;
+      pushLyric(true);
+    }
+    if (meta?.cover && currentSong && !currentSong.artwork) {
+      currentSong.artwork = meta.cover;
+      syncMusicUI?.();
+    }
+  } catch (e) {
+    console.warn("[ad-meta] 获取失败:", String(e && e.message || e));
+  }
+}
+
+// 播放云盘歌曲：ad_play_url 取流式地址 → loadMeta（复用现有播放链路），并入播放队列
+async function playAdFile(song) {
+  try {
+    const url = await invoke("ad_play_url", { fileId: song.fileId, ext: song.ext || null });
+    loadMeta({ title: song.title, artist: song.artist || "云盘", artwork: null, url, type: "云盘" });
+    bindAdExpiryRetry();
+    fetchAdTrackMeta(song); // 异步补全内嵌歌词/封面，不阻塞播放
+  } catch (e) {
+    toast("云盘播放失败：" + String(e && e.message || e));
+  }
+}
+
+// 云盘 tab 主体：绑定状态 → 未绑定显示授权引导；已绑定显示目录浏览 + 搜索
+async function renderAdDriveTab(resultsEl, panelEl, modeTabsEl) {
+  let status = { bound: false };
+  try { status = (await invoke("ad_auth_status")) || status; } catch (_) {}
+
+  if (!status.bound) {
+    modeTabsEl.style.display = "none";
+    panelEl.style.display = "none";
+    resultsEl.innerHTML = `
+      <div class="ad-auth-guide">
+        <div class="dash-empty">尚未绑定阿里云盘</div>
+        <div class="ad-auth-steps">
+          <p>1. 点下方按钮打开社区授权页，用<b>阿里云盘 App 扫码</b>登录</p>
+          <p>2. 授权成功后页面会显示一串 <b>refresh_token</b>，复制它</p>
+          <p>3. 粘贴到下面并点「绑定」</p>
+        </div>
+        <button class="btn-primary" id="ad-open-auth">打开授权页</button>
+        <div class="ad-auth-input">
+          <input id="ad-token" type="password" placeholder="粘贴 refresh_token…" autocomplete="off" spellcheck="false" />
+          <button class="btn-primary" id="ad-bind">绑定</button>
+        </div>
+        <div class="ad-auth-note">token 仅保存在本机应用数据目录，不会上传。约 30 天需重新扫码一次。</div>
+      </div>`;
+    resultsEl.querySelector("#ad-open-auth").addEventListener("click", () => {
+      invoke("open_path", { target: AD_AUTH_URL }).catch((e) => toast("打开授权页失败：" + e));
+    });
+    resultsEl.querySelector("#ad-bind").addEventListener("click", async () => {
+      const btn = resultsEl.querySelector("#ad-bind");
+      const token = resultsEl.querySelector("#ad-token").value.trim();
+      if (!token) { toast("请先粘贴 refresh_token"); return; }
+      btn.disabled = true;
+      btn.textContent = "验证中…";
+      try {
+        const info = await invoke("ad_auth_bind", { refreshToken: token });
+        toast("已绑定：" + (info.nickname || "阿里云盘"));
+        renderAdDriveTab(resultsEl, panelEl, modeTabsEl); // 重新渲染为已绑定态
+      } catch (e) {
+        toast("绑定失败：" + String(e && e.message || e));
+        btn.disabled = false;
+        btn.textContent = "绑定";
+      }
+    });
+    return;
+  }
+
+  // 已绑定：目录浏览 + 搜索
+  modeTabsEl.style.display = "none"; // 云盘 tab 无排行榜/歌单模式
+  panelEl.style.display = "";
+  panelEl.innerHTML = `
+    <input id="ad-input" type="text" placeholder="搜索云盘歌曲…" autocomplete="off" spellcheck="false" />
+    <button class="mc-btn mc-pill" id="ad-refresh" title="刷新目录">↻</button>
+    <button class="mc-btn mc-pill" id="ad-unbind" title="解绑阿里云盘">解绑</button>`;
+  const input = panelEl.querySelector("#ad-input");
+  panelEl.querySelector("#ad-refresh").addEventListener("click", async () => { adMusicFolderId = null; loadAdFolder(resultsEl, await adResolveMusicFolder()); });
+  panelEl.querySelector("#ad-unbind").addEventListener("click", async () => {
+    try { await invoke("ad_unbind"); toast("已解绑"); renderAdDriveTab(resultsEl, panelEl, modeTabsEl); }
+    catch (e) { toast(String(e)); }
+  });
+  const doAdSearch = async () => {
+    const kw = input.value.trim();
+    if (!kw) return;
+    resultsEl.innerHTML = `<div class="dash-empty">搜索中…</div>`;
+    try {
+      const list = (await invoke("ad_search", { keyword: kw })).filter((f) => AD_AUDIO_EXT.has(f.ext));
+      renderAdFiles(resultsEl, list, { title: `云盘「${kw}」`, back: async () => loadAdFolder(resultsEl, await adResolveMusicFolder()) });
+      if (!list.length) resultsEl.innerHTML += `<div class="dash-empty">没有匹配的音频文件</div>`;
+    } catch (e) {
+      resultsEl.innerHTML = `<div class="dash-empty">搜索失败：${esc(String(e && e.message || e))}</div>`;
+    }
+  };
+  panelEl.querySelector("#ad-input").addEventListener("keydown", (e) => { if (e.key === "Enter") doAdSearch(); });
+  input.focus();
+  loadAdFolder(resultsEl, await adResolveMusicFolder());
+}
+
+// 拉取并渲染云盘目录（root 或 folder_id）
+async function loadAdFolder(resultsEl, folderId) {
+  resultsEl.innerHTML = `<div class="dash-empty">加载云盘目录…</div>`;
+  try {
+    const list = await invoke("ad_list", { folderId });
+    const songs = list.filter((f) => f.kind === "file" && AD_AUDIO_EXT.has(f.ext)).map(adSongOf);
+    renderAdFiles(resultsEl, songs, { title: "云盘 · /音乐", back: null });
+    if (!songs.length) resultsEl.innerHTML += `<div class="dash-empty">该目录暂无音频文件<br /><span>把歌传到云盘后点 ↻ 刷新</span></div>`;
+  } catch (e) {
+    const msg = String(e && e.message || e);
+    resultsEl.innerHTML = /失效|重新扫码/.test(msg)
+      ? `<div class="dash-empty">授权已过期，请到「解绑」后重新扫码绑定</div>`
+      : `<div class="dash-empty">加载失败：${esc(msg)}</div>`;
+  }
+}
+
+// 渲染云盘歌曲列表（复用 online-result 行样式；点击即播，不整列表入队——直链时效短，逐首现取）
+function renderAdFiles(resultsEl, songs, ctx) {
+  resultsEl.innerHTML = "";
+  if (ctx) {
+    const bar = document.createElement("div");
+    bar.className = "online-ctx";
+    bar.innerHTML = ctx.back
+      ? `<button class="oc-back" title="返回">${ICON_BACK}</button><span class="oc-title">${esc(ctx.title)}</span>`
+      : `<span class="oc-title">${esc(ctx.title)}</span>`;
+    if (ctx.back) bar.querySelector(".oc-back").addEventListener("click", ctx.back);
+    resultsEl.appendChild(bar);
+  }
+  if (!songs.length) return;
+  const frag = document.createElement("div");
+  frag.innerHTML = songs.slice(0, 200).map((s) => `
+    <div class="online-result">
+      <span class="mr-play">${ICON_PLAY}</span>
+      <span class="mr-title">${esc(s.title)}</span>
+      <span class="mr-artist">${esc(s.artist)}</span>
+    </div>`).join("");
+  frag.querySelectorAll(".online-result").forEach((row, idx) => row.addEventListener("click", () => playCloudList(songs, idx)));
+  resultsEl.appendChild(frag);
 }
 
 // -------------------- 在线音乐（音源 tab + 搜索点播） --------------------
@@ -1169,6 +2052,7 @@ function openOnlineMusic() {
   let current = (state.musicSources || []).find((s) => s.code) || null;
   let mode = "toplist"; // search | toplist | sheet
   let favMode = false; // 左侧「喜欢」tab 激活时
+  let adMode = false; // 左侧「云盘」tab 激活时（仅用于高亮态）
   let panelInput = null;
   let typeSelectEl = null;
 
@@ -1176,6 +2060,15 @@ function openOnlineMusic() {
   function setChrome(show) {
     modeTabsEl.style.display = show ? "" : "none";
     panelEl.style.display = show ? "" : "none";
+  }
+
+  // 洛雪源只做取流（协议无搜索/歌单/排行榜）：这些功能代理到第一个非洛雪音源，
+  // 搜索结果播放时仍走当前（洛雪）源取流——即「别的源找歌，洛雪源出流」。
+  function searchPluginFor(src) {
+    const p = loadMusicPlugin(src.code);
+    if (!p.__lx) return p;
+    const alt = (state.musicSources || []).find((s) => s.code && s.id !== src.id && !loadMusicPlugin(s.code).__lx);
+    return alt ? loadMusicPlugin(alt.code) : p;
   }
 
   // 列表归一化
@@ -1248,8 +2141,27 @@ function openOnlineMusic() {
         <span class="mr-title">${esc(song.title || song.name)}</span>
         <span class="mr-artist">${esc(song.artist || "未知歌手")}</span>
         ${ctx?.fav ? `<button class="mr-fav${isFav(song) ? " active" : ""}" data-i="${i}" title="${isFav(song) ? "取消喜欢" : "加到喜欢"}">${ICON_HEART}</button>` : ""}
+        ${current ? `<button class="mr-dl" data-dl="${i}" title="下载">${ICON_DOWNLOAD}</button>` : ""}
       </div>`).join("");
     frag.querySelectorAll(".online-result").forEach((row, idx) => row.addEventListener("click", () => playList(songs, idx, current)));
+    // 行内下载按钮：弹出音质选择菜单（选定档缺失时自动降级）
+    frag.querySelectorAll(".mr-dl").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const song = songs[Number(btn.dataset.dl)];
+        if (!song || !current) return;
+        showQualityMenu(btn, async (q) => {
+          btn.disabled = true;
+          try {
+            toast(await downloadSong(song, current, q));
+          } catch (err) {
+            toast(typeof err === "string" ? err : (err && err.message) || "下载失败");
+          } finally {
+            btn.disabled = false;
+          }
+        });
+      });
+    });
     if (ctx?.fav) {
       frag.querySelectorAll(".mr-fav").forEach((btn) => {
         btn.addEventListener("click", (e) => {
@@ -1279,7 +2191,7 @@ function openOnlineMusic() {
   async function loadTopListDetail(topList) {
     resultsEl.innerHTML = `<div class="dash-empty">加载中…</div>`;
     try {
-      const plugin = loadMusicPlugin(current.code);
+      const plugin = searchPluginFor(current);
       if (typeof plugin.getTopListDetail !== "function") throw new Error("该音源不支持榜单详情");
       // 字段归一化：不同接口返回的榜单 id 字段名不同，统一补 rankid/volid
       // （酷狗 rank/song 接口必须带 rankid，否则报「参数不合法」）
@@ -1299,7 +2211,7 @@ function openOnlineMusic() {
   async function loadSheetDetail(sheet, keyword) {
     resultsEl.innerHTML = `<div class="dash-empty">加载中…</div>`;
     try {
-      const plugin = loadMusicPlugin(current.code);
+      const plugin = searchPluginFor(current);
       if (typeof plugin.getMusicSheetInfo !== "function") throw new Error("该音源不支持歌单详情");
       const res = await plugin.getMusicSheetInfo(sheet, 1);
       renderSongList(normalizeMusicList(res), {
@@ -1316,7 +2228,7 @@ function openOnlineMusic() {
   async function loadAlbumDetail(album, keyword) {
     resultsEl.innerHTML = `<div class="dash-empty">加载中…</div>`;
     try {
-      const plugin = loadMusicPlugin(current.code);
+      const plugin = searchPluginFor(current);
       if (typeof plugin.getAlbumInfo !== "function") throw new Error("该音源不支持专辑详情");
       const res = await plugin.getAlbumInfo(album);
       renderSongList(normalizeMusicList(res), { title: "专辑：" + (album.title || ""), back: () => { if (panelInput) panelInput.value = keyword; doSearch(); }, fav: true });
@@ -1330,7 +2242,7 @@ function openOnlineMusic() {
     if (!current) { resultsEl.innerHTML = `<div class="dash-empty">未安装音源，点「音源」安装</div>`; return; }
     resultsEl.innerHTML = `<div class="dash-empty">加载中…</div>`;
     try {
-      const plugin = loadMusicPlugin(current.code);
+      const plugin = searchPluginFor(current);
       if (typeof plugin.getTopLists !== "function") throw new Error("该音源不支持排行榜");
       const raw = normalizeList(await plugin.getTopLists());
       // 收集分组与扁平索引（榜单 id 字段可能是 id/rankid，点详情时统一归一化）
@@ -1379,7 +2291,7 @@ function openOnlineMusic() {
     if (!current) { resultsEl.innerHTML = `<div class="dash-empty">未安装音源，点「音源」安装</div>`; return; }
     resultsEl.innerHTML = `<div class="dash-empty">加载歌单中…</div>`;
     try {
-      const plugin = loadMusicPlugin(current.code);
+      const plugin = searchPluginFor(current);
       let res = null;
       // 协议标准：默认推荐歌单走 getRecommendSheetsByTag（默认 tag id 为空字符串）
       if (typeof plugin.getRecommendSheetsByTag === "function") res = await plugin.getRecommendSheetsByTag({ id: "" }, 1);
@@ -1407,8 +2319,8 @@ function openOnlineMusic() {
     const type = mode === "sheet" ? "sheet" : (typeSelectEl ? typeSelectEl.value : "music");
     resultsEl.innerHTML = `<div class="dash-empty">搜索中…</div>`;
     try {
-      const plugin = loadMusicPlugin(current.code);
-      if (typeof plugin.search !== "function") throw new Error("插件缺少 search");
+      const plugin = searchPluginFor(current);
+      if (typeof plugin.search !== "function") throw new Error("没有可搜索的音源（洛雪源只负责取流，请先安装其它音源）");
       const res = await plugin.search(kw, 1, type); // MusicFree 签名：search(kw, page, type)
       if (type === "sheet") {
         renderCollection(normalizeList(res), {
@@ -1438,7 +2350,7 @@ function openOnlineMusic() {
     const opts = [{ value: "music", label: "歌曲" }];
     if (current) {
       try {
-        const plugin = loadMusicPlugin(current.code);
+        const plugin = searchPluginFor(current);
         const sup = plugin.supportedSearchType || [];
         if (sup.includes("album")) opts.push({ value: "album", label: "专辑" });
       } catch (e) {}
@@ -1487,7 +2399,7 @@ function openOnlineMusic() {
     panelInput.focus();
   }
 
-  // 左侧音源栏：顶部固定「喜欢」，下面音源列表 + 管理
+  // 左侧音源栏：顶部固定「喜欢」，下面音源列表 + 云盘 + 管理
   function renderSrcSide() {
     const sources = (state.musicSources || []).filter((s) => s.code);
     if (current && !sources.some((s) => s.id === current.id)) current = sources[0] || null;
@@ -1497,10 +2409,12 @@ function openOnlineMusic() {
         ? sources.map((s, i) => `
           <button class="online-src${!favMode && current && s.id === current.id ? " active" : ""}" data-i="${i}" title="${esc(s.name || "")}">${esc(s.name || "未命名")}</button>`).join("")
         : `<span class="online-src-none">未安装音源</span>`)
+      + `<button class="online-src${adMode ? " active" : ""}" id="online-src-ad" title="阿里云盘音乐">☁ 云盘</button>`
       + `<button class="online-src online-src-add" id="online-src-btn" title="音源管理">+ 音源</button>`;
 
     srcSideEl.querySelector("#online-src-fav").addEventListener("click", () => {
       favMode = true;
+      adMode = false;
       favEl = resultsEl;
       renderSrcSide();
       setChrome(false);
@@ -1511,11 +2425,21 @@ function openOnlineMusic() {
         const sources = (state.musicSources || []).filter((s) => s.code);
         current = sources[Number(btn.dataset.i)] || null;
         favMode = false;
+        adMode = false;
         favEl = null;
         setChrome(true);
         renderSrcSide();
         switchMode(mode);
       });
+    });
+    // 云盘 tab：独立渲染分支（不走音源插件链路）
+    srcSideEl.querySelector("#online-src-ad").addEventListener("click", () => {
+      favMode = false;
+      adMode = true;
+      favEl = null;
+      current = null;
+      renderSrcSide();
+      renderAdDriveTab(resultsEl, panelEl, modeTabsEl);
     });
     srcSideEl.querySelector("#online-src-btn").addEventListener("click", () => showMusicSources(renderSrcSide));
   }

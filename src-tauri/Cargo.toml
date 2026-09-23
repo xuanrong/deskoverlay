@@ -21,8 +21,16 @@ zip = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sysinfo = { version = "0.32", features = ["network", "disk"] }
-# HTTP 代理：为音乐音源插件提供无 CORS 请求能力（get/post）
-ureq = "2"
+# HTTP 代理：为音乐音源插件提供无 CORS 请求能力（get/post）；json 特性供阿里云盘 OpenAPI 调用
+ureq = { version = "2", features = ["json"] }
+# SHA1：阿里云盘上传秒传/秒传探测的内容哈希（上传 create 接口要求）
+sha1_smol = "1"
+# 音频元数据解析：ID3(mp3)/Vorbis(flac) 内嵌歌词与封面提取（云盘歌曲元数据来源）
+lofty = "0.22"
+# 响应字节解码：gzip 魔数强制解压（部分服务器无视协商头硬性压缩）
+flate2 = "1"
+# 非 UTF-8 响应字符集解码（GBK 等中文站点常态），配合 http_get 文本通道
+encoding_rs = "0.8"
 # 图片缩略图：桌面文件中心把图片读成 base64 data URL
 base64 = "0.22"
 # 位图解码缩放：缩略图先缩到最长边 128px 再编码（按需特性，控制依赖体积）
@@ -47,4 +55,8 @@ windows = { version = "0.61", features = [
   "Win32_Graphics_Dwm",
   "Win32_Graphics_Gdi",
   "Win32_Storage_FileSystem",
+  # 开机自启：HKCU Run 注册表键（autostart.rs）
+  "Win32_System_Registry",
+  # 单实例互斥量：防「开机自启 + 手动启动」双实例重复嵌入桌面
+  "Win32_System_Threading",
 ] }

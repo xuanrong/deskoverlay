@@ -10,7 +10,10 @@
 // 发布版使用 Windows GUI 子系统，避免安装后弹出命令窗口
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod autostart;
+mod aliyundrive;
 mod desktop_inject;
+mod downloader;
 mod file_index;
 mod plugin_pkg;
 mod sedentary;
@@ -26,6 +29,9 @@ use std::sync::{Mutex, OnceLock};
 use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_dialog::DialogExt;
 use serde::Serialize;
+use windows::core::w;
+use windows::Win32::Foundation::{GetLastError, ERROR_ALREADY_EXISTS};
+use windows::Win32::System::Threading::CreateMutexW;
 use windows::Win32::UI::WindowsAndMessaging::{
     GetSystemMetrics, SetWindowPos, SM_CXSCREEN, SM_CYSCREEN, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
 };
@@ -182,8 +188,11 @@ fn show_reminder_win(win: &tauri::WebviewWindow, payload: serde_json::Value, emi
     // 展示即武装硬超时兜底（旧看门狗因世代变更自动退出）
     spawn_reminder_watchdog(win);
     if emit {
-        let _ = win.emit("show-reminder", payload);
+        let _ = win.emit("show-reminder", payload.clone());
     }
+    // 展示确认：前端（reminders.js）据此才写「当日已触发」标记——
+    // 之前是标记先行、弹窗失败即当天静默丢失（用户反馈：到点没弹提醒）。
+    let _ = win.emit("reminder-shown", payload);
 }
 
 /// 显示置顶提醒窗口（系统级：盖住浏览器等其他应用）。
@@ -217,7 +226,7 @@ pub fn present_reminder(app: &tauri::AppHandle, icon: &str, title: &str, message
         // 透明窗口（卡片 opacity:0，视觉上等同没有弹窗），却在右上角持续拦截鼠标消息。
         // 显示时机统一收敛到 reminder_ready（拿到内容后 show + emit），
         // 使"窗口可见"与"有内容"永远同时发生。
-        *PENDING_REMINDER.lock().unwrap() = Some(payload);
+        *PENDING_REMINDER.lock().unwrap() = Some(payload.clone());
         let result = WebviewWindowBuilder::new(&app, "reminder", WebviewUrl::App("reminder.html".into()))
             .title("提醒")
             .inner_size(340.0, 130.0)
@@ -236,6 +245,23 @@ pub fn present_reminder(app: &tauri::AppHandle, icon: &str, title: &str, message
             // 极端并发下窗口已被另一侧建成：保留 PENDING，交由该窗口的
             // reminder_ready 取用（内容以最后写入者为准），避免两边都推空。
             log_diag("reminder", "窗口创建失败（疑似并发已存在），保留暂存内容待复用");
+        } else {
+            // 建窗成功：等待页面就绪握手（reminder_ready）后展示并 emit reminder-shown。
+            // 若页面加载失败（reminder_ready 永不到来），15s 看门狗销毁窗口并 emit reminder-failed，
+            // 前端据此撤销「当日已触发」标记，下一分钟重试。
+            let app2 = app.clone();
+            let payload2 = payload.clone();
+            std::thread::spawn(move || {
+                for _ in 0..30 {
+                    std::thread::sleep(std::time::Duration::from_millis(500));
+                    if REMINDER_PAGE_READY.load(Ordering::SeqCst) {
+                        let _ = app2.emit("reminder-shown", payload2);
+                        return;
+                    }
+                }
+                log_diag("reminder", "页面 15s 未就绪，emit reminder-failed");
+                let _ = app2.emit("reminder-failed", payload2);
+            });
         }
     });
 }
@@ -258,7 +284,9 @@ fn reminder_ready(app: tauri::AppHandle) {
     };
     match PENDING_REMINDER.lock().unwrap().take() {
         // 有内容：先定位显示再推送（show_reminder_win 内部会武装硬超时兜底）
-        Some(p) => show_reminder_win(&win, p, true),
+        Some(p) => {
+            show_reminder_win(&win, p, true);
+        }
         // 无内容：本页没有可展示的东西（提醒页被重载，或内容已被并发路径消费）。
         // 绝不能留一个"已显示但无内容"的窗口 —— 它会静默拦截右上角的鼠标（含右键）。
         None => {
@@ -500,7 +528,6 @@ fn show_lyric(app: tauri::AppHandle) {
                 let _ = win.set_ignore_cursor_events(locked);
                 // 显示交给 lyric_ready（页面 listener 就绪后 show + emit），
                 // 保证「可见」与「有内容」同时发生。
-                log_diag("lyric", "歌词窗口已创建，等待 lyric_ready 握手后显示");
             }
             None => {
                 log_diag("lyric", "歌词窗口创建失败");
@@ -1073,11 +1100,50 @@ fn build_headers(req: ureq::Request, headers: &Option<serde_json::Value>) -> ure
     if let Some(h) = headers.as_ref().and_then(|v| v.as_object()) {
         for (k, v) in h {
             if let Some(s) = v.as_str() {
+                // accept-encoding 必须剥离：插件手动透传 gzip 时 ureq 不做透明解压
+                //（只解压自己协商的头），响应保持压缩字节 → read_to_string 报
+                // "stream did not contain valid UTF-8"。剥掉后由 ureq（gzip feature）
+                // 自动协商并解压，文本通道始终拿到明文。
+                if k.eq_ignore_ascii_case("accept-encoding") {
+                    continue;
+                }
                 r = r.set(k, s);
             }
         }
     }
     r
+}
+
+/// 响应字节 → 文本（http_get / http_post 共用）。
+/// 1) gzip 魔数(1f 8b)强制解压——部分服务器无视协商头硬性返回压缩字节；
+/// 2) 严格 UTF-8 优先；失败时按 Content-Type charset 解码，未声明则回退 GBK
+///    （中文站点非 UTF-8 响应的常态），避免 "stream did not contain valid UTF-8"。
+fn decode_response(resp: ureq::Response) -> Result<String, String> {
+    let content_type = resp.header("Content-Type").unwrap_or("").to_string();
+    let mut bytes = Vec::new();
+    resp.into_reader()
+        .take(5 * 1024 * 1024)
+        .read_to_end(&mut bytes)
+        .map_err(|e| e.to_string())?;
+    if bytes.len() > 2 && bytes[0] == 0x1f && bytes[1] == 0x8b {
+        let mut gz = flate2::read::GzDecoder::new(&bytes[..]);
+        let mut raw = Vec::new();
+        gz.read_to_end(&mut raw)
+            .map_err(|e| format!("gzip 解压失败：{e}"))?;
+        bytes = raw;
+    }
+    if let Ok(s) = std::str::from_utf8(&bytes) {
+        return Ok(s.to_string());
+    }
+    let charset = content_type
+        .split(';')
+        .find_map(|p| p.trim().strip_prefix("charset=").map(|c| c.trim_matches('"').trim().to_string()))
+        .unwrap_or_default();
+    let enc = encoding_rs::Encoding::for_label(charset.as_bytes())
+        .or_else(|| encoding_rs::Encoding::for_label(b"gbk"))
+        .unwrap_or(encoding_rs::UTF_8);
+    let (text, _encoding, _had_errors) = enc.decode(&bytes);
+    Ok(text.into_owned())
 }
 
 /// HTTP GET 代理：绕过 WebView 跨域限制，供音乐音源插件请求第三方接口。
@@ -1093,12 +1159,7 @@ fn http_get_blocking(url: String, headers: Option<serde_json::Value>) -> Result<
         .timeout(std::time::Duration::from_secs(15))
         .call()
         .map_err(|e| e.to_string())?;
-    let mut body = String::new();
-    resp.into_reader()
-        .take(5 * 1024 * 1024)
-        .read_to_string(&mut body)
-        .map_err(|e| e.to_string())?;
-    Ok(body)
+    decode_response(resp)
 }
 
 #[tauri::command]
@@ -1118,12 +1179,7 @@ fn http_post_blocking(url: String, body: String, headers: Option<serde_json::Val
         .timeout(std::time::Duration::from_secs(15))
         .send_string(&body)
         .map_err(|e| e.to_string())?;
-    let mut out = String::new();
-    resp.into_reader()
-        .take(5 * 1024 * 1024)
-        .read_to_string(&mut out)
-        .map_err(|e| e.to_string())?;
-    Ok(out)
+    decode_response(resp)
 }
 
 #[tauri::command]
@@ -1131,6 +1187,32 @@ async fn http_post(url: String, body: String, headers: Option<serde_json::Value>
     tauri::async_runtime::spawn_blocking(move || http_post_blocking(url, body, headers))
         .await
         .map_err(|e| format!("网络任务执行失败: {e}"))?
+}
+
+/// HTTP GET 二进制代理：返回 base64 编码的响应体。
+/// 供音源插件 `responseType: "arraybuffer"` 请求使用（如咪咕 VIP 加密取流），
+/// 二进制不能走 http_get 文本通道（UTF-8 解码会损坏/报错）。
+#[tauri::command]
+async fn http_get_bytes(url: String, headers: Option<serde_json::Value>) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let u = url.trim();
+        if !(u.starts_with("http://") || u.starts_with("https://")) {
+            return Err("仅支持 http/https 地址".to_string());
+        }
+        let resp = build_headers(agent().get(u), &headers)
+            .timeout(std::time::Duration::from_secs(15))
+            .call()
+            .map_err(|e| e.to_string())?;
+        let mut bytes = Vec::new();
+        resp.into_reader()
+            .take(5 * 1024 * 1024)
+            .read_to_end(&mut bytes)
+            .map_err(|e| e.to_string())?;
+        use base64::Engine as _;
+        Ok(base64::engine::general_purpose::STANDARD.encode(bytes))
+    })
+    .await
+    .map_err(|e| format!("网络任务执行失败: {e}"))?
 }
 
 /// 抓取指定 http(s) 地址响应的原始字节（上限 2MB）。供 favicon 图标读取。
@@ -1915,6 +1997,15 @@ fn hide_lock(app: tauri::AppHandle) {
 }
 
 fn main() {
+    // 单实例互斥（必须最先执行，在任何建窗之前）：
+    // 「开机自启 + 用户手动双击」会拉起第二实例，主窗口直接嵌入 WorkerW，
+    // 双实例会双重注入桌面互相干扰。命中已有实例 → 静默退出（无窗口闪烁）。
+    // 互斥句柄随 main 作用域存活到进程退出，无需手动释放。
+    let _instance_mutex = unsafe { CreateMutexW(None, false, w!("DeskOverlay.SingleInstance")) };
+    if _instance_mutex.is_ok() && unsafe { GetLastError() } == ERROR_ALREADY_EXISTS {
+        std::process::exit(0);
+    }
+
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(sedentary::new_sedentary_state())
@@ -1934,8 +2025,21 @@ fn main() {
             // 全盘文件名索引：后台线程建索引，快照秒恢复，供文件中心全盘搜索
             file_index::start_index(app.handle().clone());
 
-            // 嵌入桌面 WorkerW（成为桌面本身），再显示
-            if let Some(win) = app.get_webview_window("main") {
+            // 嵌入桌面 WorkerW（成为桌面本身），再显示。
+            // 开机自启（--autostart）：登录瞬间桌面可能尚未就绪，延迟后再嵌入，
+            // 避免嵌入失败——这是自启相对手动启动唯一的差异化路径；其余初始化照常。
+            if autostart::launched_by_autostart() {
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    std::thread::sleep(std::time::Duration::from_millis(1200));
+                    if let Some(win) = handle.get_webview_window("main") {
+                        if let Ok(hwnd) = win.hwnd() {
+                            desktop_inject::embed_in_desktop(hwnd);
+                        }
+                        let _ = win.show();
+                    }
+                });
+            } else if let Some(win) = app.get_webview_window("main") {
                 if let Ok(hwnd) = win.hwnd() {
                     desktop_inject::embed_in_desktop(hwnd);
                 }
@@ -1943,7 +2047,7 @@ fn main() {
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![quit_app, show_reminder, hide_reminder, reminder_ready, show_lyric, hide_lyric, lyric_ready, lyric_sync, lyric_set_locked, lyric_move, lyric_pos_commit, lyric_apply_cfg, lyric_commit_display, lyric_menu_toggle, lyric_menu_ready, read_text_file, export_text_file, run_wasm_backend, install_plugin_package, build_wasm_backend, http_get, http_post, fetch_favicon, load_state, save_state, backup_data, restore_data, get_theme, broadcast_theme, read_bg_data_url, prepare_wallpaper, list_desktop_files, image_thumbnail, open_file, open_path, pick_folder, pick_file, reveal_file, delete_file, rename_file, reveal_path, delete_path, rename_path, show_lock, hide_lock, file_index::index_status, file_index::search_files, file_index::rebuild_index, sys_bridge::start_system_sampling, sys_bridge::stop_system_sampling, sys_bridge::check_media_playing, sys_bridge::set_lock_monitor_enabled, sedentary::set_sedentary_config])
+        .invoke_handler(tauri::generate_handler![quit_app, autostart::autostart_status, autostart::set_autostart, downloader::download_start, downloader::download_cancel, downloader::downloaded_list, downloader::downloaded_delete, downloader::local_track_assets, aliyundrive::ad_auth_bind, aliyundrive::ad_auth_status, aliyundrive::ad_unbind, aliyundrive::ad_drive_info, aliyundrive::ad_list, aliyundrive::ad_search, aliyundrive::ad_play_url, aliyundrive::ad_upload_start, aliyundrive::ad_upload_cancel, aliyundrive::ad_upload_list, aliyundrive::ad_track_meta, show_reminder, hide_reminder, reminder_ready, show_lyric, hide_lyric, lyric_ready, lyric_sync, lyric_set_locked, lyric_move, lyric_pos_commit, lyric_apply_cfg, lyric_commit_display, lyric_menu_toggle, lyric_menu_ready, read_text_file, export_text_file, run_wasm_backend, install_plugin_package, build_wasm_backend, http_get, http_get_bytes, http_post, fetch_favicon, load_state, save_state, backup_data, restore_data, get_theme, broadcast_theme, read_bg_data_url, prepare_wallpaper, list_desktop_files, image_thumbnail, open_file, open_path, pick_folder, pick_file, reveal_file, delete_file, rename_file, reveal_path, delete_path, rename_path, show_lock, hide_lock, file_index::index_status, file_index::search_files, file_index::rebuild_index, sys_bridge::start_system_sampling, sys_bridge::stop_system_sampling, sys_bridge::check_media_playing, sys_bridge::set_lock_monitor_enabled, sedentary::set_sedentary_config])
         .run(tauri::generate_context!())
         .expect("DeskOverlay 运行失败");
 }
