@@ -2,6 +2,7 @@
 // 启动时 loadState() 从 Rust 读取；修改后调 saveState() 持久化。
 import { Store } from "./store.js";
 import { DEFAULT_REMINDERS } from "./config.js";
+import { ymd, uid } from "./utils.js";
 
 export const state = {
   currentModule: "dashboard",
@@ -55,10 +56,21 @@ export const state = {
     pos: { xRatio: 0.5, yRatio: 0.92, monitorIndex: 0 }, // 相对工作区的比例位置
   },
   theme: undefined, // 主题配置（见 js/theme.js DEFAULT_THEME；undefined = 升级前老数据，启动时归一化补默认）
+  eyeCare: {
+    // 全局护眼（改显卡 Gamma 查找表，对整机所有应用生效 —— 见 src-tauri/src/eyecare.rs）
+    enabled: false,
+    mode: "manual", // manual=固定色温 | schedule=按时段自动切换
+    kelvin: 4500, // 目标色温 K（2000–6500）；越低越暖。manual 模式使用
+    brightness: 90, // 整体亮度百分比（50–100）
+    contrast: 95, // 对比度百分比（80–100）
+    // —— schedule 模式 ——
+    dayKelvin: 5500, // 白天色温
+    nightKelvin: 3400, // 夜间色温
+    from: "22:00", // 夜间时段起
+    to: "07:00", // 夜间时段止
+    transitionMin: 30, // 切换点前的过渡时长（分钟），避免突兀变黄
+  },
 };
-
-let ready = false;
-const readyQueue = [];
 
 /// 异步初始化：从 Rust 读取状态并合并进单例。
 export async function loadState() {
@@ -74,7 +86,7 @@ export async function loadState() {
   if (!Array.isArray(state.notes)) state.notes = [];
   state.notes = state.notes.filter((n) => n && typeof n === "object" && typeof n.content === "string");
   state.notes.forEach((n) => {
-    if (typeof n.id !== "string" || !n.id) n.id = "n_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8);
+    if (typeof n.id !== "string" || !n.id) n.id = uid("n_");
     if (typeof n.title !== "string") n.title = "";
     if (typeof n.pinned !== "boolean") n.pinned = false;
     if (typeof n.createdAt !== "number") n.createdAt = Date.now();
@@ -128,8 +140,7 @@ export async function loadState() {
   pm.done = Math.max(0, Math.round(Number(pm.done)) || 0);
   pm.minutes = Math.max(0, Math.round(Number(pm.minutes)) || 0);
   // 跨日：统计归零（避免昨日数字带到今天）
-  const nowD = new Date();
-  const todayKey = `${nowD.getFullYear()}-${String(nowD.getMonth() + 1).padStart(2, "0")}-${String(nowD.getDate()).padStart(2, "0")}`;
+  const todayKey = ymd();
   if (pm.date !== todayKey) { pm.date = todayKey; pm.done = 0; pm.minutes = 0; }
   if (!Array.isArray(state.musicSources)) state.musicSources = [];
   if (!Array.isArray(state.favorites)) state.favorites = [];
@@ -161,6 +172,29 @@ export async function loadState() {
   // 导航浏览状态：结构校验
   if (!state.navState || typeof state.navState !== "object" || Array.isArray(state.navState)) {
     state.navState = {};
+  }
+  // 全局护眼：结构校验。
+  // 范围与 Rust 侧 set_eyecare_config 的 clamp 保持一致（双重保险：
+  // 老数据/手改 state.json 传越界值时，前端先收敛，后端再兜一层）。
+  if (!state.eyeCare || typeof state.eyeCare !== "object" || Array.isArray(state.eyeCare)) state.eyeCare = {};
+  {
+    const ec = state.eyeCare;
+    if (typeof ec.enabled !== "boolean") ec.enabled = false;
+    if (!["manual", "schedule"].includes(ec.mode)) ec.mode = "manual";
+    const ecClamp = (v, lo, hi, dflt) => {
+      const n = Math.round(Number(v));
+      return Number.isFinite(n) && n >= lo && n <= hi ? n : dflt;
+    };
+    ec.kelvin = ecClamp(ec.kelvin, 2000, 6500, 4500);
+    ec.brightness = ecClamp(ec.brightness, 50, 100, 90);
+    ec.contrast = ecClamp(ec.contrast, 80, 100, 95);
+    ec.dayKelvin = ecClamp(ec.dayKelvin, 2000, 6500, 5500);
+    ec.nightKelvin = ecClamp(ec.nightKelvin, 2000, 6500, 3400);
+    ec.transitionMin = ecClamp(ec.transitionMin, 0, 180, 30);
+    // 时刻格式校验：与 Rust 侧 parse_hhmm 的容错一致，非法值回落默认
+    const HM = /^([01]\d|2[0-3]):[0-5]\d$/;
+    if (typeof ec.from !== "string" || !HM.test(ec.from)) ec.from = "22:00";
+    if (typeof ec.to !== "string" || !HM.test(ec.to)) ec.to = "07:00";
   }
   // 播放状态：结构校验
   if (!state.playback || typeof state.playback !== "object") {
@@ -210,15 +244,6 @@ export async function loadState() {
   ly.pos.xRatio = Math.max(0, Math.min(1, num(ly.pos.xRatio, 0.5)));
   ly.pos.yRatio = Math.max(0, Math.min(1, num(ly.pos.yRatio, 0.92)));
   ly.pos.monitorIndex = Math.max(0, Math.round(num(ly.pos.monitorIndex, 0)));
-  ready = true;
-  readyQueue.forEach((fn) => fn());
-  readyQueue.length = 0;
-}
-
-/// 状态就绪后执行（用于需要等待初始化完成的场景）。
-export function onReady(fn) {
-  if (ready) fn();
-  else readyQueue.push(fn);
 }
 
 // 300ms 防抖：合并短时间内的连续保存（操作记录/播放状态/设置变更等），减少磁盘写入频率

@@ -1,11 +1,13 @@
-// 系统设置视图：面向应用偏好设置 + 外观主题 + 插件管理 + 隐私锁定 + 备份恢复 + 关于信息。持久化到 state.settings / state.theme / state.lock / state.plugins。
+// 系统设置视图：偏好 / 外观主题 / 插件 / 隐私锁定 / 备份恢复 / 关于。持久化到 state.settings / state.theme / state.lock / state.plugins。
 import { state, saveState, loadState } from "../state.js";
 import { invoke } from "../bus.js";
-import { esc, showDialog } from "./common.js";
+import { showDialog } from "./common.js";
+import { esc } from "../utils.js";
 import { getPlugins, addPlugin, removePlugin } from "../plugins.js";
 import { pushLockEnabled } from "../lock.js";
 import { Theme, ACCENT_PRESETS, BUILTIN_SKINS, computeAccent } from "../theme.js";
 import { toast } from "../toast.js";
+import { setEyeCare, restoreNativeColor, getEyeCareStatus, onEyeCareChange } from "../eyeCare.js";
 
 // hex(#rrggbb) → [h, s, l]（s/l 0-100），供自定义主题色取色器使用
 function hexToHsl(hex) {
@@ -22,6 +24,30 @@ function hexToHsl(hex) {
   const l = (max + min) / 2;
   const s = d === 0 ? 0 : d / (1 - Math.abs(2 * l - 1));
   return [h, Math.round(s * 100), Math.round(l * 100)];
+}
+
+// ---- 全局护眼预设 ----
+// 亮度与对比度随色温同步下降 —— 只调色温而不压亮度，暗环境里仍会刺眼。
+const EC_PRESETS = [
+  { id: "office", name: "办公", kelvin: 5500, brightness: 95, contrast: 98, desc: "日间轻度调节，色彩偏差小" },
+  { id: "read", name: "阅读", kelvin: 4500, brightness: 90, contrast: 95, desc: "长时间文档处理" },
+  { id: "night", name: "夜间", kelvin: 3400, brightness: 82, contrast: 92, desc: "睡前 2 小时使用" },
+  { id: "late", name: "深夜", kelvin: 2700, brightness: 70, contrast: 88, desc: "深夜加班，蓝光最低" },
+];
+
+// 预设缩略图：用色温对应的暖色渐变模拟实际观感
+function ecPresetPreview(p) {
+  const warmth = 1 - (p.kelvin - 2000) / 4500; // 0（冷）→ 1（暖）
+  const r = 230, g = Math.round(240 - warmth * 70), b = Math.round(245 - warmth * 165);
+  return `linear-gradient(160deg, rgb(${r},${g},${b}), rgb(${Math.round(r - 30)},${Math.round(g - 45)},${Math.round(b - 60)}))`;
+}
+function ecPresetAccent(p) {
+  const warmth = 1 - (p.kelvin - 2000) / 4500;
+  return `rgb(255, ${Math.round(190 - warmth * 90)}, ${Math.round(120 - warmth * 80)})`;
+}
+function isEcPresetActive(p) {
+  const ec = state.eyeCare;
+  return !!ec && ec.kelvin === p.kelvin && ec.brightness === p.brightness && ec.contrast === p.contrast;
 }
 
 export function renderSettings(view) {
@@ -257,6 +283,106 @@ export function renderSettings(view) {
       </div>
 
       <div class="set-panel">
+        <div class="sec-title">护眼（全局）</div>
+        <div class="set-row">
+          <div class="set-info">
+            <div class="set-name">全局护眼模式</div>
+            <div class="set-desc">调节显卡 Gamma 输出，对整机所有应用生效（含全屏视频、游戏）；关闭后精确还原原色</div>
+          </div>
+          <label class="set-toggle"><input type="checkbox" id="ec-enable" ${state.eyeCare?.enabled ? "checked" : ""} /><span></span></label>
+        </div>
+
+        <div class="set-row" style="flex-direction:column;align-items:stretch">
+          <div class="set-info"><div class="set-name">预设</div><div class="set-desc">一键套用色温档位，仍可继续微调</div></div>
+          <div class="th-skins" id="ec-presets">
+            ${EC_PRESETS.map((p) => `
+              <div class="th-skin${isEcPresetActive(p) ? " active" : ""}" data-id="${p.id}" title="${esc(p.desc)}">
+                <div class="ts-preview" style="background:${ecPresetPreview(p)}">
+                  <span class="ts-dot" style="background:${ecPresetAccent(p)}"></span>
+                </div>
+                <div class="ts-name"><span>${esc(p.name)}</span><span class="ts-check">✓</span></div>
+              </div>`).join("")}
+          </div>
+        </div>
+
+        <div class="set-row" style="flex-direction:column;align-items:stretch">
+          <div class="set-info"><div class="set-name">模式</div><div class="set-desc">固定色温，或按时间段自动在日/夜色温间切换</div></div>
+          <div class="seg-group" id="ec-mode">
+            <button data-v="manual" class="${state.eyeCare?.mode !== "schedule" ? "active" : ""}">固定色温</button>
+            <button data-v="schedule" class="${state.eyeCare?.mode === "schedule" ? "active" : ""}">按时段</button>
+          </div>
+        </div>
+
+        ${state.eyeCare?.mode === "schedule" ? `
+        <div class="set-row" style="flex-direction:column;align-items:stretch">
+          <div class="set-info"><div class="set-name">时段设置</div><div class="set-desc">夜间时段内使用夜间色温；切换点前 ${state.eyeCare?.transitionMin ?? 30} 分钟内平滑过渡，不会到点突变</div></div>
+          <div class="ec-sched">
+            <div class="ec-sched-row">
+              <span class="ec-sched-label">夜间时段</span>
+              <input type="time" id="ec-from" value="${esc(state.eyeCare?.from ?? "22:00")}" />
+              <span class="ec-sched-sep">→</span>
+              <input type="time" id="ec-to" value="${esc(state.eyeCare?.to ?? "07:00")}" />
+            </div>
+            <div class="ec-sched-row">
+              <span class="ec-sched-label">白天色温</span>
+              <input type="range" id="ec-day-k" min="2000" max="6500" step="100" value="${state.eyeCare?.dayKelvin ?? 5500}" />
+              <span class="th-range-val" id="ec-day-k-val">${state.eyeCare?.dayKelvin ?? 5500}K</span>
+            </div>
+            <div class="ec-sched-row">
+              <span class="ec-sched-label">夜间色温</span>
+              <input type="range" id="ec-night-k" min="2000" max="6500" step="100" value="${state.eyeCare?.nightKelvin ?? 3400}" />
+              <span class="th-range-val" id="ec-night-k-val">${state.eyeCare?.nightKelvin ?? 3400}K</span>
+            </div>
+            <div class="ec-sched-row">
+              <span class="ec-sched-label">过渡时长</span>
+              <input type="range" id="ec-trans" min="0" max="120" step="5" value="${state.eyeCare?.transitionMin ?? 30}" />
+              <span class="th-range-val" id="ec-trans-val">${state.eyeCare?.transitionMin ?? 30}分</span>
+            </div>
+          </div>
+        </div>` : ""}
+
+        ${state.eyeCare?.mode === "schedule" ? "" : `
+        <div class="set-row" style="flex-direction:column;align-items:stretch">
+          <div class="set-info"><div class="set-name">色温</div><div class="set-desc">数值越低越暖（蓝光越少）；建议日间 5500K、夜间 3400K 左右</div></div>
+          <div class="th-range">
+            <input type="range" id="ec-kelvin" min="2000" max="6500" step="100" value="${state.eyeCare?.kelvin ?? 4500}" />
+            <span class="th-range-val" id="ec-kelvin-val">${state.eyeCare?.kelvin ?? 4500}K</span>
+          </div>
+        </div>`}
+
+        <div class="set-row" style="flex-direction:column;align-items:stretch">
+          <div class="set-info"><div class="set-name">亮度</div><div class="set-desc">压低显卡输出亮度（显示器背光不变，故更护眼也更省电）</div></div>
+          <div class="th-range">
+            <input type="range" id="ec-bright" min="50" max="100" step="1" value="${state.eyeCare?.brightness ?? 90}" />
+            <span class="th-range-val" id="ec-bright-val">${state.eyeCare?.brightness ?? 90}%</span>
+          </div>
+        </div>
+
+        <div class="set-row" style="flex-direction:column;align-items:stretch">
+          <div class="set-info"><div class="set-name">对比度</div><div class="set-desc">收敛明暗反差，缓解长时间阅读的调节负担</div></div>
+          <div class="th-range">
+            <input type="range" id="ec-contrast" min="80" max="100" step="1" value="${state.eyeCare?.contrast ?? 95}" />
+            <span class="th-range-val" id="ec-contrast-val">${state.eyeCare?.contrast ?? 95}%</span>
+          </div>
+        </div>
+
+        <div class="set-row">
+          <div class="set-info">
+            <div class="set-name">恢复原色</div>
+            <div class="set-desc">立即还原显示器原始色彩并关闭护眼（修图、调色等需要准确色彩时使用）</div>
+          </div>
+          <button class="btn-ghost" id="ec-restore">恢复原色</button>
+        </div>
+
+        <div class="set-row" id="ec-status-row" hidden>
+          <div class="set-info">
+            <div class="set-name" id="ec-status-name">状态</div>
+            <div class="set-desc" id="ec-status-desc"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="set-panel">
         <div class="sec-title">备份与恢复</div>
         <div class="set-row">
           <div class="set-info">
@@ -298,7 +424,6 @@ export function renderSettings(view) {
         const want = autoChk.checked;
         try {
           await invoke("set_autostart", { enabled: want });
-          // 以回读的注册表实态回填，成功与否以实态为准
           const s = await invoke("autostart_status");
           autoChk.checked = !!(s && s.enabled);
           if (autoChk.checked === want) {
@@ -337,11 +462,10 @@ export function renderSettings(view) {
         }).catch(() => null);
         path = typeof picked === "string" && picked ? picked : null;
       } catch (_) { path = null; }
-      if (!path) return; // 取消选择
+      if (!path) return;
       await importPluginZip(path);
     });
 
-    // 测试媒体播放检测
     const mediaBtn = body.querySelector("#set-media-test");
     if (mediaBtn) {
       mediaBtn.addEventListener("click", async () => {
@@ -385,7 +509,6 @@ export function renderSettings(view) {
       });
     }
 
-    // 备份
     const backupBtn = body.querySelector("#set-backup");
     if (backupBtn) {
       backupBtn.addEventListener("click", async () => {
@@ -414,7 +537,6 @@ export function renderSettings(view) {
       });
     }
 
-    // 恢复
     const restoreBtn = body.querySelector("#set-restore");
     if (restoreBtn) {
       restoreBtn.addEventListener("click", async () => {
@@ -440,7 +562,6 @@ export function renderSettings(view) {
         restoreBtn.disabled = true;
         try {
           await invoke("restore_data", { zipPath });
-          // 重新加载状态
           await loadState();
           await showDialog({ title: "恢复完成", message: "数据已恢复，即将刷新页面以应用更改。", okText: "刷新", showCancel: false });
           location.reload();
@@ -453,7 +574,114 @@ export function renderSettings(view) {
       });
     }
 
-    // 移除插件
+    // -------------------- 护眼（全局）分区事件 --------------------
+    // 开关：immediate 跳过 80ms 节流 —— 开关需要即时反馈，拖滑杆才需要节流
+    const ecEnable = body.querySelector("#ec-enable");
+    if (ecEnable) {
+      ecEnable.addEventListener("change", () => {
+        setEyeCare({ enabled: ecEnable.checked }, { immediate: true });
+      });
+    }
+
+    // 预设卡片：整套替换色温/亮度/对比度，再刷新卡片高亮
+    body.querySelectorAll("#ec-presets .th-skin").forEach((card) => {
+      card.addEventListener("click", () => {
+        const p = EC_PRESETS.find((x) => x.id === card.dataset.id);
+        if (!p) return;
+        setEyeCare({ kelvin: p.kelvin, brightness: p.brightness, contrast: p.contrast }, { immediate: true });
+        renderBody(); // 预设高亮与滑杆位置都要同步
+      });
+    });
+
+    // 三条滑杆：input 实时预览（走节流）、change 立即落盘确认。
+    // 注意 change 时不能用 immediate=true 重推 —— 值已由 input 推过，
+    // 这里只需触发一次 saveState 确保落盘（setEyeCare 内部已含）。
+    const bindEcSlider = (id, valId, key, suffix, transform) => {
+      const el = body.querySelector(id);
+      const val = body.querySelector(valId);
+      if (!el) return;
+      el.addEventListener("input", () => {
+        const v = +el.value;
+        if (val) val.textContent = v + suffix;
+        setEyeCare({ [key]: transform ? transform(v) : v });
+      });
+      el.addEventListener("change", () => {
+        const v = +el.value;
+        setEyeCare({ [key]: transform ? transform(v) : v }, { immediate: true });
+        // 预设高亮可能因手动微调而变化，刷新卡片态
+        body.querySelectorAll("#ec-presets .th-skin").forEach((c) => {
+          const p = EC_PRESETS.find((x) => x.id === c.dataset.id);
+          c.classList.toggle("active", !!p && isEcPresetActive(p));
+        });
+      });
+    };
+    bindEcSlider("#ec-kelvin", "#ec-kelvin-val", "kelvin", "K");
+    bindEcSlider("#ec-bright", "#ec-bright-val", "brightness", "%");
+    bindEcSlider("#ec-contrast", "#ec-contrast-val", "contrast", "%");
+    // 时段模式的三条滑杆（仅在 schedule 模式下存在于 DOM）
+    bindEcSlider("#ec-day-k", "#ec-day-k-val", "dayKelvin", "K");
+    bindEcSlider("#ec-night-k", "#ec-night-k-val", "nightKelvin", "K");
+    bindEcSlider("#ec-trans", "#ec-trans-val", "transitionMin", "分");
+
+    // 模式切换：切到 schedule 时 kelvin 滑杆换成时段设置，需整块重渲染
+    body.querySelectorAll("#ec-mode button").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const mode = btn.dataset.v;
+        if (state.eyeCare.mode === mode) return;
+        setEyeCare({ mode }, { immediate: true });
+        renderBody();
+      });
+    });
+
+    // 时段起止时刻：time 输入 change 才落盘（拖动时间选择器会连续触发 input）
+    const ecFrom = body.querySelector("#ec-from");
+    const ecTo = body.querySelector("#ec-to");
+    if (ecFrom) ecFrom.addEventListener("change", () => setEyeCare({ from: ecFrom.value }, { immediate: true }));
+    if (ecTo) ecTo.addEventListener("change", () => setEyeCare({ to: ecTo.value }, { immediate: true }));
+
+    const ecRestore = body.querySelector("#ec-restore");
+    if (ecRestore) {
+      ecRestore.addEventListener("click", async () => {
+        await restoreNativeColor();
+        toast("已恢复显示器原始色彩");
+        renderBody();
+      });
+    }
+
+    // 状态行：区分「已开启且生效」与「已开启但未生效」（驱动屏蔽 / HDR 模式）。
+    // 这一行是必要的 —— 没有它，未生效时用户只看到开关是开的，无从判断问题所在。
+    const ecStatusRow = body.querySelector("#ec-status-row");
+    const ecStatusName = body.querySelector("#ec-status-name");
+    const ecStatusDesc = body.querySelector("#ec-status-desc");
+    if (ecStatusRow && ecStatusName && ecStatusDesc) {
+      const paintStatus = ({ config, status }) => {
+        if (!config?.enabled) { ecStatusRow.hidden = true; return; }
+        ecStatusRow.hidden = false;
+        if (!status) {
+          ecStatusName.textContent = "状态：查询中…";
+          ecStatusDesc.textContent = "";
+          return;
+        }
+        if (status.active) {
+          const eff = status.effectiveKelvin ?? status.kelvin;
+          const isSched = config.mode === "schedule";
+          ecStatusName.textContent = "状态：已生效";
+          const modeDesc = isSched
+            ? `按时段 · 当前 ${eff}K（日间 ${status.dayKelvin}K / 夜间 ${status.nightKelvin}K · ${status.from}–${status.to}）`
+            : `固定色温 ${eff}K`;
+          ecStatusDesc.textContent = `${modeDesc} · 亮度 ${Math.round(status.brightness * 100)}% · 对比度 ${Math.round(status.contrast * 100)}%`;
+        } else {
+          ecStatusName.textContent = "状态：已开启但未生效";
+          ecStatusDesc.textContent = status.error
+            ? String(status.error)
+            : "可能原因：显卡驱动屏蔽了 Gamma 调节、开启了 HDR、或远程桌面环境不支持";
+        }
+      };
+      const off = onEyeCareChange(paintStatus);
+      view.onDestroy(off);
+      paintStatus({ config: state.eyeCare, status: getEyeCareStatus() });
+    }
+
     body.querySelectorAll(".plugin-rm").forEach((btn) => {
       btn.addEventListener("click", () => {
         removePlugin(btn.dataset.path);
@@ -462,7 +690,6 @@ export function renderSettings(view) {
     });
 
     // -------------------- 外观分区事件 --------------------
-    // 主题方案（分段控件）
     body.querySelectorAll("#th-scheme button").forEach((btn) => {
       btn.addEventListener("click", async () => {
         await Theme.setScheme(btn.dataset.v);
@@ -470,7 +697,6 @@ export function renderSettings(view) {
       });
     });
 
-    // 皮肤画廊
     body.querySelectorAll(".th-skin").forEach((card) => {
       card.addEventListener("click", async () => {
         await Theme.applySkin(card.dataset.id);
@@ -478,7 +704,6 @@ export function renderSettings(view) {
       });
     });
 
-    // 主题色：预设色点
     body.querySelectorAll(".th-swatch").forEach((dot) => {
       dot.addEventListener("click", async () => {
         const p = ACCENT_PRESETS.find((x) => x.id === dot.dataset.id);
@@ -500,7 +725,6 @@ export function renderSettings(view) {
       });
     }
 
-    // 背景类型
     body.querySelectorAll("#th-bg-type button").forEach((btn) => {
       btn.addEventListener("click", async () => {
         await Theme.setBackground({ type: btn.dataset.v });
@@ -537,13 +761,11 @@ export function renderSettings(view) {
       });
       bgDim.addEventListener("change", () => Theme.setBackground({ dim: (+bgDim.value) / 100 }));
     }
-    // 背景纯色
     const bgColor = body.querySelector("#th-bg-color");
     if (bgColor) {
       bgColor.addEventListener("input", () => Theme.setBackground({ color: bgColor.value }, { persist: false }));
       bgColor.addEventListener("change", () => Theme.setBackground({ color: bgColor.value }));
     }
-    // 背景渐变
     const gFrom = body.querySelector("#th-bg-gfrom"), gTo = body.querySelector("#th-bg-gto"), gAngle = body.querySelector("#th-bg-gangle");
     const pushGradient = (persist) => Theme.setBackground({
       gradient: {
@@ -574,7 +796,6 @@ export function renderSettings(view) {
       blurSlider.addEventListener("change", () => Theme.setGlass({ blurMult: (+blurSlider.value) / 100 }));
     }
 
-    // 重置外观
     const resetBtn = body.querySelector("#th-reset");
     if (resetBtn) {
       resetBtn.addEventListener("click", async () => {

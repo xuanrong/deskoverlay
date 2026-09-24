@@ -2,8 +2,9 @@
 // 数据模型沿用 state.ideabox: { id, text, tag, ts }（按记录时间倒序呈现）
 // 自定义标签存于 state.ideaTags，统一用青色系。
 import { state, saveState } from "../state.js";
-import { esc, showDialog, fitTextarea } from "./common.js";
+import { showDialog, fitTextarea } from "./common.js";
 import { ICON_CLOSE } from "../icons.js";
+import { esc, uid, ymd, hhmm } from "../utils.js";
 
 // 随手记输入区最大自适应高度（超出后内部滚动）
 const INPUT_MAX_H = 200;
@@ -29,7 +30,6 @@ function tagColor(tag) {
 function tagText(tag) {
   return TAG_TEXT[tagKey(tag)];
 }
-// #hex → rgba(hex, alpha)
 function rgba(hex, a) {
   const n = parseInt(hex.slice(1), 16);
   return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
@@ -49,16 +49,13 @@ function tagCounts() {
 function fmtTime(ts) {
   const d = new Date(ts);
   if (isNaN(d)) return "";
-  const pad = (n) => String(n).padStart(2, "0");
-  const hhmm = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
   const now = new Date();
-  const sameDay = d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
-  if (sameDay) return `今天 ${hhmm}`;
+  const sameDay = ymd(d) === ymd(now);
   const sameYear = d.getFullYear() === now.getFullYear();
-  return `${sameYear ? "" : `${d.getFullYear()}-`}${d.getMonth() + 1}月${d.getDate()}日 ${hhmm}`;
+  if (sameDay) return `今天 ${hhmm(d)}`;
+  return `${sameYear ? "" : `${d.getFullYear()}-`}${d.getMonth() + 1}月${d.getDate()}日 ${hhmm(d)}`;
 }
 
-// 新增自定义标签
 async function promptAddTag() {
   const input = await showDialog({ title: "新增标签", okText: "添加", cancelText: "取消", showCancel: true, input: true, inputValue: "" });
   const t = (input || "").trim();
@@ -154,7 +151,7 @@ export function renderIdeabox(view) {
 
   let newTag = "想法"; // 随手记默认标签
   let currentFilter = "全部"; // 筛选：全部 或 具体标签
-  let query = ""; // 搜索关键字
+  let query = "";
 
   // 标签集合变化（新增/删除）后：若当前筛选项已被删除则回「全部」，再整体重绘
   function refreshAfterTagChange() {
@@ -213,7 +210,7 @@ export function renderIdeabox(view) {
       .filter((it) => currentFilter === "全部" || (it.tag || "想法") === currentFilter)
       .filter((it) => !kw || it.text.toLowerCase().includes(kw) || (it.tag || "").toLowerCase().includes(kw))
       .slice()
-      .sort((a, b) => (b.ts || 0) - (a.ts || 0)); // 最新在前
+      .sort((a, b) => (b.ts || 0) - (a.ts || 0));
 
     if (!list.length) {
       const base = (state.ideabox || []).length;
@@ -281,7 +278,7 @@ export function renderIdeabox(view) {
     const text = inputEl.value.trim();
     if (!text) { inputEl.focus(); return; }
     if (!Array.isArray(state.ideabox)) state.ideabox = [];
-    state.ideabox.push({ id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), text, tag: newTag, ts: Date.now() });
+    state.ideabox.push({ id: uid("i"), text, tag: newTag, ts: Date.now() });
     saveState();
     inputEl.value = "";
     fitTextarea(inputEl, INPUT_MAX_H); // 清空后高度回落
@@ -304,7 +301,6 @@ export function renderIdeabox(view) {
   });
   inputEl.addEventListener("input", () => fitTextarea(inputEl, INPUT_MAX_H));
 
-  // 搜索：输入后轻量重绘卡片墙
   let qTimer = 0;
   qEl.addEventListener("input", () => {
     clearTimeout(qTimer);

@@ -4,8 +4,7 @@
 import { state, saveState } from "../state.js";
 import { invoke } from "../bus.js";
 import { toast } from "../toast.js";
-
-const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+import { esc, uid, ymd, hhmm } from "../utils.js";
 
 // ─── marked.js 初始化 ───
 let _markedReady = false;
@@ -64,15 +63,12 @@ const SVG = {
 function fmtTime(ts) {
   const d = new Date(ts);
   const now = new Date();
-  const sameDay = d.toDateString() === now.toDateString();
-  const yesterday = new Date(now); yesterday.setDate(yesterday.getDate() - 1);
-  const sameYesterday = d.toDateString() === yesterday.toDateString();
-  const sameYear = d.getFullYear() === now.getFullYear();
-  const pad = (n) => String(n).padStart(2, "0");
-  if (sameDay) return `今天 ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-  if (sameYesterday) return `昨天 ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-  if (sameYear) return `${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const day = ymd(d);
+  if (day === ymd(now)) return `今天 ${hhmm(d)}`;
+  if (day === ymd(yesterday)) return `昨天 ${hhmm(d)}`;
+  return d.getFullYear() === now.getFullYear() ? day.slice(5) : day;
 }
 
 // ─── 笔记分组 ───
@@ -570,7 +566,6 @@ export function renderNotes(view) {
     if (remember && activeId) rememberMode(activeId, preview);
     syncFmtRow();
     if (preview) {
-      // 退出编辑前落盘
       if (activeId) { clearTimeout(saveTimer); saveCurrent(); }
       elTextarea.hidden = true;
       elPreview.hidden = false;
@@ -711,7 +706,7 @@ export function renderNotes(view) {
 
     const now = Date.now();
     const note = {
-      id: "n_" + now + "_" + Math.random().toString(36).slice(2, 8),
+      id: uid("n_"),
       title: "",
       content: "",
       pinned: false,

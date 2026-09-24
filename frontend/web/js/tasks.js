@@ -2,6 +2,7 @@
 // 操作共享 state.js 单例的 tasks 字段，持久化由 saveState 统一处理。
 import { Bus } from "./bus.js";
 import { state, saveState, pushRecentOp } from "./state.js";
+import { ymd, uid } from "./utils.js";
 
 function persist() {
   saveState();
@@ -11,11 +12,10 @@ function persist() {
 /// 待办完成时追加一条工作记录（类型：工作；日期：今天），随本次持久化一起落盘。
 function addWorkLog(text, tags = []) {
   if (!text || !text.trim()) return;
-  const d = new Date();
-  const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  const date = ymd();
   state.workLogs = state.workLogs || [];
   state.workLogs.push({
-    id: "wl" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
+    id: uid("wl"),
     date,
     type: "工作",
     text: `完成待办：${text.trim()}`,
@@ -29,7 +29,7 @@ export const Tasks = {
   add({ text, project = "", status = "pending", due = "", startDate = "", priority = "P2", tags = [] }) {
     if (!text || !text.trim()) return;
     state.tasks.unshift({
-      id: "t" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
+      id: uid("t"),
       text: text.trim(), project, status, due, startDate, priority, tags,
       done: status === "done",
       created: Date.now(),

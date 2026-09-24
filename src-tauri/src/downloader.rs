@@ -249,7 +249,6 @@ fn run_download(app: AppHandle, id: u64, url: String, filename: String, headers:
         Ok(target)
     })();
 
-    // 清理任务表
     if let Ok(mut m) = tasks().lock() {
         m.remove(&id);
     }

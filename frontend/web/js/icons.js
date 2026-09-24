@@ -22,7 +22,7 @@ export const ICON_SEARCH = `<svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="
 export const ICON_EDIT = `<svg viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>`;
 export const ICON_TRASH = `<svg viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/></svg>`;
 export const ICON_CHECK = `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M8 12.5l2.5 2.5L16 9.5"/></svg>`;
-export const ICON_PLUS = `<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>`;
+
 export const ICON_CLOSE = `<svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>`;
 export const ICON_BACK = `<svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>`;
 export const ICON_REFRESH = `<svg viewBox="0 0 24 24"><path d="M21 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L21 10"/></svg>`;
@@ -41,6 +41,8 @@ export const ICON_CALENDAR = `<svg viewBox="0 0 24 24"><rect x="3" y="5" width="
 export const ICON_BUILDING = `<svg viewBox="0 0 24 24"><path d="M4 21V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v16"/><path d="M16 9h4v12"/><path d="M4 21h16"/><path d="M8 8h2M8 12h2M8 16h2"/></svg>`;
 export const ICON_CLOCK = `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>`;
 export const ICON_BELL = `<svg viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>`;
+// 护眼（全局）：眼睛轮廓 + 虹膜。用于设置页与指令条
+export const ICON_EYE = `<svg viewBox="0 0 24 24"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3.2"/></svg>`;
 
 // 音乐播放模式
 export const ICON_SHUFFLE = `<svg viewBox="0 0 24 24"><path d="M16 3h5v5"/><path d="M4 20 20 4"/><path d="M21 15v6h-6"/><path d="M4 4l5 5"/></svg>`;
@@ -71,3 +73,5 @@ export const ICON_IDEA = `<svg viewBox="0 0 24 24"><path d="M9 18h6"/><path d="M
 
 // 音乐下载（向下箭头入托盘）
 export const ICON_DOWNLOAD = `<svg viewBox="0 0 24 24"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>`;
+// 云盘（音乐页左侧「喜欢」下方的固定入口）
+export const ICON_CLOUD = `<svg viewBox="0 0 24 24"><path d="M17.5 19a4.5 4.5 0 0 0 .42-8.98 6 6 0 0 0-11.7 1.7A4 4 0 0 0 6.5 19Z"/></svg>`;

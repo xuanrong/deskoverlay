@@ -1,6 +1,6 @@
 // 休息一下 — 小游戏大厅（游戏列表左侧 + 游戏区右侧）。
 // 新增游戏：在 views/games/ 写渲染函数，然后在 GAMES 数组注册即可。
-import { esc } from "./common.js";
+import { esc } from "../utils.js";
 import { renderSudoku } from "./games/sudoku.js";
 import { render2048 } from "./games/g2048.js";
 import { renderMinesweeper } from "./games/minesweeper.js";

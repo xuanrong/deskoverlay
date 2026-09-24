@@ -262,6 +262,17 @@ html.theme-transition * {
 .th-range input[type="range"] { width: 130px; accent-color: var(--accent); }
 .th-range .th-range-val { font-size: var(--text-xs); color: var(--text-dim); min-width: 38px; text-align: right; font-variant-numeric: tabular-nums; }
 
+/* 护眼 · 时段设置：标签 + 控件两列对齐，与 .th-range 视觉同族 */
+.ec-sched { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+.ec-sched-row { display: flex; align-items: center; gap: 8px; }
+.ec-sched-label { font-size: var(--text-xs); color: var(--text-dim); min-width: 64px; flex-shrink: 0; }
+.ec-sched-row input[type="range"] { width: 130px; accent-color: var(--accent); }
+.ec-sched-row input[type="time"] {
+  background: var(--bg-input); color: var(--text); border: 1px solid var(--border-input);
+  border-radius: var(--radius-sm); padding: 4px 8px; font: inherit; font-size: var(--text-sm);
+}
+.ec-sched-sep { color: var(--text-faint); font-size: var(--text-xs); }
+
 .th-preview { display: flex; gap: 8px; align-items: center; padding: 4px 0; }
 .th-preview .tp-btn { background: var(--accent); color: var(--accent-contrast); border: none; border-radius: 7px; padding: 4px 12px; font-size: var(--text-xs); font-weight: 600; }
 .th-preview .tp-link { color: var(--accent); font-size: var(--text-xs); text-decoration: underline; cursor: pointer; }
@@ -655,6 +666,65 @@ body.nav-collapsed .nav-btn { width: 100%; }
 .pomo-act:hover { background: var(--bg-hover-strong); }
 .pomo-act svg { width: 13px; height: 13px; display: block; }
 .mc-pomo[data-running="0"] .pomo-act { color: var(--success); }
+
+/* ============ 全局护眼胶囊（与 .mc-pomo 视觉同族） ============ */
+.mc-eye {
+  display: flex; align-items: center; gap: 10px;
+  height: 58px; flex: 0 0 auto;
+  padding: 8px 10px;
+  background: var(--bg-hover);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer; user-select: none;
+  transition: background var(--t-fast), border-color var(--t-fast);
+}
+.mc-eye:hover { background: var(--bg-hover-strong); border-color: var(--border-strong); }
+.mc-eye .eye-icon { display: flex; flex: 0 0 auto; }
+.mc-eye .eye-icon svg { width: 20px; height: 20px; stroke: var(--text-dim); stroke-width: 1.7; fill: none; }
+.mc-eye .eye-meta { display: flex; flex-direction: column; justify-content: center; gap: 3px; min-width: 0; }
+.mc-eye .eye-time {
+  font-size: 14px; font-weight: 600; color: var(--text-dim);
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+
+/* 开启态：图标与标题转为暖色，与「屏幕确实变暖」形成呼应 */
+.mc-eye[data-on="1"] { border-color: rgba(var(--amber-rgb, 210, 153, 34), 0.45); }
+.mc-eye[data-on="1"] .eye-icon svg { stroke: var(--amber); }
+.mc-eye[data-on="1"] .eye-time { color: var(--amber); }
+/* 已开启但未生效：边框转警示色，避免用户误以为已生效 */
+.mc-eye[data-inactive="1"] { border-color: rgba(var(--danger-rgb, 255, 123, 114), 0.55); }
+.mc-eye[data-inactive="1"] .eye-time { color: var(--danger); }
+
+/* 窄窗：胶囊收成「图标 + 状态」，文字隐藏进 title（与番茄钟同策略） */
+@media (max-width: 1180px) {
+  .mc-eye .eye-meta { display: none; }
+  .mc-eye { padding: 8px; }
+}
+
+/* 护眼浮层 */
+.eye-pop {
+  position: fixed; z-index: 60;
+  width: 260px; padding: 12px;
+  background: var(--bg-elevated); border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm); box-shadow: var(--shadow-soft);
+  backdrop-filter: blur(var(--blur-overlay));
+}
+.eye-pop-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.eye-pop-title { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 600; color: var(--text); }
+.eye-pop-title svg { width: 16px; height: 16px; stroke: var(--accent); stroke-width: 1.7; fill: none; }
+.eye-pop-state { font-size: 11px; color: var(--text-dim); }
+.eye-pop-mode { font-size: 11px; color: var(--text-dim); margin-bottom: 10px; line-height: 1.5; }
+.eye-pop-presets { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 10px; }
+.eye-preset {
+  background: var(--bg-panel-2); border: 1px solid var(--border);
+  border-radius: 6px; padding: 5px 0; font: inherit; font-size: 11px;
+  color: var(--text-dim); cursor: pointer; transition: all var(--t-fast);
+}
+.eye-preset:hover { color: var(--text); border-color: var(--border-strong); }
+.eye-preset.active { background: var(--accent-soft); border-color: rgba(var(--accent-rgb), 0.5); color: var(--accent); }
+.eye-pop-actions { display: flex; gap: 8px; }
+.eye-pop-actions .btn { flex: 1; font-size: 12px; padding: 6px 0; }
+.eye-pop-hint { margin-top: 9px; font-size: 10.5px; color: var(--text-faint); line-height: 1.5; }
 /* 窗口较窄：胶囊收成「进度环 + 播放键」，文字隐藏进 title */
 @media (max-width: 1180px) {
   .pomo-meta { display: none; }
@@ -877,7 +947,7 @@ body.nav-collapsed .nav-btn { width: 100%; }
   box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.15);
 }
 .rm-toast[data-type="general"] .rm-toast-icon svg { color: var(--blue); }
-.rm-toast-icon svg { display: block; width: 20px; height: 20px; }
+/* 图标尺寸/描边见文件末尾「字符图标 SVG 化」统一段 */
 
 .rm-toast-body {
   display: flex; flex-direction: column; gap: 6px;
@@ -1435,6 +1505,18 @@ html {
   border-color: var(--border);
   margin-bottom: 6px;
 }
+.online-src-fav svg {
+  width: 13px; height: 13px; vertical-align: -2px; margin-right: 6px;
+  fill: none; stroke: currentColor; stroke-width: 1.8;
+  stroke-linecap: round; stroke-linejoin: round;
+}
+/* 云盘入口：复用 fav 的固定位样式，但激活态走蓝色（区别于「喜欢」的红） */
+.online-src.online-src-ad.active {
+  background: rgba(var(--accent-rgb), 0.14);
+  border-color: rgba(var(--accent-rgb), 0.35);
+  color: var(--blue); font-weight: 600;
+}
+.online-src-fav.active svg { fill: currentColor; }
 .online-src-fav.active {
   background: rgba(var(--danger-rgb), 0.14);
   border-color: rgba(var(--danger-rgb), 0.35);
@@ -1960,15 +2042,6 @@ input[type="number"] { -moz-appearance: textfield; }
 input[type="number"]::-webkit-inner-spin-button,
 input[type="number"]::-webkit-outer-spin-button {
   -webkit-appearance: none; margin: 0;
-}
-
-/* 时间选择指示器图标：调暗，悬停偏蓝高亮 */
-input[type="time"]::-webkit-calendar-picker-indicator {
-  filter: invert(0.75); opacity: 0.7; cursor: pointer;
-  transition: opacity var(--t-fast), filter var(--t-fast);
-}
-input[type="time"]::-webkit-calendar-picker-indicator:hover {
-  opacity: 1; filter: invert(0.7) sepia(1) saturate(4) hue-rotate(175deg);
 }
 
 /* ====================== 自定义日期选择控件 ====================== */
@@ -3138,8 +3211,8 @@ kbd {
   stroke-linecap: round; stroke-linejoin: round;
 }
 
-/* ====================== 时间输入（深色原生控件） ====================== */
-input[type="time"] { color-scheme: dark; }
+/* ====================== 时间输入：原生指示器图标 ====================== */
+/* 图标常态调暗，悬停提亮并偏蓝高亮（color-scheme 见上方原生控件主题化） */
 input[type="time"]::-webkit-calendar-picker-indicator {
   opacity: 0.55;
   filter: invert(0.7) sepia(0.15) saturate(0.6);
@@ -3147,7 +3220,7 @@ input[type="time"]::-webkit-calendar-picker-indicator {
   transition: opacity var(--t-fast);
 }
 input[type="time"]::-webkit-calendar-picker-indicator:hover {
-  opacity: 1;
+  opacity: 1; filter: invert(0.7) sepia(1) saturate(4) hue-rotate(175deg);
 }
 
 /* ==================== 字符图标 SVG 化：统一尺寸/描边 ==================== */
@@ -3168,12 +3241,6 @@ input[type="time"]::-webkit-calendar-picker-indicator:hover {
   stroke-linecap: round; stroke-linejoin: round;
 }
 .mr-play svg.mr-album { stroke: currentColor; fill: none; stroke-width: 1.8; }
-.online-src-fav svg {
-  width: 13px; height: 13px; vertical-align: -2px;
-  fill: none; stroke: currentColor; stroke-width: 1.8;
-  stroke-linecap: round; stroke-linejoin: round;
-}
-.online-src-fav.active svg { fill: currentColor; }
 .q-random-on svg {
   width: 11px; height: 11px; vertical-align: -1.5px;
   fill: none; stroke: currentColor; stroke-width: 1.8;

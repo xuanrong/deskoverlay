@@ -1,6 +1,7 @@
 // 快捷访问模型 — 管理 分组(qaGroups) 与 快捷方式(quickAccess)。
 // 操作共享 state.js 单例字段，持久化由 saveState 统一处理。
 import { state, saveState } from "./state.js";
+import { uid } from "./utils.js";
 
 const DEFAULT_GROUP = "默认";
 
@@ -9,10 +10,10 @@ function persist() {
 }
 
 /// 确保至少存在一个可用分组；缺失时注入「默认」分组。
-export function ensureDefaultGroup() {
+function ensureDefaultGroup() {
   if (!Array.isArray(state.qaGroups)) state.qaGroups = [];
   if (!state.qaGroups.length) {
-    state.qaGroups.push({ id: "qag" + Date.now().toString(36), name: DEFAULT_GROUP });
+    state.qaGroups.push({ id: uid("qag"), name: DEFAULT_GROUP });
     persist();
   }
   return state.qaGroups;
@@ -28,7 +29,7 @@ export const QuickAccess = {
     ensureDefaultGroup();
     const gid = groupId && state.qaGroups.some((g) => g.id === groupId) ? groupId : state.qaGroups[0].id;
     const q = {
-      id: "qa" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
+      id: uid("qa"),
       type: type === "folder" || type === "file" ? type : "url",
       title: (title || "").trim() || t,
       target: t,
@@ -55,7 +56,7 @@ export const QuickAccess = {
   addGroup(name) {
     const n = (name || "").trim();
     if (!n) return;
-    state.qaGroups.push({ id: "qag" + Date.now().toString(36), name: n });
+    state.qaGroups.push({ id: uid("qag"), name: n });
     persist();
   },
 
@@ -72,7 +73,7 @@ export const QuickAccess = {
     const g = state.qaGroups.find((x) => x.id === groupId);
     if (!g) return;
     const keep = state.qaGroups.filter((x) => x.id !== groupId);
-    if (!keep.length) keep.push({ id: "qag" + Date.now().toString(36), name: DEFAULT_GROUP });
+    if (!keep.length) keep.push({ id: uid("qag"), name: DEFAULT_GROUP });
     state.qaGroups = keep;
     state.quickAccess.forEach((q) => { if (q.groupId === groupId) q.groupId = keep[0].id; });
     persist();

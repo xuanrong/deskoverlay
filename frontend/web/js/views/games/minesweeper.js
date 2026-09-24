@@ -83,7 +83,6 @@ export function renderMinesweeper(el) {
   function reveal(i) {
     if (over || win || revealed[i] || flags[i]) return;
     if (mines[i]) {
-      // 踩雷
       over = true;
       revealed = revealed.map((_, k) => revealed[k] || mines[k]);
       clearInterval(timer);
@@ -110,7 +109,6 @@ export function renderMinesweeper(el) {
       clearInterval(timer);
       msgEl.textContent = "🎉 胜利！全部排除";
       msgEl.classList.add("ok");
-      // 记录该难度最佳用时
       const prev = state.mineBest?.[diffKey];
       if (typeof prev !== "number" || seconds < prev) {
         state.mineBest[diffKey] = seconds;
@@ -120,7 +118,6 @@ export function renderMinesweeper(el) {
     }
   }
 
-  // 显示当前难度最佳用时
   function updateBest() {
     const b = state.mineBest?.[diffKey];
     bestEl.textContent = typeof b === "number" ? `${b}s` : "--";

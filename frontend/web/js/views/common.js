@@ -1,6 +1,5 @@
-// 视图公共工具：HTML 转义 / 通用弹窗 / 音源结果归一化。
-
-export const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+// 视图公共工具：通用弹窗 / 音源结果归一化。
+import { esc } from "../utils.js";
 
 // 通用弹窗（与工作台深色风格统一）：确认 / 输入 / 提示
 // opts: { title, message, okText, cancelText, danger, showCancel, input, inputValue }
@@ -34,16 +33,6 @@ export function showDialog({ title, message = "", okText = "确定", cancelText 
     });
     if (inputEl) { inputEl.focus(); inputEl.select(); }
   });
-}
-
-// 在 textarea 光标处插入一个换行，并保持焦点与光标位置（Ctrl/Cmd+Enter 换行统一入口）
-export function insertBreak(el) {
-  const s = el.selectionStart ?? el.value.length;
-  const e = el.selectionEnd ?? el.value.length;
-  el.value = el.value.slice(0, s) + "\n" + el.value.slice(e);
-  const pos = s + 1;
-  el.focus();
-  el.setSelectionRange(pos, pos);
 }
 
 // textarea 自适应高度：随内容增高，超过 maxPx 后内部滚动（空内容回到 CSS min-height）

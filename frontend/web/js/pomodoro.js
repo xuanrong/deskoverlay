@@ -4,7 +4,7 @@
 // 持久化：state.pomodoro（含 endsAt，重启后 running 状态可续跑）。
 import { state, saveState, pushRecentOp } from "./state.js";
 import { Heartbeat, invoke } from "./bus.js";
-import { esc } from "./views/common.js";
+import { esc, ymd, hhmm } from "./utils.js";
 
 // ---------- 常量与工具 ----------
 const C = 106.8; // 环周长（r=17）
@@ -26,9 +26,6 @@ const CFG = {
   goal: { min: 1, max: 30, step: 1, label: "每日目标" },
 };
 
-function todayKey(d = new Date()) {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
 function fmtMs(ms) {
   const s = Math.max(0, Math.ceil(ms / 1000));
   const m = Math.floor(s / 60);
@@ -36,13 +33,12 @@ function fmtMs(ms) {
 }
 
 // ---------- DOM ----------
-let pomoEl = null; // 胶囊容器
-let popEl = null; // 浮层容器
+let pomoEl = null;
+let popEl = null;
 let opened = false;
-let closePop = null;
 
 function ensureToday() {
-  const k = todayKey();
+  const k = ymd();
   if (state.pomodoro.date !== k) {
     state.pomodoro.date = k;
     state.pomodoro.done = 0;
@@ -59,11 +55,6 @@ function remainMs() {
 }
 function fullMs() {
   return MODE_MIN(state.pomodoro) * 60000;
-}
-// 已完成比例（0-1）
-function elapsedRatio() {
-  const full = fullMs();
-  return Math.min(1, Math.max(0, (full - remainMs()) / full));
 }
 function accent() {
   const p = state.pomodoro;
@@ -256,8 +247,7 @@ function notify(msg, kind) {
     invoke("show_reminder", { icon, title: `番茄钟 · ${title}`, message: msg }).catch(() => {});
     return;
   }
-  const now = new Date();
-  const timeStr = String(now.getHours()).padStart(2, "0") + ":" + String(now.getMinutes()).padStart(2, "0");
+  const timeStr = hhmm();
   const t = document.createElement("div");
   t.className = "rm-toast timing";
   t.setAttribute("data-type", "pomodoro");

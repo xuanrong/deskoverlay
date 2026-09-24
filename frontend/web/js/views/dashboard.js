@@ -6,7 +6,8 @@ import { STATUS_LABEL, TASK_STATUSES, PRIORITY_LABEL } from "../config.js";
 import { ICON_EXTERNAL, ICON_SEARCH, ICON_EDIT, ICON_TRASH, ICON_CHECK, ICON_BELL, ICON_FOLDER, ICON_PAPERCLIP, ICON_REFRESH } from "../icons.js";
 import { ICON_TOMATO } from "../pomodoro.js";
 import { FILE_CATEGORIES, FILE_ICONS } from "../filetypes.js";
-import { esc, showDialog } from "./common.js";
+import { showDialog } from "./common.js";
+import { esc } from "../utils.js";
 import { toast } from "../toast.js";
 import { createDatePicker } from "../datepicker.js";
 import { createSelect } from "../selectbox.js";
@@ -19,7 +20,6 @@ const LAYOUT_GRID_ICON = `<svg viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="
 const IMAGE_EXTS = new Set(["jpg", "jpeg", "png", "gif", "webp", "bmp", "svg", "ico"]);
 const THUMB_CACHE = new Map();
 
-// 全盘文件名搜索：走后端自建索引（file_index），子串匹配文件名，内存驻留即时返回
 function searchIcon(ext, isDir) {
   if (isDir) return ICON_FOLDER;
   for (const [cat, exts] of Object.entries(FILE_CATEGORIES)) if (exts.includes(ext)) return FILE_ICONS[cat] || ICON_PAPERCLIP;
@@ -68,7 +68,6 @@ function relTime(ts) {
   return `${day.getMonth() + 1}-${day.getDate()}`;
 }
 
-// 渲染单条最近操作记录
 const OP_VERB = {
   file_open: "打开", file_reveal: "定位", file_rename: "重命名", file_delete: "删除",
   task_create: "创建", task_update: "修改", task_delete: "删除",
@@ -90,14 +89,12 @@ function recentOpRow(op) {
     </div>`;
 }
 
-// 渲染最近操作列表（默认 5 条）
 function renderRecentOps() {
   const ops = (state.recentOps || []).slice(0, 5);
   if (!ops.length) return `<div class="dash-empty recent-empty">暂无操作记录</div>`;
   return ops.map(recentOpRow).join("");
 }
 
-// 全部操作记录弹窗
 function showRecentOpsDialog() {
   const ops = state.recentOps || [];
   const ov = document.createElement("div");
@@ -174,7 +171,6 @@ function renderTasksMini(el, view) {
     }
   }
 
-  // 根据指针 Y 坐标计算插入目标行
   function targetAt(y) {
     const rows = Array.from(listEl.querySelectorAll(".dash-task:not(.dragging)"));
     for (const r of rows) {
@@ -185,7 +181,6 @@ function renderTasksMini(el, view) {
     return null;
   }
 
-  // 松手：按指针位置落位
   function finishDrag() {
     const fromId = drag?.id;
     const moved = drag?.moved;
@@ -261,7 +256,6 @@ function renderTasksMini(el, view) {
       });
     }
 
-    // 插入线指示
     const t = targetAt(e.clientY);
     listEl.querySelectorAll(".dash-task").forEach((r) => r.classList.remove("drag-before", "drag-after"));
     if (t) listEl.querySelector(`[data-id="${t.id}"]`)?.classList.add(t.cls);
@@ -431,7 +425,6 @@ async function renderFilesBlock(el, view) {
     const layoutBtn = el.querySelector("#d-file-layout");
     layoutBtn?.addEventListener("click", () => {
       layout = layout === "grid" ? "list" : "grid";
-      // 持久化布局偏好
       if (!state.navState) state.navState = {};
       if (!state.navState.dashboard) state.navState.dashboard = {};
       state.navState.dashboard.layout = layout;

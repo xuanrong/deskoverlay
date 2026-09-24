@@ -2,7 +2,7 @@
 import { Bus } from "../bus.js";
 import { invoke } from "../bus.js";
 import { ICON_GEAR, ICON_CHIP, ICON_GLOBE, ICON_PLUG } from "../icons.js";
-import { esc } from "./common.js";
+import { esc } from "../utils.js";
 
 export function renderSystem(view) {
   view.header.style.display = "none";
@@ -72,12 +72,10 @@ export function renderSystem(view) {
     ctx.clearRect(0, 0, w, h);
     const n = data.length;
     if (n < 2) return;
-    // 折线 + 渐变填色
     ctx.strokeStyle = color; ctx.lineWidth = 1.5; ctx.lineJoin = "round"; ctx.lineCap = "round";
     const pad = 2;
     const x = (i) => pad + (i / (MAX_POINTS - 1)) * (w - pad * 2);
     const y = (v) => h - pad - (Math.min(100, Math.max(0, v)) / 100) * (h - pad * 2);
-    // 填充
     const grad = ctx.createLinearGradient(0, 0, 0, h);
     grad.addColorStop(0, color.replace(")", ",0.25)").replace("rgb", "rgba"));
     grad.addColorStop(1, "rgba(255,255,255,0)");
@@ -88,7 +86,6 @@ export function renderSystem(view) {
     ctx.fillStyle = grad;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.fill();
-    // 线条
     ctx.beginPath();
     for (let i = 0; i < n; i++) { if (i === 0) ctx.moveTo(x(i), y(data[i])); else ctx.lineTo(x(i), y(data[i])); }
     ctx.stroke();
@@ -130,7 +127,6 @@ export function renderSystem(view) {
     const lowBattery = powerStr === "BATTERY" && batt > 0 && batt <= 20;
     if (els.powerCard) els.powerCard.classList.toggle("low", lowBattery);
 
-    // 系统信息
     els.cpuName.textContent = output.cpuName || "--";
     const logic = output.logicalCores ?? output.cpuCores;
     els.cores.textContent = `${output.cpuCores ?? "-"} 物理 / ${logic ?? "-"} 逻辑`;

@@ -27,7 +27,6 @@ function ok(board, idx, v) {
   return true;
 }
 
-// 回溯生成一个完整解
 function generateSolution() {
   const board = Array(81).fill(0);
   (function fill(i) {
@@ -81,8 +80,7 @@ function dig(board, target) {
   return board;
 }
 
-// 生成指定难度的谜题，返回 { board(完整解), giver(谜题 81 数字 0=空) }
-export function generateSudoku(difficulty) {
+function generateSudoku(difficulty) {
   const board = dig(generateSolution(), DIFF_HOLES[difficulty] || 45);
   return board;
 }

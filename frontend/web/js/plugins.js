@@ -3,12 +3,13 @@
 // 插件不得超过 import 主应用内部模块——统一通过 api 使用核心能力，真正做到「工作台不含插件业务代码、插件可独立分发」。
 import { invoke } from "./bus.js";
 import { state, saveState } from "./state.js";
-import { esc, showDialog } from "./views/common.js";
+import { showDialog } from "./views/common.js";
+import { esc } from "./utils.js";
 import { VIEW_RENDERERS } from "./views.js";
 import { MODULES } from "./config.js";
 
 // 暴露给插件的运行时 API（均为工作台通用能力，不含任何业务）
-export const PLUGIN_API = { invoke, state, saveState, esc, showDialog };
+const PLUGIN_API = { invoke, state, saveState, esc, showDialog };
 
 const loaded = new Map(); // moduleId -> { def, path }
 const changed = []; // 插件集合变化 → 通知 app 重建导航

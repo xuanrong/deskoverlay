@@ -82,4 +82,11 @@ if (TAURI && TAURI.event && typeof TAURI.event.listen === "function") {
   TAURI.event
     .listen("lyric://display", (e) => Bus.emit("lyric://display", e.payload))
     .catch((err) => console.warn("[bridge] lyric://display 监听失败：", err));
+  // 护眼被外部程序覆盖 / 推送失败（守护线程发出）→ 桥接进 Bus，供状态行与胶囊刷新。
+  TAURI.event
+    .listen("eyecare-overridden", (e) => Bus.emit("eyecare-overridden", e.payload))
+    .catch((err) => console.warn("[bridge] eyecare-overridden 监听失败：", err));
+  TAURI.event
+    .listen("eyecare-failed", (e) => Bus.emit("eyecare-failed", e.payload))
+    .catch((err) => console.warn("[bridge] eyecare-failed 监听失败：", err));
 }

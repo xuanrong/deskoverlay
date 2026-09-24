@@ -14,7 +14,9 @@ import { initPomodoro, startPomodoroNow, ICON_TOMATO } from "./pomodoro.js";
 import { startLockController } from "./lock.js";
 import { initPlugins, onPluginsChanged } from "./plugins.js";
 import { Theme } from "./theme.js";
-import { ICON_CHECK, ICON_EXTERNAL } from "./icons.js";
+import { initEyeCare, toggleEyeCare, restoreNativeColor } from "./eyeCare.js";
+import { initEyeCareCapsule } from "./eyeCareCapsule.js";
+import { ICON_CHECK, ICON_EXTERNAL, ICON_EYE } from "./icons.js";
 import { toast } from "./toast.js";
 import { pillFor, lunarText, lunarShort, getDayEvents, holidayOf, workdayOf } from "./festivals.js";
 
@@ -99,6 +101,25 @@ function buildCommands() {
     sub: "25 分钟专注倒计时 · 顶栏胶囊可暂停",
     keywords: "pomodoro 番茄钟 专注 focus timer 计时",
     run: () => { if (startPomodoroNow()) toast("番茄钟已开始"); else toast("番茄钟正在进行中"); },
+  });
+  cmds.push({
+    id: "eyecare-toggle",
+    icon: ICON_EYE,
+    title: "护眼模式：开 / 关",
+    sub: "调节显卡输出色温，对整机所有应用生效",
+    keywords: "eyecare 护眼 蓝光 色温 gamma night 夜间 眼睛",
+    run: () => {
+      toggleEyeCare();
+      toast(state.eyeCare.enabled ? "护眼模式已开启" : "护眼模式已关闭");
+    },
+  });
+  cmds.push({
+    id: "eyecare-restore",
+    icon: ICON_EYE,
+    title: "护眼：恢复显示器原色",
+    sub: "立即还原原始色彩并关闭护眼（修图调色时用）",
+    keywords: "eyecare restore 护眼 恢复原色 关闭 修图",
+    run: () => { restoreNativeColor(); toast("已恢复显示器原始色彩"); },
   });
   cmds.push({
     id: "add-task",
@@ -331,4 +352,10 @@ loadState().then(async () => {
 
   // 隐私锁定：离开设定时长后全屏遮罩
   startLockController();
+
+  // 全局护眼：从 state 恢复配置并推送到 Rust（含守护线程的事件订阅）
+  initEyeCare();
+
+  // 护眼顶栏胶囊：必须放在 initPomodoro 之后，才能插到番茄钟胶囊右侧
+  initEyeCareCapsule();
 });

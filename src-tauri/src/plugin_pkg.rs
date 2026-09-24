@@ -60,7 +60,6 @@ pub fn install(app: &tauri::AppHandle, zip_path: &str) -> Result<serde_json::Val
         fs::write(&out, &buf).map_err(|e| format!("写出 {rel} 失败：{e}"))?;
     }
 
-    // 补充绝对路径
     if let Some(front) = manifest.get("frontend").and_then(|v| v.as_str()) {
         manifest["frontend"] = serde_json::json!(target.join(front).to_string_lossy());
     }
@@ -110,7 +109,6 @@ pub fn build_backend(backend_dir: &str) -> Result<String, String> {
             String::from_utf8_lossy(&out.stderr).trim()
         ));
     }
-    // 在 target 目录里找一个 *.wasm
     let release_dir = dir.join("target").join("wasm32-unknown-unknown").join("release");
     let mut wasm: Option<PathBuf> = None;
     if let Ok(rd) = fs::read_dir(&release_dir) {

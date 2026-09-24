@@ -1,8 +1,9 @@
 // 隐私锁定：监测空闲，离开设定时长后弹出全屏遮罩防偷看。
 // Tauri 正式环境使用系统级置顶窗口（lock.html）显示旋转星空；
-// 浏览器开发态回退到页面内浮层，视觉与 lock.html 保持一致。
+// 浏览器开发态回退到页面内浮层，视觉与 lock.html 保持一致（星空场景见 lockScene.js）。
 import { state } from "./state.js";
 import { Heartbeat, invoke } from "./bus.js";
+import { startSkyAnim } from "./lockScene.js";
 
 let lastActive = Date.now();
 let globalIdleMs = -1; // 由后端 system-idle 提供全局空闲毫秒（Tauri）
@@ -56,152 +57,6 @@ function injectLockStyles() {
   document.head.appendChild(style);
 }
 
-// 一套行星+星星参数，与 lock.html 的 lockpage.js 保持一致
-const LOCK_PLANETS = [
-  { rx: 0.20, ry: 0.106, speed: 0.02, dir: 1, r: 0.0125, a0: 0.0, colors: ["#9cc4e6", "#3d5f82", "#1f2c3d"], ring: false },
-  { rx: 0.26, ry: 0.138, speed: 0.015, dir: -1, r: 0.015, a0: 1.8, colors: ["#ffe6b8", "#d9a95e", "#7a4e1e"], ring: false },
-  { rx: 0.32, ry: 0.166, speed: 0.012, dir: 1, r: 0.017, a0: 3.6, colors: ["#5fb0dc", "#2d7fb8", "#11395e"], ring: false },
-  { rx: 0.37, ry: 0.192, speed: 0.0095, dir: -1, r: 0.014, a0: 5.1, colors: ["#f0a073", "#a05028", "#5a2a12"], ring: false },
-  { rx: 0.435, ry: 0.224, speed: 0.0075, dir: 1, r: 0.023, a0: 1.1, colors: ["#f0d4a4", "#c48a5a", "#8a5a2a"], ring: false },
-  { rx: 0.50, ry: 0.255, speed: 0.006, dir: -1, r: 0.021, a0: 4.4, colors: ["#f2e6c2", "#c9ad7a", "#7a5c30"], ring: true },
-  { rx: 0.565, ry: 0.286, speed: 0.005, dir: 1, r: 0.016, a0: 2.4, colors: ["#b8ecec", "#5aa8b8", "#2a6080"], ring: false },
-  { rx: 0.62, ry: 0.315, speed: 0.004, dir: -1, r: 0.016, a0: 0.6, colors: ["#6aa6e8", "#2a4a9c", "#101f5e"], ring: false },
-];
-const LOCK_STAR_COUNT = 260;
-
-// 启动星空 canvas 动画，返回取消函数
-// 性能优化：预计算渐变、dpr 上限 1.5、star 用 fillRect、缓存 min(W,H)
-function startSkyAnim(canvas, planetsRef) {
-  const ctx = canvas.getContext("2d");
-  let dpr = 1, W = 0, H = 0, cx = 0, cy = 0;
-  let stars = [];
-  let raf = 0;
-  let planetGrads = [];
-  let planetRadii = [];
-
-  function resize() {
-    dpr = Math.min(1.5, Math.max(1, window.devicePixelRatio || 1));
-    W = canvas.clientWidth || window.innerWidth;
-    H = canvas.clientHeight || window.innerHeight;
-    canvas.width = Math.round(W * dpr);
-    canvas.height = Math.round(H * dpr);
-    canvas.style.width = W + "px";
-    canvas.style.height = H + "px";
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    cx = W / 2;
-    cy = H / 2;
-    stars = [];
-    for (let i = 0; i < LOCK_STAR_COUNT; i++) {
-      stars.push({
-        x: Math.random() * W, y: Math.random() * H,
-        r: Math.random() < 0.85 ? 0.5 + Math.random() * 0.8 : 1.2 + Math.random() * 1.4,
-        base: 0.25 + Math.random() * 0.6, tw: 1.5 + Math.random() * 3.5, ph: Math.random() * Math.PI * 2,
-      });
-    }
-    // 预计算行星渐变（以 (0,0) 为球心）
-    planetGrads = [];
-    planetRadii = [];
-    const min = Math.min(W, H);
-    for (const p of planetsRef) {
-      const rad = p.r * min;
-      planetRadii.push(rad);
-      const g = ctx.createRadialGradient(-rad * 0.35, -rad * 0.35, rad * 0.1, 0, 0, rad);
-      g.addColorStop(0, p.colors[0]);
-      g.addColorStop(0.55, p.colors[1]);
-      g.addColorStop(1, p.colors[2]);
-      planetGrads.push(g);
-    }
-  }
-
-  function drawPlanet(idx, px, py) {
-    ctx.save();
-    ctx.translate(px, py);
-    ctx.fillStyle = planetGrads[idx];
-    ctx.beginPath();
-    ctx.arc(0, 0, planetRadii[idx], 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-  }
-
-  function frame(now) {
-    const t = now / 1000;
-    const min = Math.min(W, H);
-    ctx.clearRect(0, 0, W, H);
-    ctx.fillStyle = "#fff";
-    for (const s of stars) {
-      const a = s.base + Math.sin(t * s.tw + s.ph) * 0.35;
-      ctx.globalAlpha = Math.max(0, Math.min(1, a));
-      const sz = s.r * 2;
-      ctx.fillRect(s.x - s.r, s.y - s.r, sz, sz);
-    }
-    ctx.globalAlpha = 1;
-
-    const coreR = 0.13 * min;
-    const core = ctx.createRadialGradient(cx, cy, 0, cx, cy, coreR);
-    core.addColorStop(0, "rgba(255,215,150,0.35)");
-    core.addColorStop(0.5, "rgba(255,170,110,0.12)");
-    core.addColorStop(1, "rgba(255,150,90,0)");
-    ctx.fillStyle = core;
-    ctx.beginPath();
-    ctx.arc(cx, cy, coreR, 0, Math.PI * 2);
-    ctx.fill();
-
-    ctx.lineWidth = 1;
-    for (const p of planetsRef) {
-      ctx.strokeStyle = "rgba(255,255,255,0.10)";
-      ctx.beginPath();
-      ctx.ellipse(cx, cy, p.rx * min, p.ry * min, 0, 0, Math.PI * 2);
-      ctx.stroke();
-    }
-    ctx.save();
-    for (let idx = 0; idx < planetsRef.length; idx++) {
-      const p = planetsRef[idx];
-      const x = cx + Math.cos(p.a0) * p.rx * min;
-      const y = cy + Math.sin(p.a0) * p.ry * min;
-      const rad = planetRadii[idx];
-      if (p.ring) {
-        ctx.save();
-        ctx.translate(x, y);
-        ctx.rotate(-0.35);
-        ctx.strokeStyle = "rgba(235,220,180,0.45)";
-        ctx.lineWidth = Math.max(1.5, rad * 0.28);
-        ctx.beginPath();
-        ctx.ellipse(0, 0, rad * 1.7, rad * 0.55, 0, 0, Math.PI * 2);
-        ctx.stroke();
-        ctx.strokeStyle = "rgba(235,220,180,0.28)";
-        ctx.lineWidth = Math.max(1, rad * 0.15);
-        ctx.beginPath();
-        ctx.ellipse(0, 0, rad * 2.1, rad * 0.7, 0, 0, Math.PI * 2);
-        ctx.stroke();
-        ctx.restore();
-      }
-      drawPlanet(idx, x, y);
-      ctx.save();
-      ctx.translate(x, y);
-      ctx.globalAlpha = 0.10;
-      for (let k = -1; k <= 1; k++) {
-        ctx.beginPath();
-        ctx.ellipse(0, k * rad * 0.4, rad * 0.95, rad * 0.22, 0, Math.PI, Math.PI * 2);
-        ctx.strokeStyle = "#fff";
-        ctx.lineWidth = Math.max(0.6, rad * 0.08);
-        ctx.stroke();
-      }
-      ctx.restore();
-    }
-    ctx.restore();
-    for (const p of planetsRef) p.a0 += p.speed * 0.3 * p.dir;
-    raf = requestAnimationFrame(frame);
-  }
-
-  resize();
-  window.addEventListener("resize", resize);
-  raf = requestAnimationFrame(frame);
-  return () => {
-    cancelAnimationFrame(raf);
-    window.removeEventListener("resize", resize);
-  };
-}
-
 function buildOverlay() {
   injectLockStyles();
   const ov = document.createElement("div");
@@ -213,7 +68,7 @@ function buildOverlay() {
     <div class="lock-fb-hint">
       <h1>离开一会儿，马上回来</h1>
     </div>`;
-  startSkyAnim(ov.querySelector(".lock-fb-sky"), LOCK_PLANETS);
+  startSkyAnim(ov.querySelector(".lock-fb-sky"));
   ov.querySelector(".lock-fb-sun").addEventListener("click", unlock);
   return ov;
 }
@@ -300,12 +155,4 @@ export function startLockController() {
       lastActive = Date.now();
     }).catch(() => {});
   }
-}
-
-export function stopLockController() {
-  // intervalId 现在是 Heartbeat.on 返回的取消函数（而非定时器 id）
-  if (typeof intervalId === "function") intervalId();
-  else if (intervalId) clearInterval(intervalId);
-  intervalId = null;
-  ACTIVITY_EVENTS.forEach((e) => window.removeEventListener(e, onActivity));
 }

@@ -2,7 +2,7 @@
 import { invoke, Heartbeat } from "./bus.js";
 import { state, saveState } from "./state.js";
 import { ICON_CLOCK, ICON_WATER, ICON_CLOSE } from "./icons.js";
-import { esc } from "./views/common.js";
+import { esc, ymd, hhmm, uid } from "./utils.js";
 
 const mcReminders = document.getElementById("mc-reminders");
 
@@ -97,7 +97,6 @@ function updateReminders() {
   const nowTs = Date.now();
   mcReminders.querySelectorAll(".mc-rem-row").forEach((row) => {
     const id = row.dataset.id;
-    // 喝水倒计时
     if (id === "water" && state.water && state.water.enabled) {
       const interval = (state.water.intervalMin || 90) * 60000;
       const rem = state.waterLastAt ? Math.max(0, interval - (nowTs - state.waterLastAt)) : interval;
@@ -120,12 +119,11 @@ function updateReminders() {
 // 每秒检查：daily 到 HH:MM 触发（当日防重复）；喝水滚动计时
 function checkReminders() {
   const now = new Date();
-  const cur = String(now.getHours()).padStart(2, "0") + ":" + String(now.getMinutes()).padStart(2, "0");
-  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  const cur = hhmm(now);
+  const today = ymd(now);
   const ts = now.getTime();
   let changed = false;
 
-  // 喝水提醒
   if (state.water && state.water.enabled) {
     const interval = (state.water.intervalMin || 90) * 60000;
     if (!state.waterLastAt) { state.waterLastAt = ts; changed = true; }
@@ -136,7 +134,6 @@ function checkReminders() {
     }
   }
 
-  // 通用提醒
   for (const r of state.reminders || []) {
     if (!r.enabled) continue;
     if (r.type === "interval") {
@@ -205,8 +202,7 @@ function showReminderToast(r) {
     });
   }
   const type = isWater ? "water" : r.type === "interval" ? "sedentary" : "general";
-  const now = new Date();
-  const timeStr = String(now.getHours()).padStart(2, "0") + ":" + String(now.getMinutes()).padStart(2, "0");
+  const timeStr = hhmm();
   const t = document.createElement("div");
   t.className = "rm-toast timing";
   t.setAttribute("data-type", type);
@@ -293,7 +289,6 @@ function openReminderSettings() {
     renderReminders();
   });
 
-  // 喝水提醒：开关 + 间隔
   const waterEnable = ov.querySelector("#water-enable");
   const waterInt = ov.querySelector("#water-int");
   if (waterEnable) waterEnable.addEventListener("change", () => {
@@ -365,7 +360,7 @@ function openReminderSettings() {
   }
 
   ov.querySelector("#rm-add-btn").addEventListener("click", () => {
-    state.reminders.push({ id: "r" + Date.now().toString(36), label: "新提醒", icon: ICON_CLOCK, type: "daily", time: "09:00", enabled: true, lastTriggeredDate: "" });
+    state.reminders.push({ id: uid("r"), label: "新提醒", icon: ICON_CLOCK, type: "daily", time: "09:00", enabled: true, lastTriggeredDate: "" });
     saveState();
     renderRows();
     renderReminders();

@@ -74,7 +74,7 @@ export const BUILTIN_SKINS = [
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
 // HSL(h 0-360, s/l 0-100) → "r, g, b"
-export function hslToRgb(h, s, l) {
+function hslToRgb(h, s, l) {
   s /= 100; l /= 100;
   const k = (n) => (n + h / 30) % 12;
   const a = s * Math.min(l, 1 - l);
@@ -125,7 +125,7 @@ export function computeAccent(hsl, scheme = "dark") {
 
 // ThemeConfig → { scheme, vars } 纯计算（锁屏/提醒窗口复用）。
 // scheme=auto 在此解析为当前系统方案（matchMedia），保证 data-scheme 永远是 dark|light。
-export function computeThemeVars(cfg) {
+function computeThemeVars(cfg) {
   const c = normalizeTheme(cfg);
   const scheme = resolveScheme(c.scheme);
   const a = computeAccent(c.accent.hsl, scheme);
@@ -147,7 +147,7 @@ export function computeThemeVars(cfg) {
 }
 
 // -------------------- 归一化（老数据/非法值防御） --------------------
-export function normalizeTheme(raw) {
+function normalizeTheme(raw) {
   const t = raw && typeof raw === "object" ? raw : {};
   const out = structuredClone(DEFAULT_THEME);
   if (t.scheme === "dark" || t.scheme === "light" || t.scheme === "auto") out.scheme = t.scheme;
@@ -198,7 +198,7 @@ function resolveScheme(scheme) {
   } catch { return "dark"; }
 }
 
-// 背景图 URL 解析（2026-09-16 优化）：
+// 背景图 URL 解析：
 //   优先 Rust prepare_wallpaper —— 预缩放屏幕尺寸副本 + asset:// 协议引用，
 //   JS 零常驻字符串、位图仅 ~8MB（原 data URL 链路 ~50MB）。
 //   命令缺失（旧后端/浏览器 dev）或预处理失败时回退原 data URL 链路。
@@ -255,7 +255,7 @@ function withTransition(doc, fn) {
 }
 
 // 幂等应用：方案 → 变量 → 背景层。opts.transition 控制是否带过渡动画。
-export async function applyTheme(doc, cfg, opts = {}) {
+async function applyTheme(doc, cfg, opts = {}) {
   const { scheme, vars, skinId, config } = computeThemeVars(cfg);
   const html = doc.documentElement;
   const run = () => {

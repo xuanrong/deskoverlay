@@ -2,10 +2,11 @@
 // 全局播放器（音乐页 / 在线音乐页共享）：音频由 musicAudio 单例承载，UI 由各视图自行渲染。
 import { Bus, invoke } from "../bus.js";
 import { state, saveState } from "../state.js";
-import { ICON_MUSIC, ICON_SHUFFLE, ICON_REPEAT, ICON_HEART, ICON_PREV, ICON_NEXT, ICON_PLAY, ICON_PAUSE, ICON_LIST, ICON_MORE, ICON_VOLUME, ICON_VOLUME_MUTE, ICON_LOCATE, ICON_CLOSE, ICON_BACK, ICON_ALBUM, ICON_LYRICS, ICON_DOWNLOAD, ICON_TRASH } from "../icons.js";
-import { esc, normalizeSongs } from "./common.js";
+import { ICON_MUSIC, ICON_SHUFFLE, ICON_REPEAT, ICON_HEART, ICON_PREV, ICON_NEXT, ICON_PLAY, ICON_PAUSE, ICON_LIST, ICON_MORE, ICON_VOLUME, ICON_VOLUME_MUTE, ICON_LOCATE, ICON_CLOSE, ICON_BACK, ICON_ALBUM, ICON_LYRICS, ICON_DOWNLOAD, ICON_TRASH, ICON_CLOUD } from "../icons.js";
+import { normalizeSongs } from "./common.js";
 import { toast } from "../toast.js";
 import { createSelect } from "../selectbox.js";
+import { esc, uid } from "../utils.js";
 
 const musicAudio = new Audio();
 let currentSong = null; // { title, artist, artwork, url, type, song, srcId, lyric }
@@ -183,7 +184,6 @@ let syncPlayerButtons = null;
 let syncMusicUI = null;
 
 // ── 桌面歌词（独立窗口）状态 ──
-// P1 骨架：仅维护「是否已显示」的会话内状态，不落盘（持久化在 P4 接 state.lyric）。
 let lyricVisible = false;
 let lyricBtnEl = null;
 function syncLyricBtn() {
@@ -302,7 +302,6 @@ musicAudio.addEventListener("timeupdate", () => pushLyric(false));
 musicAudio.addEventListener("play", () => pushLyric(true));
 musicAudio.addEventListener("pause", () => pushLyric(true));
 
-// 渲染歌词区
 function renderLyric() {
   if (!lyricEl) return;
   lyricEl.innerHTML = currentLyric.length
@@ -311,13 +310,11 @@ function renderLyric() {
   lastLyricIdx = -1;
 }
 
-// 播放队列与状态
 let playQueue = [];    // [{ meta:{title,artist,artwork}, song, srcId, url, type }]
 let queueIndex = -1;
 let randomMode = false;
 let queueModalEl = null;
 
-// 播完自动下一首（只绑定一次）
 musicAudio.addEventListener("ended", () => { if (playQueue.length) playNext(); });
 
 // 持久化播放状态（队列/索引/当前歌曲/播放中/进度），重启后恢复
@@ -474,7 +471,6 @@ function playPrev() {
   loadQueueItem(pi);
 }
 
-// 随机模式开关
 function toggleRandom() {
   randomMode = !randomMode;
   syncPlayerButtons?.();
@@ -657,6 +653,7 @@ function showDownloads() {
   if (document.getElementById("dl-modal")) return;
   const ov = document.createElement("div");
   ov.className = "task-modal-overlay";
+  ov.id = "dl-modal";
   ov.innerHTML = `
     <div class="task-modal source-modal dl-modal">
       <div class="sm-head">
@@ -679,10 +676,10 @@ function showDownloads() {
   ov.addEventListener("click", (e) => { if (e.target === ov) close(); });
   ov.addEventListener("keydown", (e) => { if (e.key === "Escape") close(); });
 
-  // Tab 切换
   const panes = {
     running: ov.querySelector("#dl-running"),
     done: ov.querySelector("#dl-done"),
+    cloud: ov.querySelector("#dl-upload"),
   };
   ov.querySelectorAll(".dl-tab").forEach((tab) => {
     tab.addEventListener("click", () => {
@@ -700,7 +697,7 @@ function showDownloads() {
 
   const runningEl = panes.running;
   const doneEl = panes.done;
-  const uploadEl = panes.upload;
+  const uploadEl = panes.cloud;
   const countEl = ov.querySelector("#dl-count");
   const badgeRunning = ov.querySelector("#dl-badge-running");
   const badgeDone = ov.querySelector("#dl-badge-done");
@@ -733,7 +730,6 @@ function showDownloads() {
     runningEl.querySelectorAll("[data-cancel]").forEach((btn) => {
       btn.addEventListener("click", () => invoke("download_cancel", { id: Number(btn.dataset.cancel) }).catch(() => {}));
     });
-    // 已下载列表（实扫目录）
     invoke("downloaded_list").then((list) => {
       badgeDone.textContent = (list && list.length) || "";
       doneEl.innerHTML = (list && list.length)
@@ -892,7 +888,6 @@ function playFavorites(idx) {
 }
 
 
-// 播放队列面板
 function showQueue() {
   if (queueModalEl) return;
   const ov = document.createElement("div");
@@ -1173,8 +1168,6 @@ function loadMusicPlugin(code) {
 // MusicFree 形态：search 走内置酷狗聚合（洛雪源只管取流），getMediaSource 触发
 // musicUrl 事件。音质映射：standard→128k / high→320k / super→flac。
 const LX_EVENT_NAMES = { request: "request", inited: "inited" };
-// 洛雪源声明支持的平台 → 中文名（供搜索聚合展示来源）
-const LX_SOURCE_NAMES = { kw: "酷我", kg: "酷狗", tx: "QQ音乐", wy: "网易云", mg: "咪咕" };
 
 function loadLxPlugin(code) {
   if (pluginCache.has(code)) return pluginCache.get(code);
@@ -1491,7 +1484,7 @@ function showMusicSources(onDone) {
       const m = code.match(/@name\s+([^\n\r]+)/);
       if (m) name = m[1].trim();
     }
-    state.musicSources.push({ id: "s" + Date.now().toString(36), name, src, code });
+    state.musicSources.push({ id: uid("s"), name, src, code });
     saveState();
     renderList();
   }
@@ -1708,7 +1701,6 @@ export function renderMusic(view) {
   };
   volIcon?.addEventListener("click", () => {
     if (state.playback.muted) {
-      // 恢复：回到静音前的音量
       state.playback.muted = false;
       state.playback.volume = state.playback.preMuteVolume || 0.8;
     } else {
@@ -1722,7 +1714,6 @@ export function renderMusic(view) {
   });
   volRange?.addEventListener("input", (e) => {
     const v = e.target.value / 100;
-    // 拖滑杆自动解除静音
     if (state.playback.muted && v > 0) state.playback.muted = false;
     else if (state.playback.muted && v === 0) return; // 静音态下滑到 0 不改状态
     state.playback.volume = v;
@@ -1733,7 +1724,6 @@ export function renderMusic(view) {
   // 每次渲染用持久化状态同步播放器与滑杆（不再硬编码覆盖用户设置）
   applyVolumeUI();
 
-  // 底部功能按钮：喜欢/随机/上一首/下一首/队列/在线
   const likeBtn = body.querySelector("#mc-like");
   const shuffleBtn = body.querySelector("#mc-shuffle");
   const prevBtn = body.querySelector("#mc-prev");
@@ -1743,7 +1733,6 @@ export function renderMusic(view) {
   syncPlayerButtons = () => {
     const fav = !!(currentSong && currentSong.url && (state.favorites || []).some((f) => favKeyOf(f) === favKeyOf({ url: currentSong.url, song: currentSong.song, srcId: currentSong.srcId })));
     likeBtn.classList.toggle("active", fav);
-    // 随机/顺序播放图标切换
     shuffleBtn.innerHTML = randomMode ? ICON_SHUFFLE : ICON_REPEAT;
     shuffleBtn.classList.toggle("active", randomMode);
     const hasQueue = playQueue.length > 0;
@@ -1761,7 +1750,6 @@ export function renderMusic(view) {
   body.querySelector("#mc-online").addEventListener("click", openOnlineMusic);
   body.querySelector("#mc-more").addEventListener("click", () => {});
 
-  // 桌面歌词：切换显示/隐藏
   lyricBtnEl = body.querySelector("#mc-lyric");
   lyricBtnEl.addEventListener("click", () => {
     lyricVisible = !lyricVisible;
@@ -1866,7 +1854,6 @@ async function fetchAdTrackMeta(song) {
   if (!currentSong || currentSong.song?.fileId !== song.fileId) return; // 延迟期间已切歌
   try {
     const meta = await invoke("ad_track_meta", { fileId: song.fileId, ext: song.ext || "" });
-    console.log("[ad-meta] result:", JSON.stringify({ hasLyric: !!meta?.lyric, hasCover: !!meta?.cover, debug: meta?.debug || null }));
     if (!currentSong || currentSong.song?.fileId !== song.fileId) return; // 已切歌
     if (meta?.lyric && currentSong && !currentSong.lyric) {
       currentSong.lyric = meta.lyric;
@@ -1881,18 +1868,6 @@ async function fetchAdTrackMeta(song) {
     }
   } catch (e) {
     console.warn("[ad-meta] 获取失败:", String(e && e.message || e));
-  }
-}
-
-// 播放云盘歌曲：ad_play_url 取流式地址 → loadMeta（复用现有播放链路），并入播放队列
-async function playAdFile(song) {
-  try {
-    const url = await invoke("ad_play_url", { fileId: song.fileId, ext: song.ext || null });
-    loadMeta({ title: song.title, artist: song.artist || "云盘", artwork: null, url, type: "云盘" });
-    bindAdExpiryRetry();
-    fetchAdTrackMeta(song); // 异步补全内嵌歌词/封面，不阻塞播放
-  } catch (e) {
-    toast("云盘播放失败：" + String(e && e.message || e));
   }
 }
 
@@ -1971,7 +1946,6 @@ async function renderAdDriveTab(resultsEl, panelEl, modeTabsEl) {
   loadAdFolder(resultsEl, await adResolveMusicFolder());
 }
 
-// 拉取并渲染云盘目录（root 或 folder_id）
 async function loadAdFolder(resultsEl, folderId) {
   resultsEl.innerHTML = `<div class="dash-empty">加载云盘目录…</div>`;
   try {
@@ -2071,7 +2045,6 @@ function openOnlineMusic() {
     return alt ? loadMusicPlugin(alt.code) : p;
   }
 
-  // 列表归一化
   const normalizeList = (res) => {
     if (Array.isArray(res)) return res;
     if (res && Array.isArray(res.data)) return res.data;
@@ -2187,7 +2160,6 @@ function openOnlineMusic() {
     resultsEl.appendChild(frag);
   }
 
-  // 榜单详情 → 歌曲列表
   async function loadTopListDetail(topList) {
     resultsEl.innerHTML = `<div class="dash-empty">加载中…</div>`;
     try {
@@ -2207,7 +2179,6 @@ function openOnlineMusic() {
     }
   }
 
-  // 歌单详情 → 歌曲列表
   async function loadSheetDetail(sheet, keyword) {
     resultsEl.innerHTML = `<div class="dash-empty">加载中…</div>`;
     try {
@@ -2224,7 +2195,6 @@ function openOnlineMusic() {
     }
   }
 
-  // 专辑详情 → 歌曲列表
   async function loadAlbumDetail(album, keyword) {
     resultsEl.innerHTML = `<div class="dash-empty">加载中…</div>`;
     try {
@@ -2311,7 +2281,6 @@ function openOnlineMusic() {
     }
   }
 
-  // 搜索（按模式/类型分发）
   async function doSearch() {
     if (!current) { resultsEl.innerHTML = `<div class="dash-empty">未安装音源，点「音源」安装</div>`; return; }
     const kw = (panelInput && panelInput.value || "").trim();
@@ -2358,7 +2327,6 @@ function openOnlineMusic() {
     typeEl._setOptions?.(opts);
   }
 
-  // 模式切换
   function switchMode(m) {
     mode = m;
     modeTabsEl.querySelectorAll("button").forEach((b) => b.classList.toggle("active", b.dataset.mode === m));
@@ -2399,17 +2367,16 @@ function openOnlineMusic() {
     panelInput.focus();
   }
 
-  // 左侧音源栏：顶部固定「喜欢」，下面音源列表 + 云盘 + 管理
   function renderSrcSide() {
     const sources = (state.musicSources || []).filter((s) => s.code);
     if (current && !sources.some((s) => s.id === current.id)) current = sources[0] || null;
     srcSideEl.innerHTML =
       `<button class="online-src online-src-fav${favMode ? " active" : ""}" id="online-src-fav" title="喜欢的音乐">${ICON_HEART}<span>喜欢</span></button>` +
+      `<button class="online-src online-src-fav${adMode ? " active" : ""}" id="online-src-ad" title="阿里云盘音乐">${ICON_CLOUD}<span>云盘</span></button>` +
       (sources.length
         ? sources.map((s, i) => `
-          <button class="online-src${!favMode && current && s.id === current.id ? " active" : ""}" data-i="${i}" title="${esc(s.name || "")}">${esc(s.name || "未命名")}</button>`).join("")
+          <button class="online-src${!favMode && !adMode && current && s.id === current.id ? " active" : ""}" data-i="${i}" title="${esc(s.name || "")}">${esc(s.name || "未命名")}</button>`).join("")
         : `<span class="online-src-none">未安装音源</span>`)
-      + `<button class="online-src${adMode ? " active" : ""}" id="online-src-ad" title="阿里云盘音乐">☁ 云盘</button>`
       + `<button class="online-src online-src-add" id="online-src-btn" title="音源管理">+ 音源</button>`;
 
     srcSideEl.querySelector("#online-src-fav").addEventListener("click", () => {

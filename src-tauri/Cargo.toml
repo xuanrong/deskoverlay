@@ -54,6 +54,10 @@ windows = { version = "0.61", features = [
   "Win32_Media_Audio",
   "Win32_Graphics_Dwm",
   "Win32_Graphics_Gdi",
+  # 全局护眼：SetDeviceGammaRamp / GetDeviceGammaRamp 位于 UI::ColorSystem 模块
+  "Win32_UI_ColorSystem",
+  # 全局护眼时段模式：GetTimeZoneInformation 读本地时区偏移
+  "Win32_System_Time",
   "Win32_Storage_FileSystem",
   # 开机自启：HKCU Run 注册表键（autostart.rs）
   "Win32_System_Registry",

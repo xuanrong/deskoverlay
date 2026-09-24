@@ -42,7 +42,7 @@ function lYearDays(y) {
 }
 
 // 公历 → 农历：{ year, month, day, isLeap }
-export function solarToLunar(date) {
+function solarToLunar(date) {
   let offset = Math.floor((date - new Date(1900, 0, 31)) / MS_DAY);
   let i, temp = 0;
   for (i = 1900; i < 2101 && offset > 0; i++) { temp = lYearDays(i); offset -= temp; }
@@ -247,8 +247,8 @@ export function getDayEvents(date) {
   return evs;
 }
 
-// 未来 maxDays 内的节日/节气/补班事件（假期整体走 getHolidays，避免长假期逐日刷屏）
-export function getUpcoming(from, maxDays = 60, limit = 12) {
+// 未来 maxDays 内的节日/节气/补班事件
+function getUpcoming(from, maxDays = 60, limit = 12) {
   const base = stripTime(from);
   const out = [];
   for (let off = 0; off <= maxDays && out.length < limit; off++) {
@@ -258,13 +258,6 @@ export function getUpcoming(from, maxDays = 60, limit = 12) {
       if (out.length >= limit) break;
     }
   }
-  return out;
-}
-
-// 假期列表（含起止/天数/补班），fromYear..toYear 闭区间
-export function getHolidays(fromYear, toYear) {
-  const out = [];
-  for (let y = fromYear; y <= toYear; y++) out.push(...legalOf(y));
   return out;
 }
 

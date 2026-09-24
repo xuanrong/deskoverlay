@@ -3,17 +3,17 @@
 // 记录粒度只到「日期」，不含时分；历史数据遗留的 time 字段保留但不再展示/录入。
 // 数据模型沿用 state.workLogs: { id, date:"YYYY-MM-DD", text, type, tags }
 import { state, saveState } from "../state.js";
-import { esc, fitTextarea } from "./common.js";
+import { fitTextarea } from "./common.js";
 import { createDatePicker } from "../datepicker.js";
 import { createSelect } from "../selectbox.js";
 import { ICON_CLOSE } from "../icons.js";
+import { esc, ymd, uid } from "../utils.js";
 
 // 快捷录入 textarea 最大自适应高度（与 CSS max-height 对齐，超出后内部滚动）
 const INPUT_MAX_H = 130;
 
 // 记录类型 → 中文标签 + 颜色（与设计稿 / 视觉 token 对齐）
 const LOG_TYPES = ["工作", "会议", "学习", "生活", "其他"];
-const TYPE_CLASS = { 工作: "work", 会议: "meet", 学习: "study", 生活: "life", 其他: "other" };
 const TYPE_COLOR = {
   工作: "#5fa8d3",
   会议: "#b48ae6",
@@ -24,19 +24,9 @@ const TYPE_COLOR = {
 const DOT_CLASS = { 工作: "wb-dot-work", 会议: "wb-dot-meet", 学习: "wb-dot-study", 生活: "wb-dot-life", 其他: "wb-dot-other" };
 const PILL_CLASS = { 工作: "wb-pill-work", 会议: "wb-pill-meet", 学习: "wb-pill-study", 生活: "wb-pill-life", 其他: "wb-pill-other" };
 
-// 当天日期 YYYY-MM-DD（本地时区）
-function todayStr() {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
-
 function toDate(str) {
   const d = new Date(str + "T00:00:00");
   return isNaN(d) ? null : d;
-}
-
-function dateKey(d) {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
 function addDays(d, n) {
@@ -48,8 +38,8 @@ function addDays(d, n) {
 // 日期标题：今天/昨天 + 周几；其他显示「M月D日 · 周X」（跨年带年份）
 function dateTitle(dateStr) {
   if (!dateStr) return "";
-  const today = todayStr();
-  const yest = dateKey(addDays(new Date(), -1));
+  const today = ymd();
+  const yest = ymd(addDays(new Date(), -1));
   const d = toDate(dateStr);
   if (!d) return dateStr;
   const week = ["日", "一", "二", "三", "四", "五", "六"][d.getDay()];
@@ -75,9 +65,9 @@ function typeCounts() {
 // 连续记录天数（截至今天）
 function streakDays() {
   let n = 0;
-  const set = new Set((state.workLogs || []).map((w) => w.date || todayStr()));
+  const set = new Set((state.workLogs || []).map((w) => w.date || ymd()));
   let d = new Date();
-  while (set.has(dateKey(d))) { n++; d = addDays(d, -1); }
+  while (set.has(ymd(d))) { n++; d = addDays(d, -1); }
   return n;
 }
 
@@ -85,7 +75,7 @@ function streakDays() {
 function heatCells() {
   const counts = new Map();
   for (const log of state.workLogs || []) {
-    const k = log.date || todayStr();
+    const k = log.date || ymd();
     counts.set(k, (counts.get(k) || 0) + 1);
   }
   const today = new Date();
@@ -95,11 +85,11 @@ function heatCells() {
     const ws = addDays(thisSun, -w * 7);
     for (let i = 0; i < 7; i++) {
       const d = addDays(ws, i);
-      const k = dateKey(d);
+      const k = ymd(d);
       const n = counts.get(k) || 0;
       const future = d > today;
       const lv = future ? 0 : n === 0 ? 0 : n <= 2 ? 1 : n <= 4 ? 2 : 3;
-      cells.push({ key: k, lv, today: k === dateKey(today), future });
+      cells.push({ key: k, lv, today: k === ymd(today), future });
     }
   }
   return cells;
@@ -109,7 +99,7 @@ function heatCells() {
 function groupByDay(list) {
   const map = new Map();
   for (const log of list) {
-    const date = log.date || todayStr();
+    const date = log.date || ymd();
     if (!map.has(date)) map.set(date, []);
     map.get(date).push(log);
   }
@@ -249,8 +239,8 @@ export function renderWorkLog(view) {
 
   let curType = "工作";
   let filter = "全部";
-  createDatePicker({ el: dateSlot, value: todayStr() });
-  const dateVal = () => (dateSlot.value || todayStr());
+  createDatePicker({ el: dateSlot, value: ymd() });
+  const dateVal = () => (dateSlot.value || ymd());
 
   function paintTypeChips() {
     for (const b of typeBtns) {
@@ -307,7 +297,7 @@ export function renderWorkLog(view) {
     if (!text) { textEl.focus(); return; }
     state.workLogs = state.workLogs || [];
     state.workLogs.push({
-      id: "wl" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
+      id: uid("wl"),
       date: dateVal(),
       type: curType,
       text,

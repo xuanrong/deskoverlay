@@ -53,7 +53,6 @@ pub fn run_backend(wasm: &[u8], input: &str) -> Result<String, String> {
         .get_typed_func(&store, "get_result_ptr")
         .map_err(|e| format!("缺少 get_result_ptr 导出：{e}"))?;
 
-    // 输入写入插件内存
     let in_bytes = input.as_bytes();
     let in_off = alloc.call(&mut store, in_bytes.len() as i32).map_err(|e| e.to_string())?;
     {
@@ -63,13 +62,11 @@ pub fn run_backend(wasm: &[u8], input: &str) -> Result<String, String> {
         data[s..e].copy_from_slice(&in_bytes[..e - s]);
     }
 
-    // 调用处理入口
     let res_len = run
         .call(&mut store, (in_off, in_bytes.len() as i32))
         .map_err(|e| format!("插件执行失败：{e}"))?;
     let res_ptr = get_ptr.call(&mut store, ()).map_err(|e| e.to_string())?;
 
-    // 读取结果
     let out;
     {
         let data = memory.data(&store);

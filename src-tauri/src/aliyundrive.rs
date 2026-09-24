@@ -356,24 +356,6 @@ pub fn ad_unbind(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// 账号与容量信息（验证连通性用）
-#[tauri::command]
-pub async fn ad_drive_info(app: AppHandle) -> Result<serde_json::Value, String> {
-    let app2 = app.clone();
-    tauri::async_runtime::spawn_blocking(move || -> Result<serde_json::Value, String> {
-        let user = api_call(&app2, "/adrive/v1.0/user/getDriveInfo", serde_json::json!({}))?;
-        let space = api_call(&app2, "/adrive/v1.0/user/getSpaceInfo", serde_json::json!({}))?;
-        let psi = &space["personal_space_info"];
-        Ok(serde_json::json!({
-            "nickname": user["user_name"].as_str().unwrap_or(""),
-            "used_size": psi["used_size"].as_u64().unwrap_or(0),
-            "total_size": psi["total_size"].as_u64().unwrap_or(0),
-        }))
-    })
-    .await
-    .map_err(|e| e.to_string())?
-}
-
 /// 列出云盘目录（默认根目录）。folder_id 传 "root" 或具体 file_id。
 #[tauri::command]
 pub async fn ad_list(app: AppHandle, folder_id: Option<String>) -> Result<Vec<AdFile>, String> {
@@ -1320,7 +1302,6 @@ pub async fn ad_track_meta(app: AppHandle, file_id: String, ext: String) -> Resu
         // 直接拉头 512KB（flac METADATA BLOCK / ID3v2 都在文件头部，无需知道总大小）。
         // 失败路径全部带 debug 字段返回，便于前端定位。
         let head = fetch_range("bytes=0-524287")?;
-        eprintln!("[ad-meta] file={file_id} head={}B", head.len());
         if head.is_empty() {
             return Ok(serde_json::json!({ "lyric": null, "cover": null, "debug": "empty head" }));
         }
@@ -1349,12 +1330,10 @@ pub async fn ad_track_meta(app: AppHandle, file_id: String, ext: String) -> Resu
         let tagged = match Probe::new(std::io::Cursor::new(&combined)).set_file_type(ftype).read() {
             Ok(t) => t,
             Err(e) => {
-                eprintln!("[ad-meta] lofty parse failed: {e}");
                 return Ok(serde_json::json!({ "lyric": null, "cover": null, "debug": format!("parse: {e}") }));
             }
         };
         let Some(tag) = tagged.primary_tag().or_else(|| tagged.first_tag()) else {
-            eprintln!("[ad-meta] no tag");
             return Ok(serde_json::json!({ "lyric": null, "cover": null, "debug": "no tag" }));
         };
 

@@ -14,7 +14,9 @@ mod autostart;
 mod aliyundrive;
 mod desktop_inject;
 mod downloader;
+mod eyecare;
 mod file_index;
+mod http;
 mod plugin_pkg;
 mod sedentary;
 mod sys_bridge;
@@ -22,10 +24,10 @@ mod usn_index;
 mod wasm_plugin;
 
 use std::fs;
-use std::io::{Read, Write};
+use std::io::Write;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Mutex, OnceLock};
+use std::sync::Mutex;
 use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_dialog::DialogExt;
 use serde::Serialize;
@@ -70,6 +72,10 @@ fn quit_app(app: tauri::AppHandle) {
     *PENDING_REMINDER.lock().unwrap() = None;
     LYRIC_PAGE_READY.store(false, Ordering::SeqCst);
     *PENDING_LYRIC.lock().unwrap() = None;
+    // 全局护眼：退出前必须还原显示器原始 gamma ramp。
+    // 否则进程结束后屏幕会一直停留在偏暖状态（gamma 是全局状态，不随进程消失），
+    // 用户只能重启或重登才能恢复 —— 这是最影响体验的故障模式。
+    let _ = eyecare::restore_original_ramp();
     for label in ["main", "reminder", "lock", "lyric"] {
         if let Some(win) = app.get_webview_window(label) {
             let _ = win.destroy();
@@ -150,7 +156,7 @@ fn spawn_reminder_watchdog(win: &tauri::WebviewWindow) {
 fn sink_reminder_below_lock(win: &tauri::WebviewWindow) {
     let lock = match win.app_handle().get_webview_window("lock") {
         Some(l) => l,
-        None => return, // 锁屏窗口尚未创建
+        None => return,
     };
     if !lock.is_visible().unwrap_or(false) {
         return; // 锁屏未显示：提醒保持正常置顶
@@ -183,7 +189,6 @@ fn show_reminder_win(win: &tauri::WebviewWindow, payload: serde_json::Value, emi
     let _ = win.set_position(tauri::PhysicalPosition::new(x, 16));
     let _ = win.set_always_on_top(true);
     let _ = win.show();
-    // 锁屏可见时压到锁屏之下，避免提醒盖住隐私锁屏
     sink_reminder_below_lock(win);
     // 展示即武装硬超时兜底（旧看门狗因世代变更自动退出）
     spawn_reminder_watchdog(win);
@@ -207,7 +212,6 @@ pub fn present_reminder(app: &tauri::AppHandle, icon: &str, title: &str, message
         // 窗口已存在（如用户尚未点击关闭）→ 直接复用展示，避免重复创建。
         if let Some(win) = app.get_webview_window("reminder") {
             if REMINDER_PAGE_READY.load(Ordering::SeqCst) {
-                // 页面 listener 已就绪：可安全直接 emit。
                 // 复用路径无需暂存，顺手清掉可能残留的 PENDING，防陈旧内容被后续 reminder_ready 取走。
                 *PENDING_REMINDER.lock().unwrap() = None;
                 show_reminder_win(&win, payload, true);
@@ -283,7 +287,6 @@ fn reminder_ready(app: tauri::AppHandle) {
         }
     };
     match PENDING_REMINDER.lock().unwrap().take() {
-        // 有内容：先定位显示再推送（show_reminder_win 内部会武装硬超时兜底）
         Some(p) => {
             show_reminder_win(&win, p, true);
         }
@@ -446,6 +449,22 @@ fn lyric_geometry(app: &tauri::AppHandle, win_w: i32, win_h: i32) -> (i32, i32) 
     }
 }
 
+/// 按当前 DPI 校准歌词条窗口：物理尺寸 → 位置 → 置顶 → 穿透。
+///
+/// builder 的 inner_size 是逻辑像素，这里换算成物理像素再落一次，
+/// 保证窗口尺寸与位置计算（lyric_geometry）使用同一单位。
+/// 复用已存在窗口与新建成窗口两条路径共用，避免只改一处导致尺寸/单位不一致。
+fn apply_lyric_geometry(app: &tauri::AppHandle, win: &tauri::WebviewWindow, form: &str, locked: bool) {
+    let scale = win.scale_factor().unwrap_or(1.0);
+    let (w_phys, h_phys) = lyric_physical_size(scale, form);
+    let _ = win.set_size(tauri::PhysicalSize::new(w_phys as u32, h_phys as u32));
+    let (x, y) = lyric_geometry(app, w_phys, h_phys);
+    let _ = win.set_position(tauri::PhysicalPosition::new(x, y));
+    let _ = win.set_always_on_top(true);
+    // 穿透开关：锁定态下鼠标完全穿过歌词条，可点到底下的桌面图标/窗口。
+    let _ = win.set_ignore_cursor_events(locked);
+}
+
 /// 按需获取歌词窗口：已存在则复用；否则创建（置顶、透明、不可聚焦、隐藏起步）。
 /// `h` 为初始窗口高度（单行 56 / 双行 88）——由调用方按 state.lyric.form 传入。
 fn ensure_lyric(app: &tauri::AppHandle, h: i32) -> Option<tauri::WebviewWindow> {
@@ -504,28 +523,13 @@ fn show_lyric(app: tauri::AppHandle) {
     tauri::async_runtime::spawn(async move {
         // 已存在 → 复用：复位尺寸/位置/置顶/穿透后显示，不重复建窗。
         if let Some(win) = app2.get_webview_window("lyric") {
-            let scale = win.scale_factor().unwrap_or(1.0);
-            let (w_phys, h_phys) = lyric_physical_size(scale, &form);
-            let _ = win.set_size(tauri::PhysicalSize::new(w_phys as u32, h_phys as u32));
-            let (x, y) = lyric_geometry(&app2, w_phys, h_phys);
-            let _ = win.set_position(tauri::PhysicalPosition::new(x, y));
-            let _ = win.set_always_on_top(true);
-            let _ = win.set_ignore_cursor_events(locked);
+            apply_lyric_geometry(&app2, &win, &form, locked);
             let _ = win.show();
             return;
         }
         match ensure_lyric(&app2, h) {
             Some(win) => {
-                // ensure_lyric 的 inner_size 是逻辑像素；这里按真实 DPI 换算成物理像素
-                // 再校准一次，保证窗口尺寸与后续 set_size / 位置计算同一单位。
-                let scale = win.scale_factor().unwrap_or(1.0);
-                let (w_phys, h_phys) = lyric_physical_size(scale, &form);
-                let _ = win.set_size(tauri::PhysicalSize::new(w_phys as u32, h_phys as u32));
-                let (x, y) = lyric_geometry(&app2, w_phys, h_phys);
-                let _ = win.set_position(tauri::PhysicalPosition::new(x, y));
-                let _ = win.set_always_on_top(true);
-                // 穿透开关：锁定态下鼠标完全穿过歌词条，可点到底下的桌面图标/窗口。
-                let _ = win.set_ignore_cursor_events(locked);
+                apply_lyric_geometry(&app2, &win, &form, locked);
                 // 显示交给 lyric_ready（页面 listener 就绪后 show + emit），
                 // 保证「可见」与「有内容」同时发生。
             }
@@ -630,9 +634,9 @@ fn position_lyric_menu(bar: &tauri::WebviewWindow, menu: &tauri::WebviewWindow) 
     let (Ok(bp), Ok(bs)) = (bar.outer_position(), bar.outer_size()) else {
         return;
     };
-    let group_cx = bp.x as f64 + bs.width as f64 / 2.0;   // 按钮组中心（按钮组在窗口内居中）
-    let mx = group_cx - 95.0 * scale;                      // 主列中心 = 弹窗左缘 + 95 逻辑 px
-    let my = bp.y as f64 - LYRIC_MENU_H as f64 * scale;    // 底边贴工具条顶边
+    let group_cx = bp.x as f64 + bs.width as f64 / 2.0;
+    let mx = group_cx - 95.0 * scale;
+    let my = bp.y as f64 - LYRIC_MENU_H as f64 * scale;
     let _ = menu.set_size(tauri::PhysicalSize::new(
         (LYRIC_MENU_W as f64 * scale).round() as u32,
         (LYRIC_MENU_H as f64 * scale).round() as u32,
@@ -655,22 +659,7 @@ fn hide_lyric_menu(app: &tauri::AppHandle) {
 #[tauri::command]
 fn lyric_menu_ready(app: tauri::AppHandle) {
     LYRIC_MENU_READY.store(true, Ordering::SeqCst);
-    let st = read_lyric_state(&app);
-    let form = st.get("form").and_then(|v| v.as_str()).unwrap_or("single");
-    let style = st.get("style").and_then(|v| v.as_str()).unwrap_or("stroke");
-    let align = st.get("align").and_then(|v| v.as_str()).unwrap_or("center");
-    let font_size = st.get("fontSize").and_then(|v| v.as_u64()).unwrap_or(22).clamp(12, 28);
-    let color_text = st.get("colorText").and_then(|v| v.as_str()).filter(|v| is_lyric_color(v)).unwrap_or("");
-    let color_fill = st.get("colorFill").and_then(|v| v.as_str()).filter(|v| is_lyric_color(v)).unwrap_or("");
-    let offset = st.get("offset").and_then(|v| v.as_f64()).unwrap_or(0.0);
-    let _ = app.emit_to(
-        "lyric_menu",
-        "lyric://display",
-        serde_json::json!({
-            "form": form, "style": style, "align": align, "fontSize": font_size,
-            "colorText": color_text, "colorFill": color_fill, "offset": offset,
-        }),
-    );
+    let _ = app.emit_to("lyric_menu", "lyric://display", lyric_display_payload(&app));
     if LYRIC_MENU_PENDING.swap(false, Ordering::SeqCst) {
         if let (Some(bar), Some(menu)) = (app.get_webview_window("lyric"), app.get_webview_window("lyric_menu")) {
             position_lyric_menu(&bar, &menu);
@@ -794,21 +783,7 @@ fn lyric_ready(app: tauri::AppHandle) {
     // 若 state 里存的是别的值，不推一次就会出现「窗口高 88 但只画一行」「自定义配色丢失」。
     // 这里下发**完整**配置（含颜色/对齐）—— 旧版只推 form/style/fontSize，
     // 重开歌词窗口后自定义配色会被页面默认值覆盖（实测丢失），故一并修复。
-    let st = read_lyric_state(&app);
-    let form = st.get("form").and_then(|v| v.as_str()).unwrap_or("single");
-    let style = st.get("style").and_then(|v| v.as_str()).unwrap_or("stroke");
-    let align = st.get("align").and_then(|v| v.as_str()).unwrap_or("center");
-    let font_size = st.get("fontSize").and_then(|v| v.as_u64()).unwrap_or(22).clamp(12, 28);
-    let color_text = st.get("colorText").and_then(|v| v.as_str()).filter(|v| is_lyric_color(v)).unwrap_or("");
-    let color_fill = st.get("colorFill").and_then(|v| v.as_str()).filter(|v| is_lyric_color(v)).unwrap_or("");
-    let _ = app.emit_to(
-        "lyric",
-        "lyric://display",
-        serde_json::json!({
-            "form": form, "style": style, "align": align, "fontSize": font_size,
-            "colorText": color_text, "colorFill": color_fill,
-        }),
-    );
+    let _ = app.emit_to("lyric", "lyric://display", lyric_display_payload(&app));
     // 下发**真实**锁定态：OS 级穿透状态只有 Rust 知道。缺了这一步，页面会停在
     // HTML 里的 data-locked="true" 默认值，出现「页面显示锁定、实际可交互」的错位。
     let _ = app.emit_to("lyric", "lyric://locked", locked_payload());
@@ -838,6 +813,23 @@ fn locked_payload() -> serde_json::Value {
         "locked": LYRIC_LOCKED.load(Ordering::SeqCst),
         "sticky": LYRIC_STICKY_UNLOCK.load(Ordering::SeqCst),
         "hoverUnlock": LYRIC_HOVER_UNLOCK.load(Ordering::SeqCst),
+    })
+}
+
+/// 构造 `lyric://display` 的下发载荷：读取歌词条显示配置，逐字段取默认值并做合法性夹取。
+///
+/// 集中一处，避免两个握手入口（歌词页 lyric_ready / 设置弹窗 lyric_menu_ready）各写一份
+/// 默认值与颜色校验而分叉 —— 页面在缺字段时不会回退到同一套默认值。
+fn lyric_display_payload(app: &tauri::AppHandle) -> serde_json::Value {
+    let st = read_lyric_state(app);
+    serde_json::json!({
+        "form": st.get("form").and_then(|v| v.as_str()).unwrap_or("single"),
+        "style": st.get("style").and_then(|v| v.as_str()).unwrap_or("stroke"),
+        "align": st.get("align").and_then(|v| v.as_str()).unwrap_or("center"),
+        "fontSize": st.get("fontSize").and_then(|v| v.as_u64()).unwrap_or(22).clamp(12, 28),
+        "colorText": st.get("colorText").and_then(|v| v.as_str()).filter(|v| is_lyric_color(v)).unwrap_or(""),
+        "colorFill": st.get("colorFill").and_then(|v| v.as_str()).filter(|v| is_lyric_color(v)).unwrap_or(""),
+        "offset": st.get("offset").and_then(|v| v.as_f64()).unwrap_or(0.0),
     })
 }
 
@@ -1073,162 +1065,6 @@ fn start_lyric_hover_watch(app: &tauri::AppHandle) {
     });
 }
 
-/// 同步歌词配置到探测线程（前端改设置后调用）。
-#[tauri::command]
-fn lyric_apply_cfg(hover_unlock: Option<bool>, auto_lock_ms: Option<u64>) {
-    if let Some(h) = hover_unlock {
-        LYRIC_HOVER_UNLOCK.store(h, Ordering::SeqCst);
-    }
-    if let Some(ms) = auto_lock_ms {
-        LYRIC_AUTO_LOCK_MS.store(ms.min(60_000), Ordering::SeqCst);
-    }
-}
-
-/// 共享 HTTP Agent：复用连接池（keep-alive + TLS 会话），避免每次请求重建。
-/// 音源插件频繁请求第三方接口时显著减少握手开销。
-static AGENT: OnceLock<ureq::Agent> = OnceLock::new();
-fn agent() -> &'static ureq::Agent {
-    AGENT.get_or_init(|| ureq::AgentBuilder::new().build())
-}
-
-/// 构建请求：注入默认 UA + 可选自定义 headers。
-fn build_headers(req: ureq::Request, headers: &Option<serde_json::Value>) -> ureq::Request {
-    let mut r = req.set(
-        "User-Agent",
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) DeskOverlay/0.3.0",
-    );
-    if let Some(h) = headers.as_ref().and_then(|v| v.as_object()) {
-        for (k, v) in h {
-            if let Some(s) = v.as_str() {
-                // accept-encoding 必须剥离：插件手动透传 gzip 时 ureq 不做透明解压
-                //（只解压自己协商的头），响应保持压缩字节 → read_to_string 报
-                // "stream did not contain valid UTF-8"。剥掉后由 ureq（gzip feature）
-                // 自动协商并解压，文本通道始终拿到明文。
-                if k.eq_ignore_ascii_case("accept-encoding") {
-                    continue;
-                }
-                r = r.set(k, s);
-            }
-        }
-    }
-    r
-}
-
-/// 响应字节 → 文本（http_get / http_post 共用）。
-/// 1) gzip 魔数(1f 8b)强制解压——部分服务器无视协商头硬性返回压缩字节；
-/// 2) 严格 UTF-8 优先；失败时按 Content-Type charset 解码，未声明则回退 GBK
-///    （中文站点非 UTF-8 响应的常态），避免 "stream did not contain valid UTF-8"。
-fn decode_response(resp: ureq::Response) -> Result<String, String> {
-    let content_type = resp.header("Content-Type").unwrap_or("").to_string();
-    let mut bytes = Vec::new();
-    resp.into_reader()
-        .take(5 * 1024 * 1024)
-        .read_to_end(&mut bytes)
-        .map_err(|e| e.to_string())?;
-    if bytes.len() > 2 && bytes[0] == 0x1f && bytes[1] == 0x8b {
-        let mut gz = flate2::read::GzDecoder::new(&bytes[..]);
-        let mut raw = Vec::new();
-        gz.read_to_end(&mut raw)
-            .map_err(|e| format!("gzip 解压失败：{e}"))?;
-        bytes = raw;
-    }
-    if let Ok(s) = std::str::from_utf8(&bytes) {
-        return Ok(s.to_string());
-    }
-    let charset = content_type
-        .split(';')
-        .find_map(|p| p.trim().strip_prefix("charset=").map(|c| c.trim_matches('"').trim().to_string()))
-        .unwrap_or_default();
-    let enc = encoding_rs::Encoding::for_label(charset.as_bytes())
-        .or_else(|| encoding_rs::Encoding::for_label(b"gbk"))
-        .unwrap_or(encoding_rs::UTF_8);
-    let (text, _encoding, _had_errors) = enc.decode(&bytes);
-    Ok(text.into_owned())
-}
-
-/// HTTP GET 代理：绕过 WebView 跨域限制，供音乐音源插件请求第三方接口。
-/// headers 为可选 JSON 对象（键值均为字符串）。
-/// 注意：ureq 为阻塞式 I/O，禁止在主线程命令里直接调用，否则整个应用（含 WebView 事件循环）
-/// 会在请求期间冻结（最长 15s 超时）。因此命令声明为 async，把阻塞逻辑放进 spawn_blocking。
-fn http_get_blocking(url: String, headers: Option<serde_json::Value>) -> Result<String, String> {
-    let u = url.trim();
-    if !(u.starts_with("http://") || u.starts_with("https://")) {
-        return Err("仅支持 http/https 地址".to_string());
-    }
-    let resp = build_headers(agent().get(u), &headers)
-        .timeout(std::time::Duration::from_secs(15))
-        .call()
-        .map_err(|e| e.to_string())?;
-    decode_response(resp)
-}
-
-#[tauri::command]
-async fn http_get(url: String, headers: Option<serde_json::Value>) -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(move || http_get_blocking(url, headers))
-        .await
-        .map_err(|e| format!("网络任务执行失败: {e}"))?
-}
-
-/// HTTP POST 代理：同 http_get，支持发送请求体（JSON/表单字符串）。
-fn http_post_blocking(url: String, body: String, headers: Option<serde_json::Value>) -> Result<String, String> {
-    let u = url.trim();
-    if !(u.starts_with("http://") || u.starts_with("https://")) {
-        return Err("仅支持 http/https 地址".to_string());
-    }
-    let resp = build_headers(agent().post(u), &headers)
-        .timeout(std::time::Duration::from_secs(15))
-        .send_string(&body)
-        .map_err(|e| e.to_string())?;
-    decode_response(resp)
-}
-
-#[tauri::command]
-async fn http_post(url: String, body: String, headers: Option<serde_json::Value>) -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(move || http_post_blocking(url, body, headers))
-        .await
-        .map_err(|e| format!("网络任务执行失败: {e}"))?
-}
-
-/// HTTP GET 二进制代理：返回 base64 编码的响应体。
-/// 供音源插件 `responseType: "arraybuffer"` 请求使用（如咪咕 VIP 加密取流），
-/// 二进制不能走 http_get 文本通道（UTF-8 解码会损坏/报错）。
-#[tauri::command]
-async fn http_get_bytes(url: String, headers: Option<serde_json::Value>) -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let u = url.trim();
-        if !(u.starts_with("http://") || u.starts_with("https://")) {
-            return Err("仅支持 http/https 地址".to_string());
-        }
-        let resp = build_headers(agent().get(u), &headers)
-            .timeout(std::time::Duration::from_secs(15))
-            .call()
-            .map_err(|e| e.to_string())?;
-        let mut bytes = Vec::new();
-        resp.into_reader()
-            .take(5 * 1024 * 1024)
-            .read_to_end(&mut bytes)
-            .map_err(|e| e.to_string())?;
-        use base64::Engine as _;
-        Ok(base64::engine::general_purpose::STANDARD.encode(bytes))
-    })
-    .await
-    .map_err(|e| format!("网络任务执行失败: {e}"))?
-}
-
-/// 抓取指定 http(s) 地址响应的原始字节（上限 2MB）。供 favicon 图标读取。
-fn fetch_bytes(url: &str) -> Result<Vec<u8>, String> {
-    let resp = build_headers(agent().get(url), &None)
-        .timeout(std::time::Duration::from_secs(10))
-        .call()
-        .map_err(|e| e.to_string())?;
-    let mut out = Vec::new();
-    resp.into_reader()
-        .take(2 * 1024 * 1024)
-        .read_to_end(&mut out)
-        .map_err(|e| e.to_string())?;
-    Ok(out)
-}
-
 /// 从首页 HTML 中提取第一个 `<link ... rel=...icon ... href=...>` 的 href 值。
 /// 返回原始 href（可能为绝对或相对路径）。找不到返回 None。
 fn icon_href_from_html(html: &str) -> Option<String> {
@@ -1239,7 +1075,6 @@ fn icon_href_from_html(html: &str) -> Option<String> {
         let rest = &low[s + 5..];
         let e = rest.find('>').map(|i| s + 5 + i).unwrap_or(low.len());
         let tag = &html[s..e.min(html.len())]; // 原大小写，便于取属性值
-        // 仅关注 rel 中带 icon 的 link
         if tag.to_ascii_lowercase().contains("icon") {
             if let Some(v) = take_href_attr(&tag[5..]) {
                 return Some(v);
@@ -1313,7 +1148,7 @@ fn fetch_favicon_blocking(url: String) -> Result<String, String> {
 
     // 优先从首页 <link rel="icon"> 解析真实图标地址（不少站点对未知路径回退首页 HTML，导致固定路径探测失败）
     let mut candidates: Vec<String> = Vec::new();
-    if let Ok(html_bytes) = fetch_bytes(&format!("{origin}/")) {
+    if let Ok(html_bytes) = http::fetch_bytes(&format!("{origin}/")) {
         let html = String::from_utf8_lossy(&html_bytes);
         if let Some(h) = icon_href_from_html(&html) {
             candidates.push(resolve_url(&h, &origin));
@@ -1327,7 +1162,7 @@ fn fetch_favicon_blocking(url: String) -> Result<String, String> {
     ]);
 
     for cu in candidates {
-        if let Ok(bin) = fetch_bytes(&cu) {
+        if let Ok(bin) = http::fetch_bytes(&cu) {
             if let Some(data) = encode_icon(&bin) {
                 return Ok(data);
             }
@@ -1591,7 +1426,6 @@ fn prepare_wallpaper(app: tauri::AppHandle, path: String) -> Result<WallpaperPre
     let cached = cache_dir.join("bg.jpg");
     let stamp_file = cache_dir.join("bg.stamp");
 
-    // 缓存命中：副本存在且记录的源 mtime 一致 → 直接复用
     if cached.is_file() && stamp_file.is_file() {
         if let Ok(stamp) = fs::read_to_string(&stamp_file) {
             if stamp.trim() == mtime.to_string() {
@@ -2009,6 +1843,7 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(sedentary::new_sedentary_state())
+        .manage(eyecare::new_eyecare_state())
         .setup(|app| {
             // 启动系统指标 Provider 数据桥（CPU + 内存 → provider-emit）
             sys_bridge::start_system_provider(app.handle().clone());
@@ -2024,6 +1859,14 @@ fn main() {
 
             // 全盘文件名索引：后台线程建索引，快照秒恢复，供文件中心全盘搜索
             file_index::start_index(app.handle().clone());
+
+            // 全局护眼：启动 Gamma 守护线程（配置经 set_eyecare_config 下发）。
+            // 守护线程负责「被其他应用覆盖后夺回」与「显示事件重置后重放」——
+            // 这两点来自 SetDeviceGammaRamp 的官方限制，无法用事件驱动替代。
+            eyecare::start_eyecare_guardian(
+                app.handle().clone(),
+                app.state::<eyecare::EyeCareState>().inner().clone(),
+            );
 
             // 嵌入桌面 WorkerW（成为桌面本身），再显示。
             // 开机自启（--autostart）：登录瞬间桌面可能尚未就绪，延迟后再嵌入，
@@ -2047,7 +1890,7 @@ fn main() {
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![quit_app, autostart::autostart_status, autostart::set_autostart, downloader::download_start, downloader::download_cancel, downloader::downloaded_list, downloader::downloaded_delete, downloader::local_track_assets, aliyundrive::ad_auth_bind, aliyundrive::ad_auth_status, aliyundrive::ad_unbind, aliyundrive::ad_drive_info, aliyundrive::ad_list, aliyundrive::ad_search, aliyundrive::ad_play_url, aliyundrive::ad_upload_start, aliyundrive::ad_upload_cancel, aliyundrive::ad_upload_list, aliyundrive::ad_track_meta, show_reminder, hide_reminder, reminder_ready, show_lyric, hide_lyric, lyric_ready, lyric_sync, lyric_set_locked, lyric_move, lyric_pos_commit, lyric_apply_cfg, lyric_commit_display, lyric_menu_toggle, lyric_menu_ready, read_text_file, export_text_file, run_wasm_backend, install_plugin_package, build_wasm_backend, http_get, http_get_bytes, http_post, fetch_favicon, load_state, save_state, backup_data, restore_data, get_theme, broadcast_theme, read_bg_data_url, prepare_wallpaper, list_desktop_files, image_thumbnail, open_file, open_path, pick_folder, pick_file, reveal_file, delete_file, rename_file, reveal_path, delete_path, rename_path, show_lock, hide_lock, file_index::index_status, file_index::search_files, file_index::rebuild_index, sys_bridge::start_system_sampling, sys_bridge::stop_system_sampling, sys_bridge::check_media_playing, sys_bridge::set_lock_monitor_enabled, sedentary::set_sedentary_config])
+        .invoke_handler(tauri::generate_handler![quit_app, autostart::autostart_status, autostart::set_autostart, downloader::download_start, downloader::download_cancel, downloader::downloaded_list, downloader::downloaded_delete, downloader::local_track_assets, aliyundrive::ad_auth_bind, aliyundrive::ad_auth_status, aliyundrive::ad_unbind, aliyundrive::ad_list, aliyundrive::ad_search, aliyundrive::ad_play_url, aliyundrive::ad_upload_start, aliyundrive::ad_upload_cancel, aliyundrive::ad_upload_list, aliyundrive::ad_track_meta, show_reminder, hide_reminder, reminder_ready, show_lyric, hide_lyric, lyric_ready, lyric_sync, lyric_set_locked, lyric_move, lyric_pos_commit, lyric_commit_display, lyric_menu_toggle, lyric_menu_ready, read_text_file, export_text_file, run_wasm_backend, install_plugin_package, build_wasm_backend, http::http_get, http::http_get_bytes, http::http_post, fetch_favicon, load_state, save_state, backup_data, restore_data, get_theme, broadcast_theme, read_bg_data_url, prepare_wallpaper, list_desktop_files, image_thumbnail, open_file, open_path, pick_folder, pick_file, reveal_file, delete_file, rename_file, reveal_path, delete_path, rename_path, show_lock, hide_lock, file_index::index_status, file_index::search_files, file_index::rebuild_index, sys_bridge::start_system_sampling, sys_bridge::stop_system_sampling, sys_bridge::check_media_playing, sys_bridge::set_lock_monitor_enabled, sedentary::set_sedentary_config, eyecare::set_eyecare_config, eyecare::restore_native_color, eyecare::eyecare_status])
         .run(tauri::generate_context!())
         .expect("DeskOverlay 运行失败");
 }

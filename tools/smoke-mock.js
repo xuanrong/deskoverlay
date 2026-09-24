@@ -69,7 +69,6 @@
     },
     lyric_move: () => null,
     lyric_pos_commit: () => null,
-    lyric_apply_cfg: () => null,
     // 形态/样式/字号的统一提交通道。真实 Rust 侧会改窗口高度并全局广播
     // lyric://display（主窗口据此落盘）—— mock 复现这条广播，否则
     // 「歌词页右键改形态 → 主窗口持久化」这条链路无法断言。

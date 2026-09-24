@@ -8,9 +8,9 @@
 //   - onChange 选中后回调 (value) => {}
 // 交互：点击整框弹出日历；点外部 / Esc / 滚动关闭；支持今天与清除。
 
+import { ymd } from "./utils.js";
+
 const WEEK = ["日", "一", "二", "三", "四", "五", "六"];
-const pad = (n) => String(n).padStart(2, "0");
-const toStr = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 const parse = (s) => {
   if (!s) return null;
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
@@ -56,7 +56,7 @@ export function createDatePicker({ el, value = "", onChange = null }) {
 
   function buildPop() {
     const today = new Date();
-    const todayStr = toStr(today);
+    const todayStr = ymd(today);
     const init = parse(el.value) || today;
     let viewY = init.getFullYear();
     let viewM = init.getMonth();
@@ -71,7 +71,7 @@ export function createDatePicker({ el, value = "", onChange = null }) {
       const cells = [];
       for (let i = 0; i < 42; i++) {
         const d = new Date(viewY, viewM, 1 - offset + i);
-        const ds = toStr(d);
+        const ds = ymd(d);
         const cls = ["dp-day"];
         if (d.getMonth() !== viewM) cls.push("other");
         if (ds === todayStr) cls.push("today");

@@ -1,9 +1,10 @@
 // 快捷访问视图（独立导航模块）：网页链接 / 文件夹 / 文件 快捷方式，支持分组与跨组拖动。
 import { invoke } from "../bus.js";
 import { QuickAccess } from "../quickAccess.js";
-import { ICON_FOLDER, ICON_EDIT, ICON_TRASH, ICON_PAPERCLIP, ICON_GLOBE } from "../icons.js";
+import { ICON_FOLDER, ICON_EDIT, ICON_TRASH, ICON_PAPERCLIP, ICON_GLOBE, ICON_DOC } from "../icons.js";
 import { FILE_CATEGORIES, FILE_ICONS } from "../filetypes.js";
-import { esc, showDialog } from "./common.js";
+import { showDialog } from "./common.js";
+import { esc } from "../utils.js";
 import { createSelect } from "../selectbox.js";
 
 function qaCardIcon(q) {
