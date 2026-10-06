@@ -11,6 +11,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod autostart;
+mod checkin;
 mod aliyundrive;
 mod desktop_inject;
 mod downloader;
@@ -18,6 +19,8 @@ mod eyecare;
 mod file_index;
 mod http;
 mod plugin_pkg;
+mod scheduler;
+mod scheduler_export;
 mod sedentary;
 mod sys_bridge;
 mod usn_index;
@@ -1844,7 +1847,12 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .manage(sedentary::new_sedentary_state())
         .manage(eyecare::new_eyecare_state())
+        .manage(scheduler::SchedulerState::new())
         .setup(|app| {
+            // 定时任务调度线程：每 20s 一轮 tick，任务定义实时从 state.json 读取
+            // （不缓存，前端改完即生效，避免两处任务表不一致）。
+            scheduler::start_scheduler(app.handle().clone());
+
             // 启动系统指标 Provider 数据桥（CPU + 内存 → provider-emit）
             sys_bridge::start_system_provider(app.handle().clone());
 
@@ -1890,7 +1898,7 @@ fn main() {
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![quit_app, autostart::autostart_status, autostart::set_autostart, downloader::download_start, downloader::download_cancel, downloader::downloaded_list, downloader::downloaded_delete, downloader::local_track_assets, aliyundrive::ad_auth_bind, aliyundrive::ad_auth_status, aliyundrive::ad_unbind, aliyundrive::ad_list, aliyundrive::ad_search, aliyundrive::ad_play_url, aliyundrive::ad_upload_start, aliyundrive::ad_upload_cancel, aliyundrive::ad_upload_list, aliyundrive::ad_track_meta, show_reminder, hide_reminder, reminder_ready, show_lyric, hide_lyric, lyric_ready, lyric_sync, lyric_set_locked, lyric_move, lyric_pos_commit, lyric_commit_display, lyric_menu_toggle, lyric_menu_ready, read_text_file, export_text_file, run_wasm_backend, install_plugin_package, build_wasm_backend, http::http_get, http::http_get_bytes, http::http_post, fetch_favicon, load_state, save_state, backup_data, restore_data, get_theme, broadcast_theme, read_bg_data_url, prepare_wallpaper, list_desktop_files, image_thumbnail, open_file, open_path, pick_folder, pick_file, reveal_file, delete_file, rename_file, reveal_path, delete_path, rename_path, show_lock, hide_lock, file_index::index_status, file_index::search_files, file_index::rebuild_index, sys_bridge::start_system_sampling, sys_bridge::stop_system_sampling, sys_bridge::check_media_playing, sys_bridge::set_lock_monitor_enabled, sedentary::set_sedentary_config, eyecare::set_eyecare_config, eyecare::restore_native_color, eyecare::eyecare_status])
+        .invoke_handler(tauri::generate_handler![quit_app, autostart::autostart_status, autostart::set_autostart, downloader::download_start, downloader::download_cancel, downloader::downloaded_list, downloader::downloaded_delete, downloader::local_track_assets, aliyundrive::ad_auth_bind, aliyundrive::ad_auth_status, aliyundrive::ad_unbind, aliyundrive::ad_list, aliyundrive::ad_search, aliyundrive::ad_play_url, aliyundrive::ad_upload_start, aliyundrive::ad_upload_cancel, aliyundrive::ad_upload_list, aliyundrive::ad_track_meta, show_reminder, hide_reminder, reminder_ready, show_lyric, hide_lyric, lyric_ready, lyric_sync, lyric_set_locked, lyric_move, lyric_pos_commit, lyric_commit_display, lyric_menu_toggle, lyric_menu_ready, read_text_file, export_text_file, run_wasm_backend, install_plugin_package, build_wasm_backend, http::http_get, http::http_get_bytes, http::http_post, http::http_post_stream, http::http_stream_cancel, fetch_favicon, load_state, save_state, backup_data, restore_data, get_theme, broadcast_theme, read_bg_data_url, prepare_wallpaper, list_desktop_files, image_thumbnail, open_file, open_path, pick_folder, pick_file, reveal_file, delete_file, rename_file, reveal_path, delete_path, rename_path, show_lock, hide_lock, file_index::index_status, file_index::search_files, file_index::rebuild_index, sys_bridge::start_system_sampling, sys_bridge::stop_system_sampling, sys_bridge::check_media_playing, sys_bridge::set_lock_monitor_enabled, sedentary::set_sedentary_config, eyecare::set_eyecare_config, eyecare::restore_native_color, eyecare::eyecare_status, checkin::collect_checkin_state, scheduler::scheduler_runs, scheduler::scheduler_heat, scheduler::scheduler_run_now, scheduler::scheduler_cancel, scheduler::scheduler_clear_runs, scheduler::scheduler_status, scheduler::scheduler_check_cron, scheduler_export::scheduler_export_preview, scheduler_export::scheduler_export_task, scheduler_export::scheduler_unexport_task, scheduler_export::scheduler_export_status, scheduler_export::scheduler_read_os_log, scheduler_export::scheduler_clear_os_log])
         .run(tauri::generate_context!())
         .expect("DeskOverlay 运行失败");
 }

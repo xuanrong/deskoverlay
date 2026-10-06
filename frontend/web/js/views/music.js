@@ -520,7 +520,7 @@ function toggleFavorite() {
 // 在线弹窗「喜欢」tab 的结果区（openOnlineMusic 设置）
 let favEl = null;
 
-// -------------------- 音乐下载（Rust 流式落盘，设计见 .raccoon/music-download-design.md） --------------------
+// -------------------- 音乐下载（Rust 流式落盘） --------------------
 
 // 统一取流：多档音质依次回退（部分歌曲只有某一档资源，只试 standard 会被误判「音源失效」），
 // 单档异常重试一次（瞬时网络抖动）。取不到时抛最后一个真实错误，便于 UI 区分「歌曲无资源」和「音源挂了」。
@@ -1783,7 +1783,6 @@ export function renderMusic(view) {
 }
 
 // -------------------- 阿里云盘（P1 播放链路） --------------------
-// 设计见 .raccoon/aliyundrive-music-design.md。
 // 社区授权（AList/OpenList 扫码页拿 refresh_token）→ 粘贴绑定 → 官方 OpenAPI 直调。
 // 音频文件类型过滤（云盘列表/搜索共用）
 const AD_AUDIO_EXT = new Set(["mp3", "flac", "m4a", "wav", "ape", "ogg", "wma", "aac"]);

@@ -82,7 +82,6 @@ src-tauri/
   examples/eyecare_probe.rs  # 护眼读写探测（非测试套件，按需手动跑）
 tools/                    # 校验脚本（见下节）
 frontend/STYLE_GUIDE.md   # 视觉规范
-design/ .design/          # 设计 token 与静态设计稿（预览用 HTML，不参与构建）
 ```
 
 ### 架构约定（新增代码前先读）

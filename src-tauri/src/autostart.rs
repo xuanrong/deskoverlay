@@ -1,4 +1,4 @@
-//! 开机自启：写 HKCU Run 注册表键（设计见 .raccoon/autostart-design.md）。
+//! 开机自启：写 HKCU Run 注册表键。
 //!
 //! 真值来源是注册表本身：`HKCU\...\CurrentVersion\Run` 下存在 `DeskOverlay` 值
 //! 即视为已启用；state.json 只存用户意图，设置页展示以 `autostart_status` 为准。

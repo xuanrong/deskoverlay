@@ -1,5 +1,4 @@
 //! 阿里云盘对接（P1 播放链路）：社区授权绑定 + 官方 OpenAPI 直调。
-//! 设计见 .raccoon/aliyundrive-music-design.md。
 //!
 //! 通道说明（2026-09 核实）：
 //! - 开放平台 2025-07 起暂停个人开发者申请 → 采用 AList/OpenList 社区托管授权页

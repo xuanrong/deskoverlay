@@ -64,3 +64,9 @@ windows = { version = "0.61", features = [
   # 单实例互斥量：防「开机自启 + 手动启动」双实例重复嵌入桌面
   "Win32_System_Threading",
 ] }
+
+# 定时任务调度（scheduler.rs）：对外统一用 Unix 5 段 cron（分 时 日 月 周），
+# 由 parse_schedule 转换成本 crate 的 6 段语法（秒开头、星期 1=周日）再求下次触发时刻。
+# 本地时区换算依赖 chrono（此前已是传递依赖，这里提升为直接依赖以便显式使用）。
+cron = "0.12"
+chrono = "0.4"

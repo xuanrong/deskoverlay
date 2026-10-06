@@ -75,3 +75,9 @@ export const ICON_IDEA = `<svg viewBox="0 0 24 24"><path d="M9 18h6"/><path d="M
 export const ICON_DOWNLOAD = `<svg viewBox="0 0 24 24"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>`;
 // 云盘（音乐页左侧「喜欢」下方的固定入口）
 export const ICON_CLOUD = `<svg viewBox="0 0 24 24"><path d="M17.5 19a4.5 4.5 0 0 0 .42-8.98 6 6 0 0 0-11.7 1.7A4 4 0 0 0 6.5 19Z"/></svg>`;
+// 基金（上升趋势折线 + 右上箭头，宿主线性 SVG 风格）
+export const ICON_FUND = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l5-5 4 4 8-8"/><path d="M15 8h6v6"/></svg>`;
+// AI（四芒星火花 + 小星，线性风格）
+export const ICON_AI = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l2 6 6 1-6 1-2 6-2-6-6-1 6-1z"/><circle cx="18.5" cy="5.5" r="1"/></svg>`;
+// 拖拽抓手（两列三点），用于「可拖动排序」的分组标题左侧
+export const ICON_GRIP = `<svg viewBox="0 0 24 24"><circle cx="9" cy="6" r="1.3"/><circle cx="15" cy="6" r="1.3"/><circle cx="9" cy="12" r="1.3"/><circle cx="15" cy="12" r="1.3"/><circle cx="9" cy="18" r="1.3"/><circle cx="15" cy="18" r="1.3"/></svg>`;

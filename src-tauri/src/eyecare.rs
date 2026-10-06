@@ -19,9 +19,10 @@
 //! 安全底线：启用前用 GetDeviceGammaRamp 保存原始 ramp，关闭时**精确还原那一份**
 //! 而不是写恒等值 —— 用户机器上可能已装 ICC 校色配置，写恒等值会破坏它。
 
+use std::fs;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use windows::Win32::Graphics::Gdi::{GetDC, ReleaseDC, HDC};
 use windows::Win32::UI::ColorSystem::{GetDeviceGammaRamp, SetDeviceGammaRamp};
 
@@ -102,9 +103,98 @@ pub fn new_eyecare_state() -> EyeCareState {
     Arc::new(Mutex::new(EyeCareConfig::default()))
 }
 
-/// 原始 ramp 快照：首次启用护眼前保存，关闭时精确还原。
-/// None = 尚未保存（从未启用过护眼）。
+/// 原始 ramp 快照：**真实启用护眼前**保存，关闭/恢复原色时精确还原。
+///
+/// 关键设计（修复「恢复原色像夜间一样暗」）：
+///   * **持久化到磁盘**（`eyecare_baseline.json`），而非进程内 static —— 进程重启后
+///     基准仍在，不会因「应用重启 → 自动恢复护眼 → 把调暗态误存为基准」而被污染。
+///   * **只在真实用户启用时保存**（`prev.enabled=false → true`）。启动自动恢复
+///     （`prev.enabled` 已为 true）绝不重新保存，直接复用磁盘基准。
+///   * `None` = 磁盘上尚无基准（从未真实启用过护眼），此时还原不写任何 ramp，
+///     避免破坏用户既有的 ICC 校色配置。
 static ORIGINAL_RAMP: Mutex<Option<Ramp>> = Mutex::new(None);
+
+/// 基准文件名：与 state.json / music.json 并列放在 app_data_dir 下。
+/// 刻意独立成文件而非写进 state.json —— state.json 由前端整体覆盖写（save_state），
+/// 后端直接读写会与前端唯一写者冲突；独立文件由后端全权读写，互不干扰。
+const BASELINE_FILE: &str = "eyecare_baseline.json";
+
+/// 基准文件完整路径。
+fn baseline_path(app: &AppHandle) -> Option<std::path::PathBuf> {
+    app.path()
+        .app_data_dir()
+        .ok()
+        .map(|d| d.join(BASELINE_FILE))
+}
+
+/// 从 JSON Value 解码 ramp（纯函数，便于单测）。
+/// 结构异常（非数组/长度不对/含非数字）一律返回 None —— 不信任磁盘脏数据。
+fn decode_ramp_from_value(v: &serde_json::Value) -> Option<Ramp> {
+    let arr = v.get("ramp")?.as_array()?;
+    if arr.len() != 768 {
+        return None;
+    }
+    let mut ramp = [0u16; 768];
+    for (i, item) in arr.iter().enumerate() {
+        ramp[i] = item.as_u64()? as u16;
+    }
+    Some(ramp)
+}
+
+/// 把 ramp 编码为 JSON Value（纯函数，便于单测）。
+fn encode_ramp_to_value(ramp: &Ramp) -> serde_json::Value {
+    let arr: Vec<u64> = ramp.iter().map(|&x| x as u64).collect();
+    serde_json::json!({ "ramp": arr })
+}
+
+/// 启动时从磁盘加载基准到内存缓存。缺失/损坏一律视为 None，不阻塞启动。
+fn load_baseline_from_disk(app: &AppHandle) {
+    let path = match baseline_path(app) {
+        Some(p) => p,
+        None => return,
+    };
+    let Ok(data) = fs::read_to_string(&path) else {
+        return;
+    };
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(&data) else {
+        return;
+    };
+    let Some(ramp) = decode_ramp_from_value(&v) else {
+        return;
+    };
+    let mut guard = ORIGINAL_RAMP.lock().expect("original ramp lock");
+    if guard.is_none() {
+        *guard = Some(ramp);
+    }
+}
+
+/// 惰性加载：首次需要基准时从磁盘读一次（幂等，内存已有则跳过）。
+/// 由 `set_eyecare_config` / `restore_native_color` 调用，确保命令先于
+/// 守护线程也拿得到持久化基准。
+fn ensure_baseline_loaded(app: &AppHandle) {
+    let already = ORIGINAL_RAMP.lock().expect("original ramp lock").is_some();
+    if !already {
+        load_baseline_from_disk(app);
+    }
+}
+
+/// 把当前内存基准落盘（幂等：无基准时不写）。
+fn persist_baseline(app: &AppHandle) {
+    let Some(path) = baseline_path(app) else {
+        return;
+    };
+    let guard = ORIGINAL_RAMP.lock().expect("original ramp lock");
+    let Some(ref ramp) = *guard else {
+        return;
+    };
+    let body = encode_ramp_to_value(ramp);
+    if let Some(dir) = path.parent() {
+        let _ = fs::create_dir_all(dir);
+    }
+    if let Ok(s) = serde_json::to_string_pretty(&body) {
+        let _ = fs::write(&path, s);
+    }
+}
 
 // ────────────────────────── 纯函数：色温 → Gamma ramp ──────────────────────────
 
@@ -342,15 +432,21 @@ pub fn set_device_ramp(ramp: &Ramp) -> bool {
     }
 }
 
-/// 保存原始 ramp（只在首次启用护眼前调用一次）。
-fn save_original_ramp() {
+/// 保存原始 ramp：读取当前屏幕 gamma 作为基准，写内存缓存并落盘。
+///
+/// 调用方必须保证**这是真实用户启用**（`prev.enabled=false → true`），
+/// 启动自动恢复不调用本函数 —— 否则会把已被护眼调暗的 gamma 误存为基准，
+/// 正是「恢复原色像夜间一样暗」的根因。
+fn save_original_ramp(app: &AppHandle) {
     let mut guard = ORIGINAL_RAMP.lock().expect("original ramp lock");
     if guard.is_some() {
-        return; // 已保存：重复启用不应覆盖基准
+        return; // 基准已存在（本次会话或磁盘上）：真实启用不覆盖已有基准
     }
     if let Some(cur) = get_device_ramp() {
         *guard = Some(cur);
     }
+    drop(guard);
+    persist_baseline(app);
 }
 
 /// 精确还原到启用护眼前的原始 ramp。
@@ -368,12 +464,23 @@ pub fn restore_original_ramp() -> bool {
 
 // ────────────────────────── 命令 ──────────────────────────
 
+/// 判定「本次是否为真实用户启用」（纯函数，便于单测）。
+///
+/// 只有**上一状态关闭、新状态开启**才算真实启用，此时才允许保存/刷新原始基准。
+/// 启动自动恢复时 `prev_enabled` 已为 true（状态从磁盘读回），不会被误判，
+/// 从而杜绝「把已被护眼调暗的 gamma 存成原始基准」这一 bug 根源。
+#[inline]
+pub fn is_real_user_enable(prev_enabled: bool, enabled: bool) -> bool {
+    !prev_enabled && enabled
+}
+
 /// 前端写入护眼配置。
 ///
 /// 参数名经 Tauri v2 自动转 camelCase 暴露给 JS：前端必须传 `brightness` / `contrast`
 /// 等同名 camelCase 键；snake_case 会报 missing required key（sedentary 同坑）。
 #[tauri::command]
 pub fn set_eyecare_config(
+    app: AppHandle,
     state: State<EyeCareState>,
     enabled: bool,
     kelvin: f64,
@@ -386,8 +493,13 @@ pub fn set_eyecare_config(
     to: Option<String>,
     transition_min: Option<u32>,
 ) -> Result<bool, String> {
+    // 启动/首次调用时确保基准已从磁盘载入（幂等）
+    ensure_baseline_loaded(&app);
     // 范围夹取：与 build_ramp 内部约束保持一致，避免 UI 传出越界值
     let prev = *state.lock().map_err(|e| e.to_string())?;
+    // 是否「真实用户启用」：上一状态为关闭、新状态为开启。
+    // 启动自动恢复时 prev.enabled 已为 true，不会判为真实启用 → 不保存基准。
+    let real_user_enable = is_real_user_enable(prev.enabled, enabled);
     let cfg = EyeCareConfig {
         enabled,
         kelvin: kelvin.clamp(2000.0, 6500.0),
@@ -406,7 +518,11 @@ pub fn set_eyecare_config(
     }
     // 立即应用一次（不等守护线程的下一轮轮询，保证 UI 操作即时反馈）
     if cfg.enabled {
-        save_original_ramp();
+        // 只在真实用户从关闭切到开启时保存基准；启动自动恢复复用已有基准，
+        // 绝不把已被护眼调暗的 gamma 误存为「原始色彩」。
+        if real_user_enable {
+            save_original_ramp(&app);
+        }
         let k = target_kelvin_at(&cfg, now_minutes());
         let ramp = build_ramp(k, cfg.brightness, cfg.contrast);
         if !set_device_ramp(&ramp) {
@@ -464,14 +580,16 @@ fn local_utc_offset_secs() -> i32 {
 }
 
 /// 立即恢复显示器原始色彩（用于修图/调色等需要准确色彩的场合）。
-/// 只还原 ramp，**不改配置里的 enabled** —— 守护线程会在下一轮重新应用，
-/// 故此处同步把 enabled 置 false，语义为「本次护眼结束」。
+/// 语义是「本次护眼结束」：把 enabled 置 false 并还原原始 ramp；
+/// 若此时基准尚未保存过，顺手持久化一次，确保下次进程重启后仍能还原。
 #[tauri::command]
-pub fn restore_native_color(state: State<EyeCareState>) -> Result<bool, String> {
+pub fn restore_native_color(app: AppHandle, state: State<EyeCareState>) -> Result<bool, String> {
+    ensure_baseline_loaded(&app);
     {
         let mut c = state.lock().map_err(|e| e.to_string())?;
         c.enabled = false;
     }
+    persist_baseline(&app);
     Ok(restore_original_ramp())
 }
 
@@ -523,6 +641,10 @@ pub fn start_eyecare_guardian(app: AppHandle, state: EyeCareState) {
         const POLL: Duration = Duration::from_secs(2);
         // 已成功写入的目标 ramp 缓存：与当前配置比对，避免重复写
         let mut last_written: Option<Ramp> = None;
+
+        // 启动即载入持久化基准：守护线程可能是首个需要还原 ramp 的地方
+        // （命令尚未到达时），先载入保证关闭态能还原到正确基准。
+        ensure_baseline_loaded(&app);
 
         loop {
             std::thread::sleep(POLL);
@@ -716,5 +838,52 @@ mod tests {
         assert_eq!(parse_hhmm("abc"), (22, 0));
         assert_eq!(parse_hhmm("25:00"), (22, 0));
         assert_eq!(parse_hhmm("12:99"), (22, 0));
+    }
+
+    /// 核心回归：只有「真实用户启用」才允许保存基准。
+    /// 修复方向 2 —— 启动自动恢复（prev=true）必须被排除，
+    /// 否则会把已被护眼调暗的 gamma 误存为原始基准，导致「恢复原色像夜间一样暗」。
+    #[test]
+    fn only_real_user_enable_may_save_baseline() {
+        // 真实启用：上一状态关闭 → 开启。允许保存。
+        assert!(is_real_user_enable(false, true), "关闭→开启 应判为真实启用");
+        // 启动自动恢复：上一状态已开启 → 再推开启。禁止保存（关键！）。
+        assert!(!is_real_user_enable(true, true), "开启→开启（启动恢复）不应判为真实启用");
+        // 关闭护眼：两种都禁止。
+        assert!(!is_real_user_enable(false, false));
+        assert!(!is_real_user_enable(true, false));
+    }
+
+    /// 基准 JSON 编解码往返一致：落盘后重读应还原出完全相同的 ramp。
+    #[test]
+    fn baseline_ramp_roundtrip() {
+        let mut ramp = [0u16; 768];
+        for (i, x) in ramp.iter_mut().enumerate() {
+            // 用 build_ramp 的真实取值，避免全是 0 的假阳性
+            *x = ((i as f64 / 255.0) * 65535.0).round() as u16 & 0xFF00;
+        }
+        let v = encode_ramp_to_value(&ramp);
+        let decoded = decode_ramp_from_value(&v).expect("应能解码自身编码结果");
+        assert_eq!(decoded, ramp, "往返后 ramp 必须完全一致");
+    }
+
+    /// 磁盘脏数据防护：长度不足 / 非数组 / 非数字都不能被当成基准。
+    #[test]
+    fn baseline_rejects_corrupt_data() {
+        // 长度不足 768
+        let short = serde_json::json!({ "ramp": [1u64, 2, 3] });
+        assert!(decode_ramp_from_value(&short).is_none(), "长度不对应拒绝");
+        // 缺 ramp 键
+        let missing = serde_json::json!({});
+        assert!(decode_ramp_from_value(&missing).is_none(), "缺键应拒绝");
+        // ramp 不是数组
+        let not_arr = serde_json::json!({ "ramp": "garbage" });
+        assert!(decode_ramp_from_value(&not_arr).is_none(), "非数组应拒绝");
+        // 含非数字元素
+        let mut bad = serde_json::json!({ "ramp": vec![0u64; 768] });
+        if let Some(a) = bad.get_mut("ramp").and_then(|r| r.as_array_mut()) {
+            a[5] = serde_json::json!("x");
+        }
+        assert!(decode_ramp_from_value(&bad).is_none(), "含非数字应拒绝");
     }
 }

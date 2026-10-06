@@ -4,6 +4,139 @@ import { Store } from "./store.js";
 import { DEFAULT_REMINDERS } from "./config.js";
 import { ymd, uid } from "./utils.js";
 
+// 定时任务的预置内容：把本机已在跑的签到脚本收进面板统一管理。
+//
+// 两点必须照抄、不要"美化"：
+// 1) python 用 `envs\default\Scripts\pythonw.exe` 这个**虚拟环境**的绝对路径 ——
+//    脚本依赖 requests，裸 `python` 在 app 的环境里既找不到解释器也可能缺包。
+//    该路径与现有计划任务 action 完全一致，是已验证可跑的组合。
+// 2) scheduleEnabled 默认 false —— 这两条目前由系统计划任务（10:00 / 10:05）触发，
+//    面板内调度若同时开启，同一时刻会被两个引擎各触发一次（重复领取）。
+//    想改成面板内调度：打开该任务 → 关掉「系统计划任务」→ 打开「面板内调度」。
+const SCHEDULER_SEED = [
+  {
+    id: "t_workbuddy_checkin",
+    name: "WorkBuddy 每日签到",
+    enabled: true,
+    scheduleEnabled: false,
+    cron: "0 10 * * *",
+    kind: "command",
+    command:
+      '"C:\\Users\\qiuxr\\.workbuddy\\binaries\\python\\envs\\default\\Scripts\\pythonw.exe" ' +
+      '"C:\\Users\\qiuxr\\workbuddy-checkin\\checkin_workbuddy.py"',
+    cwd: "",
+    timeoutSec: 300,
+    retry: 0,
+    outputEncoding: "auto",
+    note: "现由系统计划任务「WorkBuddy Daily Check-in」每天 10:00 触发；面板内调度已关，避免重复领取",
+  },
+  {
+    id: "t_trae_checkin",
+    name: "Trae CN 每日签到",
+    enabled: true,
+    scheduleEnabled: false,
+    cron: "5 10 * * *",
+    kind: "command",
+    command:
+      '"C:\\Users\\qiuxr\\.workbuddy\\binaries\\python\\envs\\default\\Scripts\\pythonw.exe" ' +
+      '"C:\\Users\\qiuxr\\workbuddy-checkin\\checkin_trae.py"',
+    cwd: "",
+    timeoutSec: 300,
+    retry: 0,
+    outputEncoding: "auto",
+    note: "现由系统计划任务「Trae CN Daily Check-in」每天 10:05 触发；面板内调度已关，避免重复领取",
+  },
+  {
+    id: "t_quark_checkin",
+    name: "夸克网盘 每日签到",
+    enabled: true,
+    scheduleEnabled: true,
+    cron: "10 10 * * *",
+    kind: "command",
+    // 用 python.exe 而非 pythonw.exe：pythonw 是无窗口解释器，**不产生任何 stdout**，
+    // 面板日志会是空的。本任务走面板内调度，要的就是实时输出，所以必须用 python.exe。
+    // （不会弹黑框：Rust 侧 spawn 统一带 CREATE_NO_WINDOW。）
+    command:
+      '"C:\\Users\\qiuxr\\.workbuddy\\binaries\\python\\envs\\default\\Scripts\\python.exe" ' +
+      '"C:\\Users\\qiuxr\\workbuddy-checkin\\checkin_quark.py"',
+    cwd: "",
+    timeoutSec: 300,
+    retry: 1,
+    // 脚本自带 sys.stdout.reconfigure(encoding="utf-8")，输出确定是 UTF-8，
+    // 不交给启发式判定（GBK 与 UTF-8 在字节层存在真歧义）
+    outputEncoding: "utf8",
+    note: "面板内调度，每天 10:10（错开 WorkBuddy 10:00 / Trae 10:05）。签到是夸克 App 专属功能（网页端无入口、PC 端接口已停服），需手机抓包取 kps/sign/vcode 填进 C:\\Users\\qiuxr\\workbuddy-checkin\\quark_params.txt，实测有效期约两个月；未填时任务会明确报「没有读到凭证」",
+  },
+  {
+    id: "t_pupu_checkin",
+    name: "朴朴超市 每日签到",
+    enabled: true,
+    scheduleEnabled: true,
+    // 同上：这条走面板内调度（不注册系统计划任务），到点在 app 内触发
+    cron: "0 20 * * *",
+    kind: "command",
+    // 同夸克：面板内调度要的是实时输出，必须用 python.exe（pythonw 不产生 stdout）
+    command:
+      '"C:\\Users\\qiuxr\\.workbuddy\\binaries\\python\\envs\\default\\Scripts\\python.exe" ' +
+      '"C:\\Users\\qiuxr\\workbuddy-checkin\\checkin_pupu.py"',
+    cwd: "",
+    timeoutSec: 300,
+    retry: 1,
+    outputEncoding: "utf8",
+    note: "面板内调度，每天 20:00（夸克签到在 10:10，两者不同刻）。朴朴签到入口只在 App / 微信小程序里，需手机抓包取 refresh_token 填进 C:\\Users\\qiuxr\\workbuddy-checkin\\pupu_params.txt；未填时任务会明确报「没有读到凭证」",
+  },
+  {
+    id: "t_juejin_checkin",
+    name: "掘金 每日签到",
+    enabled: true,
+    scheduleEnabled: true,
+    // 面板内调度（不注册系统计划任务）。定在 10:15：10:00 的 WorkBuddy、10:05 的 Trae
+    // 两条系统计划任务已经把机器叫醒并联网，是「确定开机」的窗口，比另起时段更不易漏签。
+    cron: "15 10 * * *",
+    kind: "command",
+    // 同夸克/朴朴：面板内调度要的是实时输出，必须用 python.exe（pythonw 不产生 stdout）
+    command:
+      '"C:\\Users\\qiuxr\\.workbuddy\\binaries\\python\\envs\\default\\Scripts\\python.exe" ' +
+      '"C:\\Users\\qiuxr\\workbuddy-checkin\\checkin_juejin_browser.py"',
+    cwd: "",
+    timeoutSec: 300,
+    retry: 1,
+    outputEncoding: "utf8",
+    note: "面板内调度，每天 10:15。**走浏览器通道**：掘金 check_in 的字节风控参数 a_bogus 由页面 JS 现场生成（绑定时间戳/浏览器上下文），重放抓包那一份无效 —— 实测同一份有效 sessionid 下，check_in 对任意参数/方法/UA 组合都只回「HTTP 200 + 空正文」，纯 HTTP 无解，故用 Playwright 驱动**系统 Chrome**（掘金反爬会拦 Playwright 自带 Chromium）打开签到页点真实按钮。凭证 C:\\Users\\qiuxr\\workbuddy-checkin\\juejin_params.txt 只需 sessionid Cookie；纯 HTTP 的状态核对另见 checkin_juejin.py",
+  },
+];
+
+/// 补全单个任务的字段（老数据 / 手改 state.json 都可能缺字段）
+function normalizeScheduleTask(t) {
+  const out = t && typeof t === "object" && !Array.isArray(t) ? t : {};
+  if (typeof out.id !== "string" || !out.id) out.id = uid("t_");
+  if (typeof out.name !== "string" || !out.name) out.name = "未命名任务";
+  if (typeof out.enabled !== "boolean") out.enabled = true;
+  if (typeof out.scheduleEnabled !== "boolean") out.scheduleEnabled = true;
+  if (typeof out.cron !== "string") out.cron = "";
+  if (out.kind !== "http") out.kind = "command";
+  if (typeof out.command !== "string") out.command = "";
+  if (typeof out.cwd !== "string") out.cwd = "";
+  if (typeof out.method !== "string" || !out.method) out.method = "GET";
+  if (typeof out.url !== "string") out.url = "";
+  if (!out.headers || typeof out.headers !== "object" || Array.isArray(out.headers)) out.headers = {};
+  if (typeof out.body !== "string") out.body = "";
+  if (typeof out.expect !== "string") out.expect = "";
+  if (typeof out.note !== "string") out.note = "";
+  // 创建日期（YYYY-MM-DD）：热力图用它区分「任务那时还不存在」与「该跑没跑」。
+  // 老数据没有该字段 → 置空串，由前端回落到「最早一条按天聚合记录」。
+  if (typeof out.since !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(out.since)) out.since = "";
+  // 超时与重试收敛到后端同样的合理区间，避免手改出 0 或超大值
+  if (typeof out.timeoutSec !== "number" || !isFinite(out.timeoutSec) || out.timeoutSec < 1) out.timeoutSec = 300;
+  out.timeoutSec = Math.min(Math.round(out.timeoutSec), 86400);
+  if (typeof out.retry !== "number" || !isFinite(out.retry) || out.retry < 0) out.retry = 0;
+  out.retry = Math.min(Math.round(out.retry), 5);
+  // 子进程输出编码：auto = 后端启发式判定；其余是给用户的确定性出口
+  // （GBK 与 UTF-8 在字节层面存在真歧义，自动判定不可能 100% 正确）
+  if (!["auto", "utf8", "gbk"].includes(out.outputEncoding)) out.outputEncoding = "auto";
+  return out;
+}
+
 export const state = {
   currentModule: "dashboard",
   tasks: [],
@@ -36,6 +169,39 @@ export const state = {
   navState: {}, // 各模块导航浏览状态：{ [moduleId]: { scrollTop, tab, ... } }（切换/重启后恢复）
   settings: { rememberModule: true }, // 应用设置：rememberModule=启动时回到上次模块
   plugins: [], // 外部插件配置：{ id, title, path, enabled }（通过「设置 → 插件」导入）
+  fund: {
+    // 基金管家：自选 / 持仓 / 交易流水 / 行情缓存 / 设置
+    watchlist: [], // { id, code, name, addedAt }
+    holdings: [], // { id, code, name, shares, cost, unitCost?, addedAt }  cost=总成本（份额×单位成本）；unitCost=单位成本(元/份)
+    trades: [], // { id, code, name, type:"buy"|"sell"|"div", date, amount, shares, fee, nav, note }
+    cache: { quote: {}, history: {}, rank: {} },
+    settings: { autoRefresh: true, refreshSec: 30, highlightPct: 0.5 },
+    // AI 分析：OpenAI 兼容接口配置（apiKey 明文存本地 state.json，随「备份与恢复」走）+ 报告历史
+    ai: {
+      baseUrl: "", model: "", apiKey: "",
+      temperature: 0.3, maxTokens: 4000, timeoutMs: 120000,
+      history: [], // { id, at, model, content, summary }
+    },
+  },
+  ai: {
+    // AI 资讯：新闻源 + 缓存 / 模型目录用户覆盖 / 签到（WorkBuddy+Trae，token 不存）
+    // sources 留 null：首次进入模块由 ensureAi 填默认源（用户清空后保持空，不回填）
+    news: { sources: null, items: [], lastFetch: 0 },
+    // models.custom = 用户覆盖/新增；lastGitItems = git 自动拉取的免费额度目录缓存（24h）
+    models: { custom: [], lastGitItems: [], lastGitFetch: 0 },
+    checkin: {
+      // 后台 Task Scheduler 脚本写的结果文件目录（面板「刷新」读 last_result.json / trae_last_result.json）
+      resultDir: "C:\\Users\\qiuxr\\workbuddy-checkin\\logs",
+      workbuddy: { accounts: [], lastRun: 0 },
+      trae: { accounts: [], lastRun: 0 },
+    },
+  },
+  scheduler: {
+    // 定时任务：tasks 留 null → 首次进入模块时写入 SCHEDULER_SEED（用户清空后保持空，不回填）
+    tasks: null,
+    maxConcurrent: 2, // 面板内调度同时运行的任务数上限
+    catchUp: true, // 启动时补跑「上次运行期间被错过」的任务（窗口 6h，由后端判断）
+  },
   lock: { enabled: false, minutes: 5 }, // 隐私锁定：离开 enabled 分钟自动锁定全屏
   quickAccess: [], // 快捷访问：{ id, type:"url"|"folder"|"file", title, target, groupId }
   qaGroups: [], // 快捷访问分组：{ id, name }
@@ -173,6 +339,86 @@ export async function loadState() {
   if (!state.navState || typeof state.navState !== "object" || Array.isArray(state.navState)) {
     state.navState = {};
   }
+  // 基金管家：结构校验（自选/持仓/流水必须是数组，缓存与设置补齐默认）
+  if (!state.fund || typeof state.fund !== "object" || Array.isArray(state.fund)) state.fund = {};
+  {
+    const fd = state.fund;
+    if (!Array.isArray(fd.watchlist)) fd.watchlist = [];
+    if (!Array.isArray(fd.holdings)) fd.holdings = [];
+    if (!Array.isArray(fd.trades)) fd.trades = [];
+    fd.watchlist = fd.watchlist.filter((w) => w && typeof w === "object" && typeof w.code === "string" && /^\d{6}$/.test(w.code));
+    fd.holdings = fd.holdings.filter((h) => h && typeof h === "object" && typeof h.code === "string" && Number.isFinite(Number(h.shares)));
+    // 旧数据只有总成本时，自动补单位成本 = 总成本 / 份额（便于双字段表单回显）
+    fd.holdings.forEach((h) => {
+      // 市值统一自动计算，清除历史「手动固定市值」字段
+      delete h.marketValue; delete h.marketValueSet;
+      if (!Number.isFinite(Number(h.unitCost)) || Number(h.unitCost) <= 0) {
+        const s = Number(h.shares) || 0;
+        h.unitCost = s > 0 ? (Number(h.cost) || 0) / s : 0;
+      }
+    });
+    fd.trades = fd.trades.filter((t) => t && typeof t === "object" && typeof t.code === "string");
+    if (!fd.cache || typeof fd.cache !== "object") fd.cache = {};
+    if (!fd.cache.quote || typeof fd.cache.quote !== "object") fd.cache.quote = {};
+    if (!fd.cache.history || typeof fd.cache.history !== "object") fd.cache.history = {};
+    if (!fd.cache.rank || typeof fd.cache.rank !== "object") fd.cache.rank = {};
+    if (!fd.settings || typeof fd.settings !== "object") fd.settings = {};
+    if (typeof fd.settings.autoRefresh !== "boolean") fd.settings.autoRefresh = true;
+    fd.settings.refreshSec = Math.max(15, Math.min(300, Math.round(Number(fd.settings.refreshSec)) || 30));
+    fd.settings.highlightPct = Math.max(0.1, Math.min(10, Number(fd.settings.highlightPct) || 0.5));
+    // AI 分析配置：字符串字段兜底；temperature 必须显式判有限值（0 是合法值，不能用 `|| 0.3` 兜）
+    if (!fd.ai || typeof fd.ai !== "object" || Array.isArray(fd.ai)) fd.ai = {};
+    const fa = fd.ai;
+    for (const k of ["baseUrl", "model", "apiKey"]) {
+      if (typeof fa[k] !== "string") fa[k] = "";
+    }
+    const temp = Number(fa.temperature);
+    fa.temperature = Number.isFinite(temp) && temp >= 0 && temp <= 2 ? temp : 0.3;
+    fa.maxTokens = Math.max(256, Math.min(8000, Math.round(Number(fa.maxTokens)) || 4000));
+    // 一次性迁移：v1.9 首版默认值是 1600，对思考型模型（deepseek-reasoner / o1 系）不够，
+    // 会出现「只有思考过程、正文为空」。该字段当时还没有 UI 入口，任何 1600 都来自我们的默认值，
+    // 不存在「用户主动选了 1600」的情况，故可安全抬到 4000（此后该字段在界面上可自行调整）。
+    if (fa.maxTokens === 1600) fa.maxTokens = 4000;
+    fa.timeoutMs = Math.max(10000, Math.min(600000, Math.round(Number(fa.timeoutMs)) || 120000));
+    if (!Array.isArray(fa.history)) fa.history = [];
+    fa.history = fa.history.filter((r) => r && typeof r === "object" && typeof r.content === "string" && r.content.trim());
+  }
+  // AI 资讯：结构校验（sources 留空/null 由模块 ensureAi 填默认，用户清空后保持空）
+  if (!state.ai || typeof state.ai !== "object" || Array.isArray(state.ai)) state.ai = {};
+  {
+    const a = state.ai;
+    if (!a.news || typeof a.news !== "object" || Array.isArray(a.news)) a.news = { sources: null, items: [], lastFetch: 0 };
+    if (!Array.isArray(a.news.items)) a.news.items = [];
+    if (typeof a.news.lastFetch !== "number") a.news.lastFetch = 0;
+    if (!a.models || typeof a.models !== "object" || Array.isArray(a.models)) a.models = { custom: [] };
+    if (!Array.isArray(a.models.custom)) a.models.custom = [];
+    if (!Array.isArray(a.models.lastGitItems)) a.models.lastGitItems = [];
+    if (typeof a.models.lastGitFetch !== "number") a.models.lastGitFetch = 0;
+    // 归一化结构版本，与 views/ai.js 的 MODEL_SCHEMA 对应；不一致则丢弃旧缓存重拉
+    if (typeof a.models.lastGitSchema !== "number") a.models.lastGitSchema = 0;
+    if (!a.checkin || typeof a.checkin !== "object" || Array.isArray(a.checkin)) a.checkin = {};
+    if (typeof a.checkin.resultDir !== "string" || !a.checkin.resultDir) {
+      a.checkin.resultDir = "C:\\Users\\qiuxr\\workbuddy-checkin\\logs";
+    }
+    for (const k of ["workbuddy", "trae"]) {
+      if (!a.checkin[k] || typeof a.checkin[k] !== "object" || Array.isArray(a.checkin[k])) a.checkin[k] = { accounts: [], lastRun: 0 };
+      if (!Array.isArray(a.checkin[k].accounts)) a.checkin[k].accounts = [];
+      if (typeof a.checkin[k].lastRun !== "number") a.checkin[k].lastRun = 0;
+      delete a.checkin[k].history; // 旧字段：趋势已去掉
+      // Trae 账号只保留 Trae CN（旧版本曾缓存 TRAE SOLO CN / 国际版 Trae）
+      if (k === "trae") {
+        a.checkin.trae.accounts = a.checkin.trae.accounts.filter((acc) => {
+          const n = String(acc && acc.name ? acc.name : "").replace(/\s+/g, " ").trim().toLowerCase();
+          return n === "trae cn" || n === "";
+        });
+      }
+    }
+  }
+  // 定时任务：结构校验 + 首次填充预置任务。
+  // 必须在 loadState 里做（而非等用户打开模块）：后端调度线程每 20s 直接读 state.json，
+  // 若拖到打开面板才写入任务表，签到任务在首次打开模块前根本不会被调度。
+  state.scheduler = normalizeScheduler(state.scheduler);
+
   // 全局护眼：结构校验。
   // 范围与 Rust 侧 set_eyecare_config 的 clamp 保持一致（双重保险：
   // 老数据/手改 state.json 传越界值时，前端先收敛，后端再兜一层）。
@@ -244,6 +490,33 @@ export async function loadState() {
   ly.pos.xRatio = Math.max(0, Math.min(1, num(ly.pos.xRatio, 0.5)));
   ly.pos.yRatio = Math.max(0, Math.min(1, num(ly.pos.yRatio, 0.92)));
   ly.pos.monitorIndex = Math.max(0, Math.round(num(ly.pos.monitorIndex, 0)));
+}
+
+// 定时任务：结构校验 + 首次填充预置任务。
+// tasks 为 null 表示「从未初始化过」；用户把任务删光后是 []，不再回填预置内容
+// （否则删掉的两条签到任务会在下次启动时自己长回来）。
+function normalizeScheduler(s) {
+  if (!s || typeof s !== "object" || Array.isArray(s)) s = {};
+  if (!Array.isArray(s.tasks)) s.tasks = s.tasks === null || s.tasks === undefined ? SCHEDULER_SEED.map((t) => ({ ...t })) : [];
+  s.tasks = s.tasks.map(normalizeScheduleTask);
+
+  // 一次性补种：SCHEDULER_SEED 只在 tasks 为 null（首次运行）时写入，
+  // 老安装的 state.json 里 tasks 已经存在，往那个数组里新增条目对他们是无效的
+  // （现象：代码里加了任务，面板里却始终没有）。
+  // 这里把「尚未见过」的预置任务补进去一次，并把 id 记进 seededIds ——
+  // 记过之后用户手动删掉就不会复活（与「清空后不回填」的既有约定一致）。
+  if (!Array.isArray(s.seededIds)) s.seededIds = [];
+  for (const seed of SCHEDULER_SEED) {
+    const id = seed.id;
+    if (s.seededIds.includes(id)) continue;
+    if (!s.tasks.some((t) => t.id === id)) s.tasks.push(normalizeScheduleTask({ ...seed }));
+    s.seededIds.push(id);
+  }
+
+  if (typeof s.maxConcurrent !== "number" || !isFinite(s.maxConcurrent)) s.maxConcurrent = 2;
+  s.maxConcurrent = Math.max(1, Math.min(8, Math.round(s.maxConcurrent)));
+  if (typeof s.catchUp !== "boolean") s.catchUp = true;
+  return s;
 }
 
 // 300ms 防抖：合并短时间内的连续保存（操作记录/播放状态/设置变更等），减少磁盘写入频率

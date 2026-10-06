@@ -95,4 +95,22 @@ export const QuickAccess = {
     }
     persist();
   },
+
+  /// 分组排序：把 fromId 组移到 atGroupId 组**之前**（atGroupId 为空 → 移到末尾）。
+  /// 落点用**组 id**而不是下标：拖动时被拖的那一组仍留在 DOM 里（只降透明度），
+  /// 若用下标，splice 之后的坐标就整体错位一格。用 id 则「先摘出、再找锚点」天然正确。
+  /// `state.qaGroups` 的数组顺序**就是**显示顺序（loadState 只做 filter、不重排），故直接改数组即可。
+  moveGroup(fromId, atGroupId) {
+    const from = state.qaGroups.findIndex((g) => g.id === fromId);
+    if (from < 0 || atGroupId === fromId) return;
+    const [g] = state.qaGroups.splice(from, 1);
+    if (atGroupId) {
+      const at = state.qaGroups.findIndex((x) => x.id === atGroupId);
+      if (at >= 0) state.qaGroups.splice(at, 0, g);
+      else state.qaGroups.push(g);
+    } else {
+      state.qaGroups.push(g);
+    }
+    persist();
+  },
 };

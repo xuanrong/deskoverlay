@@ -9,6 +9,9 @@ import { renderWorkLog } from "./views/worklog.js";
 import { renderIdeabox } from "./views/ideabox.js";
 import { renderSettings } from "./views/settings.js";
 import { renderQuickAccess } from "./views/quickaccess.js";
+import { renderFund } from "./views/fund.js";
+import { renderAi } from "./views/ai.js";
+import { renderScheduler } from "./views/scheduler.js";
 
 export const VIEW_RENDERERS = {
   dashboard: renderDashboard,
@@ -16,6 +19,9 @@ export const VIEW_RENDERERS = {
   worklog: renderWorkLog,
   ideabox: renderIdeabox,
   system: renderSystem,
+  fund: renderFund,
+  ai: renderAi,
+  scheduler: renderScheduler,
   music: renderMusic,
   relax: renderRelax,
   notes: renderNotes,

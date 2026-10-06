@@ -56,6 +56,19 @@ export async function invoke(command, args = {}) {
   return Promise.resolve();
 }
 
+// 通用事件订阅：模块要用 Rust emit 的事件时统一走这里，避免各自去摸 window.__TAURI__。
+// 真实 Tauri 态订阅 Tauri 事件系统（payload 直接进回调）；浏览器 dev 态回退到 Bus。
+// 返回的取消函数是异步落地的 —— 调用方应 await 后再保留（或在 onDestroy 里用 await）。
+export async function listen(event, fn) {
+  if (TAURI && TAURI.event && typeof TAURI.event.listen === "function") {
+    const un = await TAURI.event.listen(event, (e) => {
+      try { fn(e.payload); } catch (err) { console.error(`[bus:${event}]`, err); }
+    });
+    return () => un();
+  }
+  return Bus.on(event, fn);
+}
+
 // 将 Rust 经 Tauri 事件系统推送的 provider-emit / im-notify 桥接进 Bus，
 // 使前端渲染器与 IM 角标无需区分运行环境即可消费真实数据。
 if (TAURI && TAURI.event && typeof TAURI.event.listen === "function") {
@@ -89,4 +102,12 @@ if (TAURI && TAURI.event && typeof TAURI.event.listen === "function") {
   TAURI.event
     .listen("eyecare-failed", (e) => Bus.emit("eyecare-failed", e.payload))
     .catch((err) => console.warn("[bridge] eyecare-failed 监听失败：", err));
+  // 定时任务：运行开始 / 增量输出 / 运行结束。
+  // 由调度线程（含定时触发，前端此前毫不知情）发出 → 桥接进 Bus，
+  // 使面板无论是否可见都能如实反映「谁在跑、跑到哪了」。
+  for (const ev of ["scheduler://started", "scheduler://log", "scheduler://done"]) {
+    TAURI.event
+      .listen(ev, (e) => Bus.emit(ev, e.payload))
+      .catch((err) => console.warn(`[bridge] ${ev} 监听失败：`, err));
+  }
 }
