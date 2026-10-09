@@ -20,7 +20,7 @@ use windows::Win32::Media::Audio::{
 };
 use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_ALL, COINIT_MULTITHREADED};
 
-/// 系统健康页是否处于打开状态。仅打开时才采集并 emit，空闲时停止，避免后台空转。
+/// 系统健康页是否处于打开状态。仅打开时才采集并 emit，空闲时停止。
 static SYSTEM_SAMPLING_ON: AtomicBool = AtomicBool::new(false);
 
 /// 打开系统健康页时调用：开启采样。
@@ -66,7 +66,7 @@ fn power_status() -> (u8, String) {
 }
 
 /// 启动系统指标 Provider 线程：动态指标（CPU/内存/网络/电源）每秒采集，
-/// 静态信息（CPU 型号/OS/主机名/磁盘）每 5 秒更新一次，避免无谓的重复采集与序列化。
+/// 静态信息（CPU 型号/OS/主机名/磁盘）每 5 秒更新一次。
 pub fn start_system_provider(app: AppHandle) {
     std::thread::spawn(move || {
         let mut sys = System::new();
@@ -208,11 +208,9 @@ pub fn is_audio_playing() -> bool {
             let count = sessions.GetCount()?;
             for i in 0..count {
                 let control = sessions.GetSession(i)?;
-                // 注意：不能依赖 IAudioSessionControl2::IsSystemSoundsSession().is_ok() 去排除
-                // “系统音”——windows-rs 对 S_FALSE（值 1，同样属于成功码，表示“非系统音”会话）
-                // 也会返回 Ok，导致普通视频/音乐会话被当成系统音全部跳过，is_audio_playing
-                // 恒为 false，看视频也会锁屏。因此只按会话是否 Active 判定即可
-                // （系统提示音极短，在默认 3s 采样 + 每秒判定的频率下影响可忽略）。
+                // 注意：不能用 IAudioSessionControl2::IsSystemSoundsSession() 排除“系统音”——
+                // windows-rs 对 S_FALSE（表示“非系统音”）也返回 Ok，会把视频/音乐会话全跳过，
+                // 导致 is_audio_playing 恒为 false。只按会话是否 Active 判定。
                 if control.GetState()? == AudioSessionStateActive {
                     return Ok(true);
                 }
@@ -232,9 +230,8 @@ pub fn check_media_playing() -> bool {
 }
 
 /// 全局空闲监控：锁屏启用期间每秒把"距上次输入的毫秒数"与"是否有音频播放"推送给前端
-/// （system-idle 事件）。供隐私锁屏使用——无论用户在哪应用操作都不算空闲，
-/// 且播放视频/音乐时即使无输入也不触发锁定。
-/// 锁屏未启用时事件无消费者：降频至 5 秒轮询开关，音频枚举（COM，开销较大）随之暂停。
+/// （system-idle 事件），供隐私锁屏判断空闲与媒体播放。
+/// 锁屏未启用时降频至 5 秒轮询开关，音频枚举（COM，开销较大）随之暂停。
 pub fn start_lock_idle_monitor(app: AppHandle) {
     std::thread::spawn(move || {
         // 空闲时长每秒都发（及时）；音频枚举开销较大，每 3 秒做一次并缓存结果

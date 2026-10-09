@@ -1,8 +1,7 @@
 //! 阿里云盘对接（P1 播放链路）：社区授权绑定 + 官方 OpenAPI 直调。
 //!
-//! 通道说明（2026-09 核实）：
-//! - 开放平台 2025-07 起暂停个人开发者申请 → 采用 AList/OpenList 社区托管授权页
-//!   扫码获取 refresh_token，之后直调阿里官方开放接口（openapi.alipan.com）。
+//! - 授权：AList/OpenList 社区托管授权页扫码取 refresh_token，之后直调阿里官方
+//!   开放接口（openapi.alipan.com）。
 //! - access_token 约 2h；refresh_token 约 30 天且滚动失效（刷新后旧值立即作废）
 //!   → 每次刷新成功必须原子落盘新 refresh_token，Mutex 串行防并发重复刷新。
 //! - ureq 阻塞式 I/O：所有网络调用经 spawn_blocking，不占 async 运行时线程。
@@ -19,9 +18,8 @@ use tauri::{AppHandle, Manager};
 
 /// OpenAPI 基址（官方）
 const API_BASE: &str = "https://openapi.alipan.com";
-/// 刷新代理：社区 token（alistgo 官方工具页签发，client b8c990e6…）的 secret 由
-/// alistgo 服务端持有，本机无法直接调官方 /oauth/access_token（会报 invalid client_secret）。
-/// 走 alistgo 续期代理：POST {grant_type:refresh_token, refresh_token} → 新 token 对。
+/// 刷新代理：社区 token 的 client secret 由 alistgo 服务端持有，本机无法直接调官方
+/// /oauth/access_token（会报 invalid client_secret），故走 alistgo 续期代理。
 const REFRESH_URL: &str = "https://api.alistgo.com/alist/ali_open/token";
 /// 凭证目录（app_data_dir/aliyundrive）
 const AD_DIR: &str = "aliyundrive";
@@ -126,9 +124,7 @@ fn now_secs() -> u64 {
 }
 
 // ── HTTP 连接复用与直链缓存（降低首播延迟） ─────────────────────
-// 每次新建 Agent = 完整 TLS 握手（openapi + OSS 两跳）；媒体栈对同一首歌会发
-// 探测 + 真实多次请求，每请求重签直链一次 → 首播延迟被放大数倍。
-// 全局 Agent（连接池 keep-alive）+ 直链缓存（直链有效期数小时，缓存 25 分钟留余量）。
+// 全局 Agent keep-alive 复用连接；直链缓存 25 分钟（直链有效期数小时）。
 
 fn http_agent() -> &'static ureq::Agent {
     static AGENT: OnceLock<ureq::Agent> = OnceLock::new();
@@ -146,7 +142,7 @@ fn url_cache() -> &'static Mutex<HashMap<String, (String, std::time::Instant)>> 
 }
 
 const URL_CACHE_TTL: Duration = Duration::from_secs(25 * 60);
-/// 缓存容量上限：满了先清过期条目，仍超限则淘汰最旧写入（防长期使用无界增长）
+/// 缓存容量上限：满了先清过期条目，仍超限则淘汰最旧写入。
 const URL_CACHE_CAP: usize = 64;
 
 /// 取播放直链：优先缓存（force=true 跳过缓存强制重签），未命中调接口并写缓存
@@ -181,7 +177,7 @@ fn cached_url(app: &AppHandle, file_id: &str, force: bool) -> Result<String, Str
 }
 
 /// 确保拿到有效 access_token：未过期直接用；过期则串行刷新并落盘。
-/// 双重检查（锁外判过期 + 锁内再判）避免排队线程重复刷新。
+/// 锁外判过期 + 锁内再判，避免排队线程重复刷新。
 fn ensure_access(app: &AppHandle) -> Result<String, String> {
     let st = load_tokens(app).ok_or("未绑定阿里云盘，请先在设置中授权")?;
     if now_secs() < st.expires_at {
@@ -420,7 +416,7 @@ pub async fn ad_search(app: AppHandle, keyword: String) -> Result<Vec<AdFile>, S
 /// 获取播放直链（内部使用：给 adstream 协议转发用）。
 fn get_download_url_blocking(app: &AppHandle, file_id: &str) -> Result<String, String> {
     let drive = drive_id(app)?;
-    // 实测端点为驼峰 getDownloadUrl（下划线 get_download_url 返回 404）
+    // 实测端点为驼峰 getDownloadUrl
     let v = api_call(
         app,
         "/adrive/v1.0/openFile/getDownloadUrl",
@@ -475,11 +471,8 @@ pub async fn ad_play_url(
 }
 
 // ── 本地流式音频服务 ─────────────────────────────────────────────
-// 为什么不用 Tauri 自定义协议：UriSchemeResponder 只接受 Into<Cow<'static,[u8]>>，
-// wry(Win) 用 SHCreateMemStream 物化整个 body → 不支持流式，只能整文件下载完再回
-// （首播延迟 = 全文件下载时长，且占内存；同步回调还会卡 WebView2 UI 线程）。
-// 方案：仅绑定 127.0.0.1 的迷你 HTTP 服务，<audio> 直连；收到 Range 请求后从云盘直链
-// 64KB 分块拉流转发 —— 真流式、首字节快、seek 由 Range 直通。
+// 仅绑定 127.0.0.1 的迷你 HTTP 服务，<audio> 直连；收到 Range 请求后从云盘直链
+// 64KB 分块拉流转发（真流式，seek 由 Range 直通）。
 // 安全：仅回环地址、file_id 严格校验、单连接 200MB 上限。
 
 static STREAM_APP: OnceLock<AppHandle> = OnceLock::new();
@@ -544,10 +537,8 @@ fn stream_sem() -> &'static StreamSem {
 }
 
 // ── 上游预读缓冲 ─────────────────────────────────────────────
-// OSS 上游强制 Connection: close（每请求新建 TLS + 慢启动，实测 1MB/1.9s），
-// 媒体栈频繁的小 Range 请求若逐个打到上游，衔接处缓冲易饿 → 播放断续。
-// 对策：单文件预读窗口（4MB）——请求落在窗口内直接回，未命中才打上游并顺带
-// 预读余量。内存代价 ≤4MB/文件，切歌清理。
+// 单文件预读窗口（4MB）：请求落在窗口内直接回，未命中才打上游并顺带预读余量。
+// 内存代价 ≤4MB/文件，切歌清理。
 struct Prefetch {
     /// 窗口起始偏移
     start: u64,
@@ -564,7 +555,7 @@ fn prefetch_slot() -> &'static Mutex<Option<(String, Prefetch)>> {
     PREFETCH.get_or_init(|| Mutex::new(None))
 }
 
-/// 预读窗口大小：flac 码率 ~1Mbps 下 4MB ≈ 32 秒音频，足够吸收上游连接建立抖动
+/// 预读窗口大小：flac 码率 ~1Mbps 下 4MB ≈ 32 秒音频
 const PREFETCH_WINDOW: u64 = 4 * 1024 * 1024;
 
 fn stream_lock() -> &'static Mutex<()> {
@@ -743,9 +734,8 @@ fn serve_audio(
         return Ok(());
     }
 
-    // 未命中：向上游请求大窗口（从请求起点起 PREFETCH_WINDOW 字节），
-    // 边读边转发：上游首块到达立即回给媒体栈（不等整窗拉满——OSS ~500KB/s
-    // 限速下 4MB 要 ~8s，整窗读完再回是起播/拖动进度卡顿的主因），
+    // 未命中：向上游请求大窗口（从请求起点起 PREFETCH_WINDOW 字节）。
+    // 边读边转发：上游首块到达立即回给媒体栈（不等整窗拉满），
     // 转发的同时把字节累积进预读窗口，读满或 EOF 后一次性入缓存。
     let up_start = req_start.unwrap_or(0);
     let up_end = up_start + PREFETCH_WINDOW - 1;
@@ -793,10 +783,8 @@ fn serve_audio(
     // 头先发（长度已知，无需等数据）：媒体栈立刻知道本次范围
     write_audio_head(stream, status, ext, &cr, out_len)?;
 
-    // 并行分段拉取：实测上游单连接限速 ~100KB/s（TTFB ~2.8s），低于 flac
-    // 播放码率（~125KB/s），单连接顺序拉必然断续；限速按连接计，多连接可叠加
-    // （实测双连接 ~197KB/s 近似线性）。将窗口均分 4 段并行 Range 拉取，
-    // 按序转发给媒体栈 + 逐块入预读缓存（滑动窗口语义不变）。
+    // 并行分段拉取：限速按连接计，单连接速率低于 flac 播放码率会导致断续，
+    // 故将窗口均分 4 段并行 Range 拉取，按序转发给媒体栈 + 逐块入预读缓存。
     const STREAM_PAR: usize = 4;
     let seg_len = PREFETCH_WINDOW / STREAM_PAR as u64;
     let n_segs = if window_len == 0 { 0 } else { ((window_len + seg_len - 1) / seg_len) as usize };
@@ -835,7 +823,7 @@ fn serve_audio(
     }
 
     // 按序消费各段：转发请求所需部分 + 逐块入预读缓存。
-    // 写客户端失败 = 客户端已断开（seek/切歌），停止消费避免白耗上游带宽。
+    // 写客户端失败 = 客户端已断开（seek/切歌），停止消费。
     let mut sent = 0u64;
     let mut read_pos = 0u64; // 相对 up_start 的已消费偏移
     'outer: for i in 0..n_segs {
@@ -1265,10 +1253,9 @@ pub fn ad_upload_list() -> Result<Vec<serde_json::Value>, String> {
 }
 
 // ── 音频内嵌元数据（歌词 + 封面） ─────────────────────────────
-// 云盘歌曲无插件元数据来源：从音频文件自身提取（ID3(mp3)/Vorbis(flac) 内嵌的
-// 歌词与封面）。云端文件需先经流式服务拉取本地片段？——不，内嵌元数据可能在
-// 文件任意位置（ID3v2 在头部，APE 标签在尾部），直接对云盘文件做两次 Range
-// 拉取（头 512KB + 尾 512KB）解析，避免整文件下载。
+// 从音频文件自身提取（ID3(mp3)/Vorbis(flac) 内嵌的歌词与封面）。内嵌元数据可能
+// 在文件任意位置（ID3v2 在头部，APE 标签在尾部），故对云盘文件做头 512KB +
+// 尾 512KB 两次 Range 拉取解析，无需整文件下载。
 
 /// 从云盘音频提取内嵌歌词与封面（base64 data URL）。
 /// 实现：经流式服务语义直接对上游直链做头/尾 Range 拉取 → lofty 解析。
@@ -1299,7 +1286,7 @@ pub async fn ad_track_meta(app: AppHandle, file_id: String, ext: String) -> Resu
         };
 
         // 直接拉头 512KB（flac METADATA BLOCK / ID3v2 都在文件头部，无需知道总大小）。
-        // 失败路径全部带 debug 字段返回，便于前端定位。
+        // 失败路径全部带 debug 字段返回。
         let head = fetch_range("bytes=0-524287")?;
         if head.is_empty() {
             return Ok(serde_json::json!({ "lyric": null, "cover": null, "debug": "empty head" }));

@@ -1,9 +1,9 @@
 //! 桌面注入与自愈 —— 把工作台窗口嵌入 Explorer 桌面 WorkerW，
 //! 使其成为「桌面本身」：Win+D 回到工作台，任务栏自然浮于其上（z-order 高于 WorkerW）。
 //!
-//! 关键修正（对比早期失败版本，那次窗口矩形正确但不可见）：
+//! 关键约束：
 //! - **不加 WS_EX_LAYERED**：WS_CHILD + WS_EX_LAYERED 在桌面子窗口层级合成不可靠，
-//!   会导致窗口矩形正确但视觉不可见。改用 transparent:false + WebView 自绘不透明背景。
+//!   会导致窗口矩形正确但视觉不可见。用 transparent:false + WebView 自绘不透明背景。
 //! - 注入后 `ShowWindow(SW_SHOW)` + `UpdateWindow` 触发重绘（SetParent 后 WebView2 需刷新）。
 //! - DefView 递归查找（孙级），确保隐藏原生图标层。
 //!

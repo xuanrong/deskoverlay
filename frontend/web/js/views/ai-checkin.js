@@ -1,5 +1,5 @@
 // AI 资讯 · 签到适配器（纯模块：零 import / 零 DOM / 零全局时钟）
-// 复刻 C:\Users\qiuxr\workbuddy-checkin\ 两个 Python 脚本的逻辑：
+// 复刻签到脚本目录下两个 Python 脚本的逻辑（checkin_workbuddy.py / checkin_trae.py）：
 //   - WorkBuddy（腾讯 CodeBuddy）：$wbEncrypted AES-256-GCM 解 token → copilot.tencent.com
 //   - Trae：iCube AES-256-CBC 解 JWT → api.trae.cn
 // token 仅在内存中解密使用，不落盘、不打印。createCheckin(ports) 注入依赖以便单测。

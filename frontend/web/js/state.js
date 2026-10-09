@@ -1,110 +1,20 @@
 // 统一状态源 — 单例 state 对象，所有模块共享同一引用，避免多份快照互相覆盖。
 // 启动时 loadState() 从 Rust 读取；修改后调 saveState() 持久化。
 import { Store } from "./store.js";
-import { DEFAULT_REMINDERS } from "./config.js";
 import { ymd, uid } from "./utils.js";
+import { CHECKIN_RESULT_DIR, normalizeCheckinResultDir } from "./config.js";
 
-// 定时任务的预置内容：把本机已在跑的签到脚本收进面板统一管理。
+// （历史）这里曾有一个 SCHEDULER_SEED —— 把本机在跑的签到脚本硬编码成面板的预置任务。
+// 已于 2026-10-07 整体移除，原因：
+//   1) 它把**个人数据**（绝对路径、任务名、cron、甚至签到习惯说明）写进了 git 跟踪的源码，
+//      换台机器 / 分享仓库即成脏数据；
+//   2) 它与 state.json 形成「两处真相」—— 源码一份、运行数据一份，必然不同步。实测踩过两次：
+//      改 state.json 会被运行中的应用用内存状态写回覆盖；改源码又对已存在任务无效；
+//   3) 为弥合 (2) 而生的 seededIds 补种机制还衍生新坑 —— id 一旦进过 seededIds，
+//      seed 的后续修改**永远无法生效**（掘金任务改离线通道后「改了不生效」就是这个根因）。
 //
-// 两点必须照抄、不要"美化"：
-// 1) python 用 `envs\default\Scripts\pythonw.exe` 这个**虚拟环境**的绝对路径 ——
-//    脚本依赖 requests，裸 `python` 在 app 的环境里既找不到解释器也可能缺包。
-//    该路径与现有计划任务 action 完全一致，是已验证可跑的组合。
-// 2) scheduleEnabled 默认 false —— 这两条目前由系统计划任务（10:00 / 10:05）触发，
-//    面板内调度若同时开启，同一时刻会被两个引擎各触发一次（重复领取）。
-//    想改成面板内调度：打开该任务 → 关掉「系统计划任务」→ 打开「面板内调度」。
-const SCHEDULER_SEED = [
-  {
-    id: "t_workbuddy_checkin",
-    name: "WorkBuddy 每日签到",
-    enabled: true,
-    scheduleEnabled: false,
-    cron: "0 10 * * *",
-    kind: "command",
-    command:
-      '"C:\\Users\\qiuxr\\.workbuddy\\binaries\\python\\envs\\default\\Scripts\\pythonw.exe" ' +
-      '"C:\\Users\\qiuxr\\workbuddy-checkin\\checkin_workbuddy.py"',
-    cwd: "",
-    timeoutSec: 300,
-    retry: 0,
-    outputEncoding: "auto",
-    note: "现由系统计划任务「WorkBuddy Daily Check-in」每天 10:00 触发；面板内调度已关，避免重复领取",
-  },
-  {
-    id: "t_trae_checkin",
-    name: "Trae CN 每日签到",
-    enabled: true,
-    scheduleEnabled: false,
-    cron: "5 10 * * *",
-    kind: "command",
-    command:
-      '"C:\\Users\\qiuxr\\.workbuddy\\binaries\\python\\envs\\default\\Scripts\\pythonw.exe" ' +
-      '"C:\\Users\\qiuxr\\workbuddy-checkin\\checkin_trae.py"',
-    cwd: "",
-    timeoutSec: 300,
-    retry: 0,
-    outputEncoding: "auto",
-    note: "现由系统计划任务「Trae CN Daily Check-in」每天 10:05 触发；面板内调度已关，避免重复领取",
-  },
-  {
-    id: "t_quark_checkin",
-    name: "夸克网盘 每日签到",
-    enabled: true,
-    scheduleEnabled: true,
-    cron: "10 10 * * *",
-    kind: "command",
-    // 用 python.exe 而非 pythonw.exe：pythonw 是无窗口解释器，**不产生任何 stdout**，
-    // 面板日志会是空的。本任务走面板内调度，要的就是实时输出，所以必须用 python.exe。
-    // （不会弹黑框：Rust 侧 spawn 统一带 CREATE_NO_WINDOW。）
-    command:
-      '"C:\\Users\\qiuxr\\.workbuddy\\binaries\\python\\envs\\default\\Scripts\\python.exe" ' +
-      '"C:\\Users\\qiuxr\\workbuddy-checkin\\checkin_quark.py"',
-    cwd: "",
-    timeoutSec: 300,
-    retry: 1,
-    // 脚本自带 sys.stdout.reconfigure(encoding="utf-8")，输出确定是 UTF-8，
-    // 不交给启发式判定（GBK 与 UTF-8 在字节层存在真歧义）
-    outputEncoding: "utf8",
-    note: "面板内调度，每天 10:10（错开 WorkBuddy 10:00 / Trae 10:05）。签到是夸克 App 专属功能（网页端无入口、PC 端接口已停服），需手机抓包取 kps/sign/vcode 填进 C:\\Users\\qiuxr\\workbuddy-checkin\\quark_params.txt，实测有效期约两个月；未填时任务会明确报「没有读到凭证」",
-  },
-  {
-    id: "t_pupu_checkin",
-    name: "朴朴超市 每日签到",
-    enabled: true,
-    scheduleEnabled: true,
-    // 同上：这条走面板内调度（不注册系统计划任务），到点在 app 内触发
-    cron: "0 20 * * *",
-    kind: "command",
-    // 同夸克：面板内调度要的是实时输出，必须用 python.exe（pythonw 不产生 stdout）
-    command:
-      '"C:\\Users\\qiuxr\\.workbuddy\\binaries\\python\\envs\\default\\Scripts\\python.exe" ' +
-      '"C:\\Users\\qiuxr\\workbuddy-checkin\\checkin_pupu.py"',
-    cwd: "",
-    timeoutSec: 300,
-    retry: 1,
-    outputEncoding: "utf8",
-    note: "面板内调度，每天 20:00（夸克签到在 10:10，两者不同刻）。朴朴签到入口只在 App / 微信小程序里，需手机抓包取 refresh_token 填进 C:\\Users\\qiuxr\\workbuddy-checkin\\pupu_params.txt；未填时任务会明确报「没有读到凭证」",
-  },
-  {
-    id: "t_juejin_checkin",
-    name: "掘金 每日签到",
-    enabled: true,
-    scheduleEnabled: true,
-    // 面板内调度（不注册系统计划任务）。定在 10:15：10:00 的 WorkBuddy、10:05 的 Trae
-    // 两条系统计划任务已经把机器叫醒并联网，是「确定开机」的窗口，比另起时段更不易漏签。
-    cron: "15 10 * * *",
-    kind: "command",
-    // 同夸克/朴朴：面板内调度要的是实时输出，必须用 python.exe（pythonw 不产生 stdout）
-    command:
-      '"C:\\Users\\qiuxr\\.workbuddy\\binaries\\python\\envs\\default\\Scripts\\python.exe" ' +
-      '"C:\\Users\\qiuxr\\workbuddy-checkin\\checkin_juejin_browser.py"',
-    cwd: "",
-    timeoutSec: 300,
-    retry: 1,
-    outputEncoding: "utf8",
-    note: "面板内调度，每天 10:15。**走浏览器通道**：掘金 check_in 的字节风控参数 a_bogus 由页面 JS 现场生成（绑定时间戳/浏览器上下文），重放抓包那一份无效 —— 实测同一份有效 sessionid 下，check_in 对任意参数/方法/UA 组合都只回「HTTP 200 + 空正文」，纯 HTTP 无解，故用 Playwright 驱动**系统 Chrome**（掘金反爬会拦 Playwright 自带 Chromium）打开签到页点真实按钮。凭证 C:\\Users\\qiuxr\\workbuddy-checkin\\juejin_params.txt 只需 sessionid Cookie；纯 HTTP 的状态核对另见 checkin_juejin.py",
-  },
-];
+// 现在的规则：任务的**唯一真相是 state.json**，全部由面板的「新建 / 编辑 / 删除」维护，
+// 改任务不再需要动代码，也不再需要重启应用。换机迁移走面板上的「导出 / 导入」。
 
 /// 补全单个任务的字段（老数据 / 手改 state.json 都可能缺字段）
 function normalizeScheduleTask(t) {
@@ -190,15 +100,18 @@ export const state = {
     // models.custom = 用户覆盖/新增；lastGitItems = git 自动拉取的免费额度目录缓存（24h）
     models: { custom: [], lastGitItems: [], lastGitFetch: 0 },
     checkin: {
-      // 后台 Task Scheduler 脚本写的结果文件目录（面板「刷新」读 last_result.json / trae_last_result.json）
-      resultDir: "C:\\Users\\qiuxr\\workbuddy-checkin\\logs",
+      // 签到脚本写的结果文件目录（面板「刷新」读 last_result.json / trae_last_result.json）。
+      // 常量在 config.js —— 改路径两边一起改（脚本侧对应 workbuddy-checkin\checkin_paths.py），
+      // 只改一边就会出现「脚本写了、面板读不到」的静默故障。
+      resultDir: CHECKIN_RESULT_DIR,
       workbuddy: { accounts: [], lastRun: 0 },
       trae: { accounts: [], lastRun: 0 },
     },
   },
   scheduler: {
-    // 定时任务：tasks 留 null → 首次进入模块时写入 SCHEDULER_SEED（用户清空后保持空，不回填）
-    tasks: null,
+    // 定时任务：只来自用户（面板里新建 / 编辑）。源码不预置任何任务，理由见文件开头。
+    // （历史：这里曾是 null，当「未初始化」哨兵用，首次进入模块时填入 SCHEDULER_SEED）
+    tasks: [],
     maxConcurrent: 2, // 面板内调度同时运行的任务数上限
     catchUp: true, // 启动时补跑「上次运行期间被错过」的任务（窗口 6h，由后端判断）
   },
@@ -259,12 +172,9 @@ export async function loadState() {
     if (typeof n.updatedAt !== "number") n.updatedAt = Date.now();
   });
   if (!Array.isArray(state.recentOps)) state.recentOps = [];
-  // 提醒：老数据无该字段时填充默认配置；为空数组则保留（用户可能删光）
-  if (state.reminders === undefined) {
-    state.reminders = DEFAULT_REMINDERS.map((r) => ({ ...r }));
-  } else if (!Array.isArray(state.reminders)) {
-    state.reminders = [];
-  }
+  // 提醒：只做结构校验，源码不预置任何内容（理由见文件开头）。
+  // 为空数组保留（用户可能删光），不是数组才重置。
+  if (!Array.isArray(state.reminders)) state.reminders = [];
   // 久坐提醒：结构校验
   if (!state.sedentary || typeof state.sedentary !== "object") {
     state.sedentary = { enabled: false, intervalMin: 45 };
@@ -397,9 +307,10 @@ export async function loadState() {
     // 归一化结构版本，与 views/ai.js 的 MODEL_SCHEMA 对应；不一致则丢弃旧缓存重拉
     if (typeof a.models.lastGitSchema !== "number") a.models.lastGitSchema = 0;
     if (!a.checkin || typeof a.checkin !== "object" || Array.isArray(a.checkin)) a.checkin = {};
-    if (typeof a.checkin.resultDir !== "string" || !a.checkin.resultDir) {
-      a.checkin.resultDir = "C:\\Users\\qiuxr\\workbuddy-checkin\\logs";
-    }
+    // 结果目录：缺失 / 空 / 仍是旧路径时升级到 CHECKIN_RESULT_DIR（规则在 config.js）。
+    // ⚠ 老 state.json 里存的是旧绝对路径（非空），只改默认值**不会生效** ⇒ 面板会一直读旧目录，
+    //   而脚本已改写到新目录 ⇒ 静默失配（面板刷新永远拿不到新结果）。
+    a.checkin.resultDir = normalizeCheckinResultDir(a.checkin.resultDir);
     for (const k of ["workbuddy", "trae"]) {
       if (!a.checkin[k] || typeof a.checkin[k] !== "object" || Array.isArray(a.checkin[k])) a.checkin[k] = { accounts: [], lastRun: 0 };
       if (!Array.isArray(a.checkin[k].accounts)) a.checkin[k].accounts = [];
@@ -492,26 +403,17 @@ export async function loadState() {
   ly.pos.monitorIndex = Math.max(0, Math.round(num(ly.pos.monitorIndex, 0)));
 }
 
-// 定时任务：结构校验 + 首次填充预置任务。
-// tasks 为 null 表示「从未初始化过」；用户把任务删光后是 []，不再回填预置内容
-// （否则删掉的两条签到任务会在下次启动时自己长回来）。
+// 定时任务：结构校验。任务**只来自用户**（面板里新建 / 编辑 / 删除），源码不带任何预置内容 ——
+// 见文件开头那段说明：预置内容一旦写进源码，就与 state.json 形成「两处真相」，改哪边都可能被
+// 另一边覆盖。所以这里只做校验与补字段，不做任何「填充」。
 function normalizeScheduler(s) {
   if (!s || typeof s !== "object" || Array.isArray(s)) s = {};
-  if (!Array.isArray(s.tasks)) s.tasks = s.tasks === null || s.tasks === undefined ? SCHEDULER_SEED.map((t) => ({ ...t })) : [];
+  if (!Array.isArray(s.tasks)) s.tasks = [];
   s.tasks = s.tasks.map(normalizeScheduleTask);
 
-  // 一次性补种：SCHEDULER_SEED 只在 tasks 为 null（首次运行）时写入，
-  // 老安装的 state.json 里 tasks 已经存在，往那个数组里新增条目对他们是无效的
-  // （现象：代码里加了任务，面板里却始终没有）。
-  // 这里把「尚未见过」的预置任务补进去一次，并把 id 记进 seededIds ——
-  // 记过之后用户手动删掉就不会复活（与「清空后不回填」的既有约定一致）。
-  if (!Array.isArray(s.seededIds)) s.seededIds = [];
-  for (const seed of SCHEDULER_SEED) {
-    const id = seed.id;
-    if (s.seededIds.includes(id)) continue;
-    if (!s.tasks.some((t) => t.id === id)) s.tasks.push(normalizeScheduleTask({ ...seed }));
-    s.seededIds.push(id);
-  }
+  // 清理历史遗留：seededIds 是旧「一次性补种」机制的账本，机制已整体移除。
+  // 老 state.json 里会带这个键，留着无害，但顺手删掉保持数据干净。
+  if ("seededIds" in s) delete s.seededIds;
 
   if (typeof s.maxConcurrent !== "number" || !isFinite(s.maxConcurrent)) s.maxConcurrent = 2;
   s.maxConcurrent = Math.max(1, Math.min(8, Math.round(s.maxConcurrent)));

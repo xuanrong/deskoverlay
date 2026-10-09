@@ -32,8 +32,14 @@ function inferType(title) {
 
 // 请求后端销毁窗口；失败重试一次 —— 静默吞掉失败会留下拦截鼠标的残留窗口
 function invokeHide(retry = 1) {
-  if (!(TAURI && TAURI.core && typeof TAURI.core.invoke === "function")) return;
-  TAURI.core.invoke("hide_reminder").catch(() => {
+  if (!(TAURI && TAURI.core && typeof TAURI.core.invoke === "function")) {
+    // ⛔ 原来这里直接 return、什么都不做：hide() 就退化成「只改 CSS、不关窗口」，
+    // 透明置顶窗会一直挂着拦截鼠标，直到后端 15s 硬超时兜底。失败必须留痕。
+    console.warn("[reminder] 无法调用 hide_reminder：__TAURI__ 不可用");
+    return;
+  }
+  TAURI.core.invoke("hide_reminder").catch((err) => {
+    console.warn("[reminder] hide_reminder 调用失败：", err);
     if (retry > 0) setTimeout(() => invokeHide(retry - 1), 300);
   });
 }
@@ -46,13 +52,17 @@ function hide() {
 }
 
 function show() {
+  // ⛔ 顺序有讲究：倒计时必须先装上。原实现 `shownOnce = true` 在第一行、
+  // `autoHideTimer = setTimeout(...)` 在最后一行 —— 中间任何异常都会让
+  // 「11s 定时器」与「5s 孤儿兜底」**同时**失效（后者被 shownOnce 门控），
+  // 于是只剩后端 15s 看门狗收场。
+  clearTimeout(autoHideTimer);
+  autoHideTimer = setTimeout(hide, AUTO_CLOSE_MS);
   shownOnce = true;
   // 重置进度条动画（移除 timing 类触发 reflow 后重新添加）
   card.classList.remove("timing");
   void card.offsetWidth;
   card.classList.add("show", "timing");
-  clearTimeout(autoHideTimer);
-  autoHideTimer = setTimeout(hide, AUTO_CLOSE_MS);
 }
 
 if (TAURI && TAURI.event && typeof TAURI.event.listen === "function") {
@@ -80,11 +90,25 @@ if (TAURI && TAURI.event && typeof TAURI.event.listen === "function") {
     .then(() => {
       // listener 已就绪：通知后端取用暂存内容推送（规避 emit 早于注册导致的丢事件）
       if (TAURI && TAURI.core && typeof TAURI.core.invoke === "function") {
-        TAURI.core.invoke("reminder_ready").catch(() => {});
+        TAURI.core.invoke("reminder_ready").catch((err) => {
+          console.warn("[reminder] reminder_ready 调用失败：", err);
+        });
       }
     })
-    .catch((err) => console.warn("[reminder] 监听失败：", err));
+    // 诊断：注册失败意味着后端仍以为「页面已就绪」（PAGE_READY 会停在 true），
+    // 复用分支就会把 show-reminder emit 给一个没人听的页面。
+    .catch((err) => console.warn("[reminder] 监听注册失败：", err));
 }
+
+// ⛔ 页面卸载（重载 / WebView2 进程恢复）必须主动告知后端复位 PAGE_READY。
+// 否则该标志停在 true 而 listener 已随页面消失 ⇒ 后端复用分支把 show-reminder
+// emit 给一个没人听的页面：卡片不渲染，前端三道保险（10s 动画结束 / 11s 定时器 /
+// 5s 孤儿兜底）全部哑火，最终只能靠后端 15s 硬超时兜底强杀。
+// 这里不重试 —— 页面正在消失，setTimeout 排不上队。
+window.addEventListener("pagehide", () => {
+  if (!(TAURI && TAURI.core && typeof TAURI.core.invoke === "function")) return;
+  TAURI.core.invoke("hide_reminder").catch(() => {});
+});
 
 document.getElementById("ok").addEventListener("click", hide);
 

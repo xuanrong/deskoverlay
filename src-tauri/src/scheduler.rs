@@ -1,8 +1,8 @@
 //! 定时任务调度器（「定时任务」模块的后端）。
 //!
 //! ## 职责边界
-//! - **任务定义**由前端持有并写入 state.json（`scheduler.tasks`），Rust 每轮 tick 直接读该文件。
-//!   这样任务表只有一份真相，无需第二套持久化，也不会出现前后端各持一份而漂移。
+//! - **任务定义**由前端持有并写入 state.json（`scheduler.tasks`），Rust 每轮 tick 直接读该文件，
+//!   任务表只有一份真相。
 //! - **运行历史 / 下次触发时刻**由 Rust 独占写入 `scheduler-store.json`。历史含完整输出，
 //!   体量与 state.json（前端整份重写）差异太大，混在一起会让前端每次保存都搬运历史。
 //!
@@ -37,9 +37,13 @@ use tauri::{AppHandle, Emitter, Manager, State};
 const TICK: Duration = Duration::from_secs(20);
 /// 历史保留条数上限（全局，非每任务），避免无限增长。
 const MAX_RUNS: usize = 300;
-/// 单次运行输出落盘上限（字符），防止把日志文件写爆。
+/// 单次运行输出落盘上限（字符）。
 const MAX_OUTPUT: usize = 60_000;
-/// 单条实时日志事件的分片上限，避免一次 emit 塞进超大字符串。
+/// 运行期间内存累积上限（落盘上限的 2 倍）。
+const OUT_CAP: usize = MAX_OUTPUT * 2;
+/// 输出超限后追加的提示。
+const OUT_CLIPPED: &str = "\n…（输出超过上限，后续内容已丢弃）";
+/// 单条实时日志事件的分片上限。
 const CHUNK: usize = 8_000;
 /// 错过执行的补跑窗口：超过该时长不再补跑（避免开机后突然涌出一堆过期任务）。
 const CATCHUP_WINDOW_MS: i64 = 6 * 60 * 60 * 1000;
@@ -90,8 +94,8 @@ pub struct TaskDef {
     #[serde(default)]
     pub retry: u32,
     /// 子进程输出编码："auto" | "utf8" | "gbk"。默认 auto（自动判定）。
-    /// 之所以要能显式指定：GBK 与 UTF-8 在字节层面**存在真歧义**（见 OutDecoder 注释），
-    /// 自动判定不可能 100% 正确，留一个确定性的开关比让用户吃乱码强。
+    /// GBK 与 UTF-8 在字节层面**存在真歧义**（见 OutDecoder 注释），
+    /// 自动判定不可能 100% 正确，故留一个可显式指定的开关。
     #[serde(default = "default_out_enc")]
     pub output_encoding: String,
 }
@@ -128,9 +132,8 @@ pub struct RunRecord {
 
 /// 单日聚合：一天里跑了几次、各是什么结果。
 ///
-/// 为什么不直接拿 `runs` 现算：`MAX_RUNS = 300` 是**全局**上限，一个月就会被写满，
-/// 月初的记录会被后来的运行挤掉 —— 那时热力图会把「记录已被裁」画成「未运行」，
-/// 也就是把残缺当完整。按天聚合只存计数，容量与 `runs` 完全无关。
+/// `MAX_RUNS = 300` 是**全局**上限，一个月就会被写满，月初记录会被挤掉；
+/// 按天聚合只存计数，容量与 `runs` 完全无关。
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DayAgg {
@@ -244,22 +247,47 @@ pub fn read_tasks_raw(app: &AppHandle) -> Vec<Value> {
         .unwrap_or_default()
 }
 
-/// 读全局设置（并发上限 / 是否补跑），缺省用安全默认值。
-fn read_settings(app: &AppHandle) -> (usize, bool) {
-    let Some(p) = state_path(app) else { return (2, true) };
-    let Ok(txt) = std::fs::read_to_string(p) else { return (2, true) };
-    let Ok(v) = serde_json::from_str::<Value>(&txt) else { return (2, true) };
+/// 调度设置的默认值与合法区间。
+const DEFAULT_MAX_CONCURRENT: usize = 2;
+const MAX_CONCURRENT_RANGE: (usize, usize) = (1, 8);
+const DEFAULT_CATCHUP: bool = true;
+
+/// 读盘失败或字段缺失时的兜底设置。
+fn default_settings() -> (usize, bool) {
+    (DEFAULT_MAX_CONCURRENT, DEFAULT_CATCHUP)
+}
+
+/// 从已解析的 state.json 取调度设置。
+fn settings_from(v: &Value) -> (usize, bool) {
     let s = v.get("scheduler");
     let max = s
         .and_then(|x| x.get("maxConcurrent"))
         .and_then(|x| x.as_u64())
-        .unwrap_or(2)
-        .clamp(1, 8) as usize;
+        .unwrap_or(DEFAULT_MAX_CONCURRENT as u64)
+        .clamp(MAX_CONCURRENT_RANGE.0 as u64, MAX_CONCURRENT_RANGE.1 as u64) as usize;
     let catchup = s
         .and_then(|x| x.get("catchUp"))
         .and_then(|x| x.as_bool())
-        .unwrap_or(true);
+        .unwrap_or(DEFAULT_CATCHUP);
     (max, catchup)
+}
+
+/// 一轮 tick 需要的全部配置：任务表 + 设置。读盘一次、解析一次。
+fn read_tick_config(app: &AppHandle) -> (Vec<TaskDef>, (usize, bool)) {
+    let Some(p) = state_path(app) else { return (vec![], default_settings()) };
+    let Ok(txt) = std::fs::read_to_string(p) else { return (vec![], default_settings()) };
+    let Ok(v) = serde_json::from_str::<Value>(&txt) else { return (vec![], default_settings()) };
+    let tasks = v
+        .get("scheduler")
+        .and_then(|s| s.get("tasks"))
+        .and_then(|t| t.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|it| serde_json::from_value::<TaskDef>(it.clone()).ok())
+                .collect()
+        })
+        .unwrap_or_default();
+    (tasks, settings_from(&v))
 }
 
 fn now_ms() -> i64 {
@@ -277,7 +305,7 @@ const DAY_KEEP: usize = 120;
 
 /// 本地时区的「年-月-日」键。
 /// 必须用**本地**日期：热力图的格子和用户看到的日历一致；用 UTC 会让东八区 08:00
-/// 之前跑出来的记录落到前一天（每天 10:00 的签到看起来会整天偏移）。
+/// 之前跑出来的记录落到前一天。
 fn day_key(ms: i64) -> String {
     use chrono::{Local, TimeZone};
     match Local.timestamp_millis_opt(ms).single() {
@@ -508,22 +536,19 @@ pub fn next_due_after(expr: &str, after_ms: i64) -> Option<i64> {
 
 // ============================ 输出解码 ============================
 //
-// 命令行工具的 stdout 编码在 Windows 上是「不可控」的，三种情况都会碰到：
+// 命令行工具的 stdout 编码在 Windows 上不可控，三种情况都会碰到：
 //   1. cmd 自身的报错与内置命令（echo/dir/…）按**控制台输出代码页**编码，简中 = GBK(936)；
 //   2. python 未设 PYTHONUTF8/PYTHONIOENCODING 时按 locale 编码输出（同样是 GBK）；
 //   3. git / node / cargo / ripgrep 这类工具直接吐 UTF-8。
-// 一律 from_utf8 会得到满屏 U+FFFD（用户可见的「全是乱码」）；一律按 GBK 解又会毁掉第 3 类。
 //
-// ⚠️ 关键事实：**GBK 与 UTF-8 在字节层面存在真歧义**，不能靠「是不是合法 UTF-8」区分：
+// ⚠️ **GBK 与 UTF-8 在字节层面存在真歧义**，不能靠「是不是合法 UTF-8」区分：
 //   GBK 汉字里 lead 落在 C2–DF、trail 落在 80–BF 的那些字，字节本身就是合法 UTF-8 ——
 //   例如「一」的 GBK 是 D2 BB，按 UTF-8 解得到 U+04BB（西里尔字母 һ），不报错、也不产生替换符。
-//   一个由这类字组成的串（「一卜」…）在两种编码下都能解开，只能靠「解出来的字符落在哪些区段」判别。
-//   （多数汉字序列没这么巧：「中文」的 GBK 是 D6 D0 CE C4，在 UTF-8 下非法，一眼可分。）
-// 因此这里的策略是：
-//   - 只在**首个含非 ASCII 的块**上判定一次（此后黏住，避免同一流中途换编码而更乱）；
+// 策略：
+//   - 只在**首个含非 ASCII 的块**上判定一次（此后黏住，避免同一流中途换编码）；
 //   - 判定用「GBK 被误当 UTF-8 的落点特征」：合法 UTF-8 但字符全落在希腊/西里尔/希伯来/
-//     常用标点等区段、且不含 CJK → 判为 GBK 误判。中文/英文的正常输出几乎不会命中这些区段；
-//   - 任务可显式指定 `outputEncoding`，绕开启发式（歧义无法根除，只能给出确定性出口）。
+//     常用标点等区段、且不含 CJK → 判为 GBK 误判；
+//   - 任务可显式指定 `outputEncoding`，绕开启发式。
 
 #[cfg(windows)]
 #[link(name = "kernel32")]
@@ -816,7 +841,7 @@ fn run_http(t: &TaskDef) -> (bool, String) {
     };
     for (k, v) in &t.headers {
         // accept-encoding 交给 ureq 自行协商：手动透传 gzip 时它不做透明解压，
-        // 响应会保持压缩字节导致后续按 UTF-8 解失败（与 http.rs 同一处坑）。
+        // 响应会保持压缩字节导致后续按 UTF-8 解失败。
         if k.eq_ignore_ascii_case("accept-encoding") {
             continue;
         }
@@ -936,8 +961,9 @@ fn execute(app: &AppHandle, run_id: &str, t: &TaskDef, ctl: &Arc<RunCtl>) -> (St
         let _ = r.join();
     }
     let out = {
-        let a = out_buf.lock().expect("out lock").clone();
-        let b = err_buf.lock().expect("err lock").clone();
+        // reader 已 join，直接取走缓冲内容，不再复制
+        let a = std::mem::take(&mut *out_buf.lock().expect("out lock"));
+        let b = std::mem::take(&mut *err_buf.lock().expect("err lock"));
         match (a.trim().is_empty(), b.trim().is_empty()) {
             (false, true) => a,
             (true, false) => b,
@@ -1018,7 +1044,9 @@ fn sink_and_emit(
         return;
     }
     if let Ok(mut s) = sink.lock() {
-        s.push_str(text);
+        if append_bounded(&mut s, text) {
+            return; // 已截断，不再发事件
+        }
     }
     for part in split_chunks(text, CHUNK) {
         let _ = app.emit(
@@ -1026,6 +1054,22 @@ fn sink_and_emit(
             json!({ "runId": run_id, "taskId": task_id, "stream": stream, "text": part }),
         );
     }
+}
+
+/// 有界累积运行输出。返回 `true` 表示已截断（本次未写入，调用方应跳过这次事件）。
+/// 封顶时把缓冲裁到一个 CHUNK 以内再追加 `OUT_CLIPPED`，此后以提示结尾判定已封顶。
+fn append_bounded(sink: &mut String, text: &str) -> bool {
+    if sink.ends_with(OUT_CLIPPED) {
+        return true;
+    }
+    if sink.len() + text.len() <= OUT_CAP {
+        sink.push_str(text);
+        return false;
+    }
+    let keep = sink.len().saturating_sub(CHUNK);
+    sink.truncate(sink.floor_char_boundary(keep));
+    sink.push_str(OUT_CLIPPED);
+    true
 }
 
 // ============================ 运行编排 ============================
@@ -1151,11 +1195,10 @@ fn set_due(app: &AppHandle, st: &SchedulerState, task_id: &str, due: i64) {
 }
 
 fn tick(app: &AppHandle, allow_catchup: bool) {
-    let tasks = read_tasks(app);
+    let (tasks, (max_conc, catchup_on)) = read_tick_config(app);
     if tasks.is_empty() {
         return;
     }
-    let (max_conc, catchup_on) = read_settings(app);
     let st: State<SchedulerState> = app.state();
     let state: &SchedulerState = st.inner();
     let now = now_ms();
@@ -1231,9 +1274,8 @@ pub fn scheduler_runs(
 
 /// 按天聚合的热力图数据：taskId -> "YYYY-MM-DD" -> 当日计数。
 ///
-/// **不返回 `output`**：任务行的整月热力图只需要「哪天跑了几次、结果如何」，
-/// 若改用 `scheduler_runs(limit: 300)` 现算，等于把 300 条 × 最长 60KB 的输出灌进 IPC，
-/// 而且 `runs` 本来就是全局 300 条上限、月初记录已被截断（见 `DayAgg` 的注释）。
+/// **不返回 `output`**：整月热力图只需要「哪天跑了几次、结果如何」，
+/// 拼上每条最长 60KB 的输出会撑爆 IPC。
 #[tauri::command]
 pub fn scheduler_heat(st: State<SchedulerState>) -> HashMap<String, HashMap<String, DayAgg>> {
     let s = st.store.lock().expect("store lock");
@@ -1286,8 +1328,7 @@ pub fn scheduler_cancel(st: State<SchedulerState>, run_id: String) -> Result<boo
 #[tauri::command]
 pub fn scheduler_clear_runs(app: AppHandle, st: State<SchedulerState>, task_id: Option<String>) -> Result<(), String> {
     let mut s = st.store.lock().expect("store lock");
-    // 按天聚合必须与 runs 一起清：清了历史却留着热力图，界面上就是一堆
-    // 点开无记录的颜色块（用户点「清空」的意图就是「这些别算了」）。
+    // 按天聚合必须与 runs 一起清，否则会留下点开无记录的颜色块
     match task_id.as_deref() {
         Some(id) if !id.is_empty() => {
             s.runs.retain(|r| r.task_id != id);
@@ -1300,6 +1341,27 @@ pub fn scheduler_clear_runs(app: AppHandle, st: State<SchedulerState>, task_id: 
     }
     write_store(&app, &s);
     Ok(())
+}
+
+/// 从磁盘重新读一次 `scheduler-store.json`，覆盖内存副本。
+///
+/// ⛔ `SchedulerState.store` 是**常驻内存**的：`read_store()` 只在 `start_scheduler`
+/// 启动时调用一次，此后 `write_store()` 会把**整份内存副本**回写磁盘（触发点：
+/// `set_due()`、每次运行结束、`scheduler_clear_runs`）。
+/// 故「备份与恢复」覆盖 `scheduler-store.json` 后，**必须在写完盘之后调用本命令** ——
+/// 否则下一次 tick 会用内存里的数据把它静默写回（恢复看起来成功、实际被回滚）。
+///
+/// 返回 (运行记录条数, 有热力图数据的任务数)，便于前端提示恢复结果。
+#[tauri::command]
+pub fn scheduler_reload_store(app: AppHandle, st: State<SchedulerState>) -> Result<(usize, usize), String> {
+    let fresh = read_store(&app);
+    let runs = fresh.runs.len();
+    let tasks = fresh.daily.len();
+    {
+        let mut s = st.store.lock().expect("store lock");
+        *s = fresh;
+    }
+    Ok((runs, tasks))
 }
 
 #[tauri::command]
@@ -1317,12 +1379,12 @@ pub fn scheduler_status(app: AppHandle, st: State<SchedulerState>) -> Value {
             })
         })
         .collect();
-    let (max_conc, catchup) = read_settings(&app);
+    let (tasks, (max_conc, catchup)) = read_tick_config(&app);
     let now = now_ms();
     // next_due 以 store 记录的为准（它就是调度真正依赖的值），
     // 尚未登记过的任务才现算一个，保证 UI 显示与后端行为一致。
     let recorded = st.store.lock().expect("store lock").next_due.clone();
-    let next: HashMap<String, i64> = read_tasks(&app)
+    let next: HashMap<String, i64> = tasks
         .into_iter()
         .map(|t| {
             let n = recorded.get(&t.id).copied().filter(|v| *v > 0).unwrap_or_else(|| {
@@ -1339,7 +1401,7 @@ pub fn scheduler_status(app: AppHandle, st: State<SchedulerState>) -> Value {
 }
 
 /// 校验 cron 并给出下次触发时刻（前端编辑器实时校验用）。
-/// 失败时把真实原因原样回传 —— 早先这里固定吐「需 5 段」的文案，反而掩盖了真实故障。
+/// 失败时把真实原因原样回传。
 #[tauri::command]
 pub fn scheduler_check_cron(expr: String) -> Value {
     let now = now_ms();
@@ -1765,5 +1827,49 @@ mod tests {
         assert_eq!(backfill["a"]["2026-10-06"].ok, incremental["a"]["2026-10-06"].ok);
         assert_eq!(backfill["a"]["2026-10-06"].bad, incremental["a"]["2026-10-06"].bad);
         assert_eq!(backfill["b"]["2026-10-06"].warn, 1);
+    }
+
+    /// 运行输出缓冲有上界，且截断后不再增长。
+    #[test]
+    fn 输出缓冲有上界() {
+        let mut sink = String::new();
+        let big = "x".repeat(CHUNK);
+        // 灌到远超上限：模拟 reader 线程持续 push
+        let mut clipped_times = 0;
+        for _ in 0..40 {
+            if append_bounded(&mut sink, &big) {
+                clipped_times += 1;
+            }
+        }
+        assert!(sink.len() <= OUT_CAP + OUT_CLIPPED.len(), "缓冲越界：{} 字节", sink.len());
+        assert!(
+            sink.ends_with(OUT_CLIPPED),
+            "超限后应留下截断提示；实际 len={}, tail={:?}",
+            sink.len(),
+            &sink[sink.len().saturating_sub(40)..]
+        );
+        // 前 15 轮正常累积（第 15 轮起触发截断），此后每轮都回报「已截断」且长度不再增长
+        assert_eq!(clipped_times, 25, "封顶后应持续回报「已截断」");
+        assert_eq!(sink.len(), OUT_CAP - CHUNK + OUT_CLIPPED.len(), "封顶长度应固定不再增长");
+        // 未越界时原样累积（行为不能被上界改坏）
+        let mut small = String::new();
+        assert!(!append_bounded(&mut small, "hello"));
+        assert!(!append_bounded(&mut small, " world"));
+        assert_eq!(small, "hello world");
+    }
+
+    /// 设置解析：缺省、合法区间与类型错误。
+    #[test]
+    fn 设置解析() {
+        assert_eq!(settings_from(&serde_json::json!({})), (2, true));
+        assert_eq!(settings_from(&serde_json::json!({ "scheduler": {} })), (2, true));
+        assert_eq!(
+            settings_from(&serde_json::json!({ "scheduler": { "maxConcurrent": 5, "catchUp": false } })),
+            (5, false)
+        );
+        // 越界值收敛到 1..=8，类型不对则回退默认
+        assert_eq!(settings_from(&serde_json::json!({ "scheduler": { "maxConcurrent": 99 } })).0, 8);
+        assert_eq!(settings_from(&serde_json::json!({ "scheduler": { "maxConcurrent": 0 } })).0, 1);
+        assert_eq!(settings_from(&serde_json::json!({ "scheduler": { "maxConcurrent": "x" } })).0, 2);
     }
 }

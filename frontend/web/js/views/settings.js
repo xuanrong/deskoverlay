@@ -387,14 +387,14 @@ export function renderSettings(view) {
         <div class="set-row">
           <div class="set-info">
             <div class="set-name">导出备份</div>
-            <div class="set-desc">将所有数据（笔记、工作记录、灵感碎片、任务、设置等）打包为 zip 文件</div>
+            <div class="set-desc">打包所有用户数据：笔记、工作记录、灵感碎片、任务、设置、定时任务的运行历史与热力图、已安装插件。不含可重建的缓存（全盘索引、壁纸副本）。</div>
           </div>
           <button class="btn-primary" id="set-backup">导出备份</button>
         </div>
         <div class="set-row">
           <div class="set-info">
             <div class="set-name">恢复备份</div>
-            <div class="set-desc">从 zip 备份文件恢复数据，当前数据将被覆盖</div>
+            <div class="set-desc">从 zip 备份文件恢复数据，当前数据将被覆盖（恢复前会自动备份当前数据，可回退）</div>
           </div>
           <button class="btn-ghost" id="set-restore">选择备份文件</button>
         </div>
@@ -551,7 +551,8 @@ export function renderSettings(view) {
 
         const confirmed = await showDialog({
             title: "确认恢复",
-            message: "恢复将覆盖当前所有数据，且无法撤销。\n确定继续吗？",
+            message: "恢复将覆盖当前所有数据。\n恢复前会自动把当前数据备份一份（pre-restore-<时间>.zip），" +
+                     "万一恢复错了可以从它还原。\n\n确定继续吗？",
             okText: "确认恢复",
             cancelText: "取消",
             danger: true,
@@ -561,9 +562,24 @@ export function renderSettings(view) {
         restoreBtn.textContent = "恢复中…";
         restoreBtn.disabled = true;
         try {
-          await invoke("restore_data", { zipPath });
+          // restore_data 返回一句说明（恢复前自动备份的落点 / 备份失败警告）
+          const note = await invoke("restore_data", { zipPath });
+          // ⛔ 顺序要紧：调度器的运行历史与热力图是 Rust 侧**常驻内存**的一份副本
+          // （read_store 只在启动时调一次，write_store 会整份回写）。必须在恢复完文件之后
+          // 立刻让它从磁盘重读，否则下一次 tick 就把恢复结果静默覆盖掉。
+          const reloaded = await invoke("scheduler_reload_store").catch((e) => {
+            console.warn("[settings] 调度器存储重载失败：", e);
+            return null;
+          });
           await loadState();
-          await showDialog({ title: "恢复完成", message: "数据已恢复，即将刷新页面以应用更改。", okText: "刷新", showCancel: false });
+          const reloadNote = Array.isArray(reloaded)
+            ? `\n\n调度器已重载：运行历史 ${reloaded[0]} 条、热力图 ${reloaded[1]} 个任务。`
+            : "\n\n⚠ 调度器历史重载失败，重启应用后才会生效。";
+          await showDialog({
+            title: "恢复完成",
+            message: `数据已恢复，即将刷新页面以应用更改。${reloadNote}${note || ""}`,
+            okText: "刷新", showCancel: false,
+          });
           location.reload();
         } catch (e) {
           showDialog({ title: "恢复失败", message: String(e && e.message || e), okText: "知道了", showCancel: false });

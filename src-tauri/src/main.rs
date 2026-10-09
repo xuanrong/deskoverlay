@@ -2,7 +2,7 @@
 //!
 //! 运行模式：嵌入 Explorer 桌面 WorkerW，使工作台成为「桌面本身」。
 //! - Win+D 回到工作台；任务栏 z-order 高于 WorkerW → 任务栏可见；
-//! - 不实现点击穿透；Explorer 重启自愈（后续用可靠检测重新实现）。
+//! - 不实现点击穿透。
 //!
 //! 持久化：state.json 写入 app_data_dir（跨 WebView 重装不丢失）。
 //! 前端经 load_state / save_state 命令读写，不再用 localStorage。
@@ -75,9 +75,8 @@ fn quit_app(app: tauri::AppHandle) {
     *PENDING_REMINDER.lock().unwrap() = None;
     LYRIC_PAGE_READY.store(false, Ordering::SeqCst);
     *PENDING_LYRIC.lock().unwrap() = None;
-    // 全局护眼：退出前必须还原显示器原始 gamma ramp。
-    // 否则进程结束后屏幕会一直停留在偏暖状态（gamma 是全局状态，不随进程消失），
-    // 用户只能重启或重登才能恢复 —— 这是最影响体验的故障模式。
+    // 退出前必须还原显示器原始 gamma ramp：gamma 是全局状态，不随进程消失，
+    // 否则进程结束后屏幕一直偏暖，只能重启或重登才能恢复。
     let _ = eyecare::restore_original_ramp();
     for label in ["main", "reminder", "lock", "lyric"] {
         if let Some(win) = app.get_webview_window(label) {
@@ -101,13 +100,15 @@ const REMINDER_HARD_TTL_MS: u64 = 15_000;
 /// 避免它误杀新一轮的提醒窗口。
 static REMINDER_GEN: AtomicU64 = AtomicU64::new(0);
 
+/// 提醒窗口**实例**序号：每次建窗成功自增。
+/// 用途：让「页面 15s 未就绪」的清理逻辑只销毁它当初负责的那一扇窗 ——
+/// 期间若已换了一扇新窗（序号变了），说明本轮早已作废，绝不能顺手把新窗杀掉。
+static REMINDER_WIN_SEQ: AtomicU64 = AtomicU64::new(0);
+
 /// 当前 reminder 页面的事件监听器是否已注册完成（`reminder_ready` 置 true，窗口销毁时置 false）。
 ///
-/// 为什么需要它：`present_reminder` 的**复用分支**曾无条件 `emit`。若两次提醒间隔极短
-/// （≤ 页面加载耗时，约 200ms~1s），第二次到达时窗口对象已存在、但页面 JS 尚未注册
-/// listener → emit 的 `show-reminder` 无人接收而永久丢失；而复用分支已顺手清空
-/// PENDING，随后页面就绪时 `reminder_ready` 取到 `None` → 直接销毁窗口。
-/// 净结果：**两次提醒一起静默丢失**（既没弹窗，也没有残留窗口可供暴露问题）。
+/// 用途：复用分支只有在页面监听器就绪后才允许直接 emit；否则两次间隔极短的提醒
+/// 会因 `show-reminder` 无人接收而丢失。
 ///
 /// 不变量：**不存在提醒窗口 ⟹ 本标志为 false**。因此「窗口存在但标志为 false」
 /// 唯一对应「页面尚在加载」这一种状态，此时应写回 PENDING 交给页面自取，而非 emit。
@@ -140,9 +141,19 @@ fn spawn_reminder_watchdog(win: &tauri::WebviewWindow) {
         let app_inner = app.clone();
         let _ = app.run_on_main_thread(move || {
             if let Some(w) = app_inner.get_webview_window("reminder") {
-                log_diag("reminder", "硬超时兜底：强制销毁提醒窗口（前端未回调 hide_reminder？）");
+                // 诊断用：与本条对照 `hide_reminder` 入口那条即可定性 ——
+                // 没有「收到 hide_reminder」= 前端根本没调到；有却仍走到这里 = 销毁没生效。
+                log_diag(
+                    "reminder",
+                    &format!(
+                        "硬超时兜底：强制销毁提醒窗口（前端未回调 hide_reminder？page_ready={} visible={}）",
+                        REMINDER_PAGE_READY.load(Ordering::SeqCst),
+                        w.is_visible().unwrap_or(false)
+                    ),
+                );
                 // 与 hide_reminder 一样复位就绪标志，维持「无窗口 ⟹ 标志为 false」不变量
                 REMINDER_PAGE_READY.store(false, Ordering::SeqCst);
+                *PENDING_REMINDER.lock().unwrap() = None;
                 let _ = w.hide();
                 let _ = w.destroy();
             }
@@ -184,7 +195,7 @@ fn sink_reminder_below_lock(win: &tauri::WebviewWindow) {
 /// 将提醒定位到主屏右上角（预留 24px 边距）、置顶并显示。
 /// emit=true 时向 reminder 窗口推送内容（仅用于"复用已就绪窗口"的场景）；
 /// 新建窗口时 emit=false，改由提醒页 listener 就绪后经 reminder_ready 命令取用 PENDING 再推送，
-/// 消除"emit 早于前端 listener 注册完成"的竞态（事件偶发丢失 → 卡片不渲染 → 透明窗口常驻拦截）。
+/// 避免"emit 早于前端 listener 注册完成"的竞态。
 fn show_reminder_win(win: &tauri::WebviewWindow, payload: serde_json::Value, emit: bool) {
     let size = win.outer_size().unwrap_or(tauri::PhysicalSize::new(340, 130));
     let screen_w = unsafe { GetSystemMetrics(SM_CXSCREEN) };
@@ -193,20 +204,19 @@ fn show_reminder_win(win: &tauri::WebviewWindow, payload: serde_json::Value, emi
     let _ = win.set_always_on_top(true);
     let _ = win.show();
     sink_reminder_below_lock(win);
-    // 展示即武装硬超时兜底（旧看门狗因世代变更自动退出）
+    // 展示即武装硬超时兜底
     spawn_reminder_watchdog(win);
     if emit {
         let _ = win.emit("show-reminder", payload.clone());
     }
-    // 展示确认：前端（reminders.js）据此才写「当日已触发」标记——
-    // 之前是标记先行、弹窗失败即当天静默丢失（用户反馈：到点没弹提醒）。
+    // 展示确认：前端（reminders.js）据此才写「当日已触发」标记
     let _ = win.emit("reminder-shown", payload);
 }
 
 /// 显示置顶提醒窗口（系统级：盖住浏览器等其他应用）。
 /// 窗口非常驻：已存在则直接复用展示；否则按需创建（reminder.html 页面就绪后再展示）。
-/// 注意：窗口的创建/展示都挪到后台异步线程执行——若在 Tauri 命令（主线程）里同步
-/// `WebviewWindowBuilder::build()`，会发现建窗需事件循环而自身又占着主线程 → 死锁。
+/// 注意：窗口的创建/展示都在后台异步线程执行——若在 Tauri 命令（主线程）里同步
+/// `WebviewWindowBuilder::build()`，建窗需事件循环而自身又占着主线程 → 死锁。
 /// pub：久坐监控线程复用该逻辑弹出提醒（见 sedentary.rs）。
 pub fn present_reminder(app: &tauri::AppHandle, icon: &str, title: &str, message: &str) {
     let payload = serde_json::json!({ "icon": icon, "title": title, "message": message });
@@ -253,9 +263,11 @@ pub fn present_reminder(app: &tauri::AppHandle, icon: &str, title: &str, message
             // reminder_ready 取用（内容以最后写入者为准），避免两边都推空。
             log_diag("reminder", "窗口创建失败（疑似并发已存在），保留暂存内容待复用");
         } else {
+            // 本扇窗的身份序号：清理时用它确认「要销毁的仍是当初这一扇」。
+            let seq = REMINDER_WIN_SEQ.fetch_add(1, Ordering::SeqCst) + 1;
             // 建窗成功：等待页面就绪握手（reminder_ready）后展示并 emit reminder-shown。
-            // 若页面加载失败（reminder_ready 永不到来），15s 看门狗销毁窗口并 emit reminder-failed，
-            // 前端据此撤销「当日已触发」标记，下一分钟重试。
+            // 若页面加载失败（reminder_ready 永不到来），清掉窗口并 emit reminder-failed，
+            // 前端据此撤销「当日已触发」标记，触发分钟内的心跳会自动重试。
             let app2 = app.clone();
             let payload2 = payload.clone();
             std::thread::spawn(move || {
@@ -266,7 +278,26 @@ pub fn present_reminder(app: &tauri::AppHandle, icon: &str, title: &str, message
                         return;
                     }
                 }
-                log_diag("reminder", "页面 15s 未就绪，emit reminder-failed");
+                // ⛔ 必须真的销毁，不能只 emit「失败」就撒手：该窗口以 `visible(false)` 建成，
+                // 若留着，此后每次 present_reminder 都会命中「窗口在 + page_ready=false」
+                // 分支 —— 写 PENDING 后直接 return，既不显示也不武装看门狗 ⇒
+                // **后续所有提醒静默丢失**，还白占一个永不释放的 WebView2 实例。
+                let app3 = app2.clone();
+                let _ = app2.run_on_main_thread(move || {
+                    // 只在「仍是当初那一扇」且「页面始终没就绪」时才动手：
+                    // 期间若换了新窗（序号变了）或页面最后一刻就绪（15s 看门狗已接手），都不碰。
+                    if REMINDER_WIN_SEQ.load(Ordering::SeqCst) != seq
+                        || REMINDER_PAGE_READY.load(Ordering::SeqCst)
+                    {
+                        return;
+                    }
+                    log_diag("reminder", "页面 15s 未就绪：销毁僵尸窗口并 emit reminder-failed");
+                    *PENDING_REMINDER.lock().unwrap() = None;
+                    if let Some(w) = app3.get_webview_window("reminder") {
+                        let _ = w.hide();
+                        let _ = w.destroy();
+                    }
+                });
                 let _ = app2.emit("reminder-failed", payload2);
             });
         }
@@ -314,9 +345,16 @@ fn show_reminder(app: tauri::AppHandle, icon: String, title: String, message: St
 /// 同时清空暂存内容，避免残留内容被下一次窗口的 reminder_ready 误取。
 #[tauri::command]
 fn hide_reminder(app: tauri::AppHandle) {
+    let win = app.get_webview_window("reminder");
+    // 诊断：与看门狗那条「硬超时兜底」对照即可定性 ——
+    // 没有本条 = 前端根本没调到（页面 JS 不在 / invoke 被静默 return）。
+    log_diag(
+        "reminder",
+        &format!("收到 hide_reminder（窗口存在={}）", win.is_some()),
+    );
     REMINDER_PAGE_READY.store(false, Ordering::SeqCst);
     *PENDING_REMINDER.lock().unwrap() = None;
-    if let Some(win) = app.get_webview_window("reminder") {
+    if let Some(win) = win {
         let _ = win.hide();
         let _ = win.destroy();
     }
@@ -324,15 +362,13 @@ fn hide_reminder(app: tauri::AppHandle) {
 
 // ══════════════════════ 桌面歌词窗口（常驻浮层） ══════════════════════
 //
-// 与 reminder / lock 的关键差异：歌词窗口在**播放期间常驻**，故绝不能复用
-// `REMINDER_HARD_TTL_MS` 那套「显示后必被销毁」的看门狗 —— 那会在 15s 后把歌词条强杀。
-// 复用的只是它的两条工程经验：
+// 歌词窗口在**播放期间常驻**，故**不能**套用 `REMINDER_HARD_TTL_MS` 那套「显示后必被销毁」
+// 的看门狗 —— 那会在 15s 后把歌词条强杀。本窗口同样遵守两条约定：
 //   1. `focusable(false)`：不抢键盘焦点，避免打断用户正在进行的输入；
-//   2. 「窗口可见 ⟺ 有内容」+ listener 先注册再由页面取内容的 ready 握手
-//      （消除「emit 早于前端 listen 注册」的丢事件竞态）。
+//   2. 「窗口可见 ⟺ 有内容」+ listener 先注册再由页面取内容的 ready 握手。
 //
-// 另注：`desktop_inject.rs` 顶部「不实现点击穿透」的注释仅约束**主工作台窗口**
-// （面板外点击交给工作台处理），不适用于歌词浮层 —— 它是独立窗口，穿透是其核心能力。
+// 另注：`desktop_inject.rs` 顶部「不实现点击穿透」的注释仅约束**主工作台窗口**，
+// 不适用于歌词浮层 —— 它是独立窗口，穿透是其核心能力。
 
 /// 歌词窗口页面就绪标志（对齐 REMINDER_PAGE_READY）。
 static LYRIC_PAGE_READY: AtomicBool = AtomicBool::new(false);
@@ -353,8 +389,7 @@ static LYRIC_LOCKED: AtomicBool = AtomicBool::new(false);
 
 /// 歌词条尺寸（物理像素）：宽 760；歌词区单行高 56 / 双行高 88；工具条高 34。
 /// 高度**紧贴可见区域**，不留透明内边距 —— 透明区域在 WebView2 里仍会吞掉鼠标消息，
-/// 只有窗口矩形足够紧凑，穿透行为才可预期。故单双行切换必须真的改窗口高度，
-/// 不能靠「留一块透明区」——那会让条下方的桌面图标点不到。
+/// 只有窗口矩形足够紧凑，穿透行为才可预期。故单双行切换必须真的改窗口高度。
 ///
 /// 工具条放在歌词**上方**（网易云样式）：放右侧会在 flex 流里占宽、把歌词压到 ~478px，
 /// 悬浮又会在悬停时盖住长句句尾。放上方则歌词区永远全宽、永不遮挡。
@@ -390,8 +425,8 @@ fn lyric_height_for(form: &str) -> i32 {
 /// 尺寸常量（LYRIC_W / lyric_height_for）是**逻辑像素**（CSS px），而 set_size /
 /// outer_size / 位置换算全是物理像素。不乘 scale 的话，高分屏（125%/150%）上
 /// `set_size(物理 760×90)` 会把 CSS 视口压到 506×60 —— 工具条吃掉一大半，
-/// 歌词只剩一条缝被裁在条底边（真机已复现）。建窗用的 `inner_size` 恰好是逻辑像素，
-/// 所以两套单位混用还会导致「刚建好是对的、一切换形态就缩小」。
+/// 歌词只剩一条缝被裁在条底边。建窗用的 `inner_size` 恰好是逻辑像素，
+/// 两套单位混用还会导致「刚建好是对的、一切换形态就缩小」。
 fn lyric_physical_size(scale: f64, form: &str) -> (i32, i32) {
     let (w, h) = (LYRIC_W as f64, lyric_height_for(form) as f64);
     ((w * scale).round() as i32, (h * scale).round() as i32)
@@ -483,8 +518,7 @@ fn ensure_lyric(app: &tauri::AppHandle, h: i32) -> Option<tauri::WebviewWindow> 
         .shadow(false)
         .always_on_top(true)
         .skip_taskbar(true)
-        // 不可聚焦：歌词条常驻显示，若可聚焦则点它会夺走当前应用的键盘焦点，
-        // 打断用户正在进行的输入（与 reminder 窗口同一考量）。
+        // 不可聚焦：歌词条常驻显示，若可聚焦则点它会夺走当前应用的键盘焦点。
         .focusable(false)
         // 起步隐藏：显示时机收敛到 lyric_ready（拿到内容后 show），
         // 维持「窗口可见 ⟺ 有内容」不变量，避免造出透明却吞鼠标的空窗。
@@ -674,11 +708,9 @@ fn lyric_menu_ready(app: tauri::AppHandle) {
 
 /// 提交歌词条显示配置（形态 / 视觉模式 / 字号 / 自定义颜色）。设置页与歌词页按钮共用。
 ///
-/// 为什么要绕经 Rust，而不是页面自己搞定：
-/// 1. 单双行必须真的改**窗口高度**（90 → 122）。留一块透明区来「假装双行」会让条下方
-///    那段区域继续吞鼠标，破坏穿透 —— 这正是本功能最容易踩的坑。
-/// 2. 歌词页不能自己写 state.json（整体覆盖写 + 它只有启动时的旧快照），
-///    故配置统一广播出去，由**主窗口**落盘（唯一写者原则）。
+/// 配置绕经 Rust 下发：单双行必须真的改**窗口高度**（90 → 122）——留一块透明区来「假装双行」
+/// 会让条下方那段区域继续吞鼠标，破坏穿透；且歌词页不能自己写 state.json
+/// （整体覆盖写 + 它只有启动时的旧快照），故配置统一广播出去，由**主窗口**落盘。
 ///
 /// 广播用全局 `emit` 而非 `emit_to("lyric")`：主窗口也要收到才能持久化。
 #[tauri::command]
@@ -734,9 +766,8 @@ fn lyric_commit_display(
             let cur_h = cur.map(|s| s.height as i32).unwrap_or(h_phys);
             if cur_w != w_phys || cur_h != h_phys {
                 // **底边锚定**：歌词区贴在窗口底部，高度变化时把顶边反向平移同样的量，
-                // 歌词在屏幕上的位置就完全不动 —— 否则单双行切换会让歌词条上下跳。
-                // 也刻意**不读** state.json 的 pos：那是以旧窗口高度换算的比例，直接套用
-                // 会把歌词条挪到别处，看起来像「拖好的位置丢了、回到了原来的地方」。
+                // 歌词在屏幕上的位置就完全不动。
+                // 也刻意**不读** state.json 的 pos：那是按比例换算的坐标，直接套用会把歌词条挪到别处。
                 let old = win.outer_position().ok();
                 let _ = win.set_size(tauri::PhysicalSize::new(w_phys as u32, h_phys as u32));
                 if let Some(op) = old {
@@ -782,10 +813,8 @@ fn lyric_ready(app: tauri::AppHandle) {
             return;
         }
     };
-    // 先下发显示配置：新建窗口的页面默认是 single+stroke+center+22+默认配色，
-    // 若 state 里存的是别的值，不推一次就会出现「窗口高 88 但只画一行」「自定义配色丢失」。
-    // 这里下发**完整**配置（含颜色/对齐）—— 旧版只推 form/style/fontSize，
-    // 重开歌词窗口后自定义配色会被页面默认值覆盖（实测丢失），故一并修复。
+    // 下发完整显示配置（含颜色/对齐）：页面默认值是 single+stroke+center+22+默认配色，
+    // 不推一次就会出现「窗口高 88 但只画一行」「自定义配色丢失」。
     let _ = app.emit_to("lyric", "lyric://display", lyric_display_payload(&app));
     // 下发**真实**锁定态：OS 级穿透状态只有 Rust 知道。缺了这一步，页面会停在
     // HTML 里的 data-locked="true" 默认值，出现「页面显示锁定、实际可交互」的错位。
@@ -856,9 +885,7 @@ fn lyric_set_locked(app: tauri::AppHandle, locked: bool) {
         // 重置悬停标记，让探测线程从干净的状态开始：
         // 锁定时鼠标多半停在工具条上（在窗口内），置 true 可避免下一轮误判「刚移入」而立刻解锁。
         LYRIC_HOVERED.store(locked, Ordering::SeqCst);
-        // 回发确认：让页面与 OS 真实状态保持一致。
-        // 页面自身点击触发的回声是幂等的；这条主要服务于「外部发起」的场景
-        // （设置页 / 未来的全局热键），否则页面会停在旧的锁定态显示。
+        // 回发确认：让页面与 OS 真实状态保持一致（页面自身点击触发的回声是幂等的）。
         let _ = app.emit_to("lyric", "lyric://locked", locked_payload());
     }
 }
@@ -890,16 +917,13 @@ fn lyric_pos_commit(app: tauri::AppHandle, x_ratio: f64, y_ratio: f64, monitor_i
 
 // ────────────────── 悬停探测（P3：悬停自动解锁 / 离开自动锁定） ──────────────────
 //
-// 为什么必须在 Rust 侧做：**锁定态下窗口对鼠标完全透明**（WS_EX_TRANSPARENT），
-// 鼠标事件根本到不了页面 —— 所以 CSS `:hover`、`pointerenter` 在锁定态**永远不会触发**。
-// 而「悬停解锁」恰恰要从锁定态开始，靠页面事件是逻辑死循环。
+// 必须在 Rust 侧做：**锁定态下窗口对鼠标完全透明**（WS_EX_TRANSPARENT），
+// 鼠标事件到不了页面 —— CSS `:hover` / `pointerenter` 在锁定态**永远不会触发**。
 //
 // 解法：后台线程轮询光标位置，与歌词窗口矩形做命中测试，命中/离开时切换锁定态。
-// 用 120ms 轮询（约 8Hz）而非更高频：肉眼可感的响应延迟在 100ms 上下，
-// 再快只是徒增 CPU 唤醒，且解锁本身需要一次 set_ignore_cursor_events 的系统调用。
+// 用 120ms 轮询（约 8Hz）而非更高频：再快只是徒增 CPU 唤醒。
 //
-// 关键：**只在「锁定态 ↔ 命中」的组合下才动作**，避免与用户手动锁定打架 ——
-// 用户主动锁定后若鼠标恰好停在条上，不应立刻被自动解锁（那会让手动锁定形同虚设）。
+// 关键：**只在「锁定态 ↔ 命中」的组合下才动作**，避免与用户手动锁定打架。
 
 /// 悬停探测线程是否已启动（只启动一次）。
 static LYRIC_HOVER_WATCH: AtomicBool = AtomicBool::new(false);
@@ -907,9 +931,8 @@ static LYRIC_HOVER_WATCH: AtomicBool = AtomicBool::new(false);
 static LYRIC_MANUAL_LOCK: AtomicBool = AtomicBool::new(false);
 /// 用户是否显式要求「解锁并保持可交互」（对应歌词条上的「解锁」按钮）。
 ///
-/// 为什么需要它：悬停解锁只是**临时**的 —— 鼠标一移开，自动锁定计时到点就把窗口锁回。
-/// 用户点「解锁」的语义是「我要反复拖动 / 调样式，别锁回去」，故需要这个持久标记；
-/// 否则解锁按钮点完几乎立刻失效，等于没用。
+/// 悬停解锁只是**临时**的（鼠标移开、自动锁定计时到点就锁回）；本标记保留用户的
+/// 「别锁回去」意图，供反复拖动 / 调样式使用。
 static LYRIC_STICKY_UNLOCK: AtomicBool = AtomicBool::new(false);
 /// 当前是否处于「光标命中歌词条」状态（供前端查询与去重）。
 static LYRIC_HOVERED: AtomicBool = AtomicBool::new(false);
@@ -944,6 +967,17 @@ fn read_lyric_cfg(app: &tauri::AppHandle) -> (bool, u64) {
     (hover, ms)
 }
 
+/// 悬停探测的轮询间隔（毫秒）：拿不到窗口时按档位退避，最高 1000ms。
+fn poll_ms(idle_rounds: u32) -> u64 {
+    match idle_rounds {
+        0..=4 => 120,
+        5..=9 => 240,
+        10..=19 => 480,
+        20..=39 => 960,
+        _ => 1000,
+    }
+}
+
 /// 启动歌词条悬停探测线程（幂等；在 show_lyric 首次建窗时调用）。
 fn start_lyric_hover_watch(app: &tauri::AppHandle) {
     if LYRIC_HOVER_WATCH.swap(true, Ordering::SeqCst) {
@@ -951,15 +985,20 @@ fn start_lyric_hover_watch(app: &tauri::AppHandle) {
     }
     let app = app.clone();
     std::thread::spawn(move || {
-        const POLL_MS: u64 = 120;
         // 移出后的锁定倒计时（毫秒累计）
         let mut leave_acc: u64 = 0;
         // 上一轮「光标是否在工具条区域」——手动锁定模式下据此切换穿透开关（见下）
         let mut tools_prev = false;
         // 设置弹窗：光标移出（弹窗+歌词条之外）的轮询累计（≥4 轮 ≈ 480ms → 收起）
         let mut menu_out_acc: u32 = 0;
+        // 连续多少轮没拿到可用窗口。拿到窗口立刻复位，否则退避会放大菜单自动收起的延迟。
+        let mut idle_rounds: u32 = 0;
+        // 上一轮唤醒时刻：倒计时按真实经过时间累加，不受退避影响
+        let mut last_tick = std::time::Instant::now();
         loop {
-            std::thread::sleep(std::time::Duration::from_millis(POLL_MS));
+            std::thread::sleep(std::time::Duration::from_millis(poll_ms(idle_rounds)));
+            let elapsed_ms = last_tick.elapsed().as_millis() as u64;
+            last_tick = std::time::Instant::now();
             // 窗口不存在 → 重置全部状态，线程继续等（不退出，避免反复创建线程）
             let win = match app.get_webview_window("lyric") {
                 Some(w) => w,
@@ -968,14 +1007,17 @@ fn start_lyric_hover_watch(app: &tauri::AppHandle) {
                     LYRIC_MANUAL_LOCK.store(false, Ordering::SeqCst);
                     LYRIC_STICKY_UNLOCK.store(false, Ordering::SeqCst);
                     leave_acc = 0;
+                    idle_rounds = idle_rounds.saturating_add(1);
                     continue;
                 }
             };
-            // 窗口不可见时不做任何判定（隐藏/销毁中）
+            // 窗口不可见时不做任何判定（隐藏/销毁中），同样退避
             if !win.is_visible().unwrap_or(false) {
                 leave_acc = 0;
+                idle_rounds = idle_rounds.saturating_add(1);
                 continue;
             }
+            idle_rounds = 0;
             // 命中测试（物理像素，避免 DPI 换算误差）：
             //   hit       —— 光标是否在窗口矩形内
             //   hit_tools —— 光标是否在**顶部工具条区域**内（窗口顶部 LYRIC_TOOLS_H 像素）
@@ -1055,7 +1097,7 @@ fn start_lyric_hover_watch(app: &tauri::AppHandle) {
                 // sticky 解锁期间不锁回 —— 用户显式要求保持可交互。
                 if was_hit && !sticky {
                     let auto_ms = LYRIC_AUTO_LOCK_MS.load(Ordering::SeqCst);
-                    leave_acc += POLL_MS;
+                    leave_acc += elapsed_ms;
                     if leave_acc >= auto_ms {
                         leave_acc = 0;
                         let _ = win.set_ignore_cursor_events(true);
@@ -1227,7 +1269,7 @@ fn export_text_file(
 /// 读取持久化状态。
 /// state.json 存业务数据；音乐相关（音源插件脚本 musicSources / 收藏 favorites / 播放状态 playback）
 /// 统一独立存 music.json；workLogs（工作记录）独立存 worklogs.json；notes（笔记列表）独立存 notes.json。
-/// 老数据迁移：state.json 中残留的这几个字段会保留返回，下次保存自动分流；旧版 sources.json 作兜底。
+/// state.json 中残留的这几个字段会保留返回，下次保存自动分流。
 #[tauri::command]
 fn load_state(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
@@ -1253,7 +1295,7 @@ fn load_state(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
             }
         }
     }
-    // 旧版音源独立文件迁移兜底：music.json 未提供 musicSources 时，读 sources.json 保留旧数据
+    // 音源独立文件兜底：music.json 未提供 musicSources 时，读 sources.json 保留数据
     if state.get("musicSources").is_none() {
         let sources_file = dir.join("sources.json");
         if sources_file.exists() {
@@ -1276,7 +1318,7 @@ fn load_state(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
             state["notes"] = nv;
         }
     }
-    // 旧版迁移：state.notes 为 string 时自动包装为数组
+    // 迁移：state.notes 为 string 时自动包装为数组
     if let Some(n) = state.get("notes") {
         if n.is_string() {
             let now = 0;
@@ -1383,10 +1425,8 @@ fn read_bg_data_url(path: String) -> Result<Option<String>, String> {
     Ok(Some(format!("data:{};base64,{}", mime, STANDARD.encode(data))))
 }
 
-// ─── 壁纸内存优化（2026-09-16）───
-// 旧链路：原图整读 → base64（×1.33）→ IPC 传给前端 → JS 常驻持有 → 解码为全尺寸位图。
-// 一张 4K 图占用 ~50MB（16MB 字符串 + 33MB 位图），且主窗/锁屏/提醒窗各来一份。
-// 新链路：prepare_wallpaper 预缩放到屏幕尺寸的 JPEG 副本（磁盘缓存，改图/失效即重建），
+// ─── 壁纸内存优化 ───
+// prepare_wallpaper 预缩放到屏幕尺寸的 JPEG 副本（磁盘缓存，改图/失效即重建），
 // 前端经 asset:// 协议直接引用副本 —— JS 零常驻字符串，位图仅屏幕尺寸（~8MB）。
 
 /// 壁纸副本信息：asset_url 供 CSS 直接使用。
@@ -1477,52 +1517,148 @@ fn convert_file_src(p: &std::path::Path) -> String {
     format!("http://asset.localhost/{}", enc.trim_start_matches('/'))
 }
 
-/// 备份所有数据文件到 zip。
-#[tauri::command]
-fn backup_data(app: tauri::AppHandle, zip_path: String) -> Result<(), String> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let files = ["state.json", "music.json", "worklogs.json", "notes.json"];
+// ─── 备份与恢复 ───
+// 备份范围 = 「用户数据」：
+//   ✅ state.json、music.json、worklogs.json、notes.json、scheduler-store.json、plugins/
+//   ❌ fileindex.txt（可重建）、wallpaper_cache/、music/、aliyundrive/（授权会过期）、
+//      eyecare_baseline.json（护眼 gamma 基准，丢了重新学习即可）
+const BACKUP_FILES: &[&str] = &[
+    "state.json",
+    "music.json",
+    "worklogs.json",
+    "notes.json",
+    // 运行历史 + 按天热力图 + next_due。⚠ 恢复后前端必须再调 scheduler_reload_store，
+    // 否则会被调度器的内存副本静默写回。
+    "scheduler-store.json",
+];
+// 需要递归打包的目录。plugins/ 不能省：已安装插件靠目录扫描发现，不在 state 里。
+const BACKUP_DIRS: &[&str] = &["plugins"];
 
-    let zip_file = fs::File::create(&zip_path).map_err(|e| e.to_string())?;
+/// 备份条目白名单：只认已知的数据文件，或已知目录内的条目。
+/// ⚠ 不能只做前缀匹配：`plugins/../../evil.js` 也满足「以 `plugins/` 开头」，
+/// 本函数必须自己挡住越界形态，不依赖解压侧的 `enclosed_name()` 兜底。
+fn is_allowed_backup_entry(name: &str) -> bool {
+    if name.is_empty()
+        || name.starts_with('/')
+        || name.contains('\\')
+        || name.split('/').any(|c| c == "..")
+    {
+        return false;
+    }
+    BACKUP_FILES.contains(&name)
+        || BACKUP_DIRS
+            .iter()
+            .any(|d| name.strip_prefix(d).is_some_and(|rest| rest.starts_with('/')))
+}
+
+/// 递归把目录写进 zip（条目名用 `/` 分隔并带目录前缀）。
+fn zip_add_dir<W: std::io::Write + std::io::Seek>(
+    zip: &mut zip::ZipWriter<W>,
+    dir: &std::path::Path,
+    prefix: &str,
+) -> Result<(), String> {
+    // 目录不存在不是错误（用户可能一个插件都没装）
+    let Ok(rd) = fs::read_dir(dir) else { return Ok(()) };
+    let options = zip::write::SimpleFileOptions::default();
+    for entry in rd.flatten() {
+        let path = entry.path();
+        let name = entry.file_name().to_string_lossy().to_string();
+        let full = format!("{prefix}/{name}");
+        if path.is_dir() {
+            zip_add_dir(zip, &path, &full)?;
+        } else if path.is_file() {
+            let data = fs::read(&path).map_err(|e| e.to_string())?;
+            zip.start_file(&full, options).map_err(|e| e.to_string())?;
+            zip.write_all(&data).map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+/// 把 app_data_dir 下的用户数据打包成 zip。
+fn write_backup_zip(dir: &std::path::Path, zip_path: &std::path::Path) -> Result<(), String> {
+    let zip_file = fs::File::create(zip_path).map_err(|e| e.to_string())?;
     let mut zip = zip::ZipWriter::new(zip_file);
     let options = zip::write::SimpleFileOptions::default();
 
-    for name in &files {
+    for name in BACKUP_FILES {
         let path = dir.join(name);
         if path.exists() {
             let data = fs::read(&path).map_err(|e| e.to_string())?;
-            zip.start_file(name, options).map_err(|e| e.to_string())?;
+            zip.start_file(*name, options).map_err(|e| e.to_string())?;
             zip.write_all(&data).map_err(|e| e.to_string())?;
         }
+    }
+    for d in BACKUP_DIRS {
+        zip_add_dir(&mut zip, &dir.join(d), d)?;
     }
 
     zip.finish().map_err(|e| e.to_string())?;
     Ok(())
 }
 
-/// 从 zip 恢复数据文件（覆盖现有数据）。
+/// 备份所有用户数据文件到 zip。
 #[tauri::command]
-fn restore_data(app: tauri::AppHandle, zip_path: String) -> Result<(), String> {
+fn backup_data(app: tauri::AppHandle, zip_path: String) -> Result<(), String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    write_backup_zip(&dir, std::path::Path::new(&zip_path))
+}
 
-    let zip_file = fs::File::open(&zip_path).map_err(|e| e.to_string())?;
+/// 从 zip 还原白名单内的条目到 `dir`，返回实际写入的条目名（相对路径，`/` 分隔）。
+///
+/// 不依赖 AppHandle，便于单测 —— 这里是 zip 解压的安全敏感面：
+///   ① `enclosed_name()` 挡掉「写到 app_data_dir 之外」；
+///   ② 白名单只放行已知数据文件与已知目录下的条目。
+/// 两层都不能省：只靠白名单挡不住白名单内目录里的越界（例如 `plugins/../../x`）。
+fn extract_backup_zip(dir: &std::path::Path, zip_path: &std::path::Path) -> Result<Vec<String>, String> {
+    let zip_file = fs::File::open(zip_path).map_err(|e| e.to_string())?;
     let mut archive = zip::ZipArchive::new(zip_file).map_err(|e| e.to_string())?;
-
-    let allowed = ["state.json", "music.json", "worklogs.json", "notes.json"];
+    let mut written = Vec::new();
 
     for i in 0..archive.len() {
         let mut file = archive.by_index(i).map_err(|e| e.to_string())?;
-        let name = file.name().to_string();
-        if !allowed.contains(&name.as_str()) {
+        let Some(rel) = file.enclosed_name() else { continue };
+        let name = rel.to_string_lossy().replace('\\', "/");
+        if name.ends_with('/') {
+            continue; // 目录条目（下面 create_dir_all 会隐式建）
+        }
+        if !is_allowed_backup_entry(&name) {
             continue;
         }
+
         let out_path = dir.join(&name);
+        if let Some(parent) = out_path.parent() {
+            fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
         let mut out = fs::File::create(&out_path).map_err(|e| e.to_string())?;
         std::io::copy(&mut file, &mut out).map_err(|e| e.to_string())?;
+        written.push(name);
     }
 
-    Ok(())
+    Ok(written)
+}
+
+/// 从 zip 恢复数据文件（覆盖现有数据）。
+/// 返回一句给用户看的说明 —— 含「恢复前自动备份」的落点，或该备份失败的警告。
+///
+/// 恢复前**先自动把当前数据打包**（界面文案承诺「可撤销」）。
+#[tauri::command]
+fn restore_data(app: tauri::AppHandle, zip_path: String) -> Result<String, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+
+    // ① 保险备份：尽力而为 —— 失败不阻断恢复，但必须在结果里明确告知（不能悄悄跳过）
+    let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S").to_string();
+    let safety = dir.join(format!("pre-restore-{stamp}.zip"));
+    let safety_note = match write_backup_zip(&dir, &safety) {
+        Ok(()) => format!("\n\n恢复前的数据已自动备份到：\n{}", safety.display()),
+        Err(e) => format!("\n\n⚠ 恢复前的自动备份失败（{e}）—— 本次恢复不可撤销。"),
+    };
+
+    // ② 解压覆盖
+    extract_backup_zip(&dir, std::path::Path::new(&zip_path))?;
+
+    Ok(safety_note)
 }
 
 /// 桌面文件项。
@@ -1647,10 +1783,9 @@ fn rename_file(name: String, new_name: String) -> Result<(), String> {
 }
 
 // -------------------- 全盘路径作用域的文件操作 --------------------
-// 文件中心的**搜索结果**是全盘绝对路径（file_index::Hit.path），可能位于任意盘符。
 // 上方 open_file / reveal_file / rename_file / delete_file 均为 desktop_dir 作用域
-// （后端把入参当文件名 join 到桌面目录），作用于搜索结果会「找不到」或误改桌面上的同名文件，
-// 因此搜索结果必须走这一组按绝对路径操作的命令。
+// （后端把入参当文件名 join 到桌面目录），无法作用于全盘绝对路径，
+// 因此 file_index 的搜索结果必须走这一组按绝对路径操作的命令。
 
 /// 在资源管理器中定位任意路径。
 #[tauri::command]
@@ -1782,15 +1917,12 @@ fn ensure_lock(app: &tauri::AppHandle) -> Option<tauri::WebviewWindow> {
 /// 显示系统级锁屏窗口：全屏置顶（盖住其它应用与任务栏），并通知锁屏页开始动画。
 /// 注意：创建/展示在后台异步线程执行，命令立即返回——避免主线程命令里同步建窗死锁。
 ///
-/// 契约说明（2026-09-12 修正）：本命令**无返回值**——建窗是异步的，命令无法用返回值
-/// 报告成败。成败只能经事件回传：成功发 `lock-init`，彻底失败发 `lock-failed`。
-/// 原实现首次建窗失败即静默放弃且只发 `lock-init`，而 `lock.js` 又按本命令的布尔返回值
-/// 判断成功（返回值实为 `null`，`null !== false` 恒真）→ 隐私锁定会静默失效。
+/// 契约说明：本命令**无返回值**——建窗是异步的，命令无法用返回值报告成败。
+/// 成败只能经事件回传：成功发 `lock-init`，彻底失败发 `lock-failed`。
 #[tauri::command]
 fn show_lock(app: tauri::AppHandle) {
     tauri::async_runtime::spawn(async move {
         // WebView2 实例初始化、与销毁操作撞车等会让建窗偶发失败，退避重试后再判失败。
-        // 注：此处 sleep 会占用一个 runtime worker，但仅在罕见失败路径触发，可接受。
         let mut win = None;
         for attempt in 0..3u32 {
             if attempt > 0 {
@@ -1865,20 +1997,18 @@ fn main() {
                 app.state::<sedentary::SedentaryState>().inner().clone(),
             );
 
-            // 全盘文件名索引：后台线程建索引，快照秒恢复，供文件中心全盘搜索
-            file_index::start_index(app.handle().clone());
+            // 全盘文件名索引：只登记数据目录，首次全盘搜索时才加载
+            file_index::prime(app.handle());
 
-            // 全局护眼：启动 Gamma 守护线程（配置经 set_eyecare_config 下发）。
-            // 守护线程负责「被其他应用覆盖后夺回」与「显示事件重置后重放」——
-            // 这两点来自 SetDeviceGammaRamp 的官方限制，无法用事件驱动替代。
+            // 全局护眼：启动 Gamma 守护线程（配置经 set_eyecare_config 下发），
+            // 负责「被其他应用覆盖后夺回」与「显示事件重置后重放」。
             eyecare::start_eyecare_guardian(
                 app.handle().clone(),
                 app.state::<eyecare::EyeCareState>().inner().clone(),
             );
 
             // 嵌入桌面 WorkerW（成为桌面本身），再显示。
-            // 开机自启（--autostart）：登录瞬间桌面可能尚未就绪，延迟后再嵌入，
-            // 避免嵌入失败——这是自启相对手动启动唯一的差异化路径；其余初始化照常。
+            // 开机自启（--autostart）：登录瞬间桌面可能尚未就绪，延迟后再嵌入。
             if autostart::launched_by_autostart() {
                 let handle = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
@@ -1898,7 +2028,148 @@ fn main() {
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![quit_app, autostart::autostart_status, autostart::set_autostart, downloader::download_start, downloader::download_cancel, downloader::downloaded_list, downloader::downloaded_delete, downloader::local_track_assets, aliyundrive::ad_auth_bind, aliyundrive::ad_auth_status, aliyundrive::ad_unbind, aliyundrive::ad_list, aliyundrive::ad_search, aliyundrive::ad_play_url, aliyundrive::ad_upload_start, aliyundrive::ad_upload_cancel, aliyundrive::ad_upload_list, aliyundrive::ad_track_meta, show_reminder, hide_reminder, reminder_ready, show_lyric, hide_lyric, lyric_ready, lyric_sync, lyric_set_locked, lyric_move, lyric_pos_commit, lyric_commit_display, lyric_menu_toggle, lyric_menu_ready, read_text_file, export_text_file, run_wasm_backend, install_plugin_package, build_wasm_backend, http::http_get, http::http_get_bytes, http::http_post, http::http_post_stream, http::http_stream_cancel, fetch_favicon, load_state, save_state, backup_data, restore_data, get_theme, broadcast_theme, read_bg_data_url, prepare_wallpaper, list_desktop_files, image_thumbnail, open_file, open_path, pick_folder, pick_file, reveal_file, delete_file, rename_file, reveal_path, delete_path, rename_path, show_lock, hide_lock, file_index::index_status, file_index::search_files, file_index::rebuild_index, sys_bridge::start_system_sampling, sys_bridge::stop_system_sampling, sys_bridge::check_media_playing, sys_bridge::set_lock_monitor_enabled, sedentary::set_sedentary_config, eyecare::set_eyecare_config, eyecare::restore_native_color, eyecare::eyecare_status, checkin::collect_checkin_state, scheduler::scheduler_runs, scheduler::scheduler_heat, scheduler::scheduler_run_now, scheduler::scheduler_cancel, scheduler::scheduler_clear_runs, scheduler::scheduler_status, scheduler::scheduler_check_cron, scheduler_export::scheduler_export_preview, scheduler_export::scheduler_export_task, scheduler_export::scheduler_unexport_task, scheduler_export::scheduler_export_status, scheduler_export::scheduler_read_os_log, scheduler_export::scheduler_clear_os_log])
+        .invoke_handler(tauri::generate_handler![quit_app, autostart::autostart_status, autostart::set_autostart, downloader::download_start, downloader::download_cancel, downloader::downloaded_list, downloader::downloaded_delete, downloader::local_track_assets, aliyundrive::ad_auth_bind, aliyundrive::ad_auth_status, aliyundrive::ad_unbind, aliyundrive::ad_list, aliyundrive::ad_search, aliyundrive::ad_play_url, aliyundrive::ad_upload_start, aliyundrive::ad_upload_cancel, aliyundrive::ad_upload_list, aliyundrive::ad_track_meta, show_reminder, hide_reminder, reminder_ready, show_lyric, hide_lyric, lyric_ready, lyric_sync, lyric_set_locked, lyric_move, lyric_pos_commit, lyric_commit_display, lyric_menu_toggle, lyric_menu_ready, read_text_file, export_text_file, run_wasm_backend, install_plugin_package, build_wasm_backend, http::http_get, http::http_get_bytes, http::http_post, http::http_post_stream, http::http_stream_cancel, fetch_favicon, load_state, save_state, backup_data, restore_data, get_theme, broadcast_theme, read_bg_data_url, prepare_wallpaper, list_desktop_files, image_thumbnail, open_file, open_path, pick_folder, pick_file, reveal_file, delete_file, rename_file, reveal_path, delete_path, rename_path, show_lock, hide_lock, file_index::index_status, file_index::search_files, file_index::rebuild_index, sys_bridge::start_system_sampling, sys_bridge::stop_system_sampling, sys_bridge::check_media_playing, sys_bridge::set_lock_monitor_enabled, sedentary::set_sedentary_config, eyecare::set_eyecare_config, eyecare::restore_native_color, eyecare::eyecare_status, checkin::collect_checkin_state, scheduler::scheduler_runs, scheduler::scheduler_heat, scheduler::scheduler_run_now, scheduler::scheduler_cancel, scheduler::scheduler_clear_runs, scheduler::scheduler_reload_store, scheduler::scheduler_status, scheduler::scheduler_check_cron, scheduler_export::scheduler_export_preview, scheduler_export::scheduler_export_task, scheduler_export::scheduler_unexport_task, scheduler_export::scheduler_export_status, scheduler_export::scheduler_read_os_log, scheduler_export::scheduler_clear_os_log])
         .run(tauri::generate_context!())
         .expect("DeskOverlay 运行失败");
+}
+
+#[cfg(test)]
+mod backup_tests {
+    use super::*;
+    use std::io::Read as _;
+
+    #[test]
+    fn whitelist_accepts_known_data_files() {
+        for f in BACKUP_FILES.iter().copied() {
+            assert!(is_allowed_backup_entry(f), "应接受已知数据文件 {f}");
+        }
+        assert!(is_allowed_backup_entry("scheduler-store.json"));
+    }
+
+    #[test]
+    fn whitelist_accepts_entries_inside_backup_dirs() {
+        assert!(is_allowed_backup_entry("plugins/weread/manifest.json"));
+        assert!(is_allowed_backup_entry("plugins/a/b/c/frontend.js"));
+    }
+
+    /// 白名单必须挡住的四类：未知文件、越界路径、目录前缀混淆、未列入的目录。
+    #[test]
+    fn whitelist_rejects_unknown_traversal_and_prefix_confusion() {
+        for bad in [
+            "",                       // 空名
+            "fileindex.txt",          // 可重建的缓存，不该进备份
+            "eyecare_baseline.json",  // 同上
+            "../state.json",          // 越界
+            "plugins/../../evil.js",  // 越界（满足「以 plugins/ 开头」，白名单必须自己挡住）
+            "plugins/a/../../../x",   // 越界
+            "/etc/passwd",            // 绝对路径
+            "plugins\\..\\..\\evil.js", // 反斜杠形态的越界
+            "pluginsevil/x.js",       // 前缀混淆：必须以 `plugins/` 开头
+            "pluginsX/y.js",          // 同上
+            "plugins",                // 目录名本身不是条目
+            "wallpaper_cache/a.bin",  // 未列入的目录
+            "music/x.mp3",            // 同上
+        ] {
+            assert!(!is_allowed_backup_entry(bad), "不应接受 {bad:?}");
+        }
+    }
+
+    fn tmp_dir(tag: &str) -> PathBuf {
+        let p = std::env::temp_dir().join(format!("deskoverlay_bk_{}_{}", tag, std::process::id()));
+        let _ = fs::remove_dir_all(&p);
+        fs::create_dir_all(&p).unwrap();
+        p
+    }
+
+    #[test]
+    fn backup_zip_includes_nested_dir_and_skips_missing_or_unlisted() {
+        let src = tmp_dir("src");
+        fs::create_dir_all(src.join("plugins/weread")).unwrap();
+        fs::write(src.join("state.json"), b"{\"currentModule\":\"dashboard\"}").unwrap();
+        fs::write(src.join("scheduler-store.json"), b"{\"runs\":[]}").unwrap();
+        fs::write(src.join("plugins/weread/manifest.json"), b"{\"id\":\"weread\"}").unwrap();
+        fs::write(src.join("plugins/weread/frontend.js"), b"// js").unwrap();
+        // 白名单里但不存在 ⇒ 应被静默跳过（不能让备份整体失败）
+        // 不在白名单里且存在 ⇒ 应被忽略
+        fs::write(src.join("fileindex.txt"), b"junk").unwrap();
+
+        let zip = std::env::temp_dir().join(format!("deskoverlay_bk_{}.zip", std::process::id()));
+        let _ = fs::remove_file(&zip);
+        write_backup_zip(&src, &zip).unwrap();
+
+        let mut ar = zip::ZipArchive::new(fs::File::open(&zip).unwrap()).unwrap();
+        let mut names: Vec<String> =
+            (0..ar.len()).map(|i| ar.by_index(i).unwrap().name().to_string()).collect();
+        names.sort();
+
+        assert!(names.contains(&"state.json".to_string()), "{names:?}");
+        assert!(names.contains(&"scheduler-store.json".to_string()), "{names:?}");
+        assert!(names.contains(&"plugins/weread/manifest.json".to_string()), "{names:?}");
+        assert!(names.contains(&"plugins/weread/frontend.js".to_string()), "{names:?}");
+        assert!(!names.iter().any(|n| n == "fileindex.txt"), "白名单外不该进包：{names:?}");
+        assert!(!names.iter().any(|n| n == "music.json"), "不存在的文件不该进包：{names:?}");
+
+        let mut s = String::new();
+        ar.by_name("state.json").unwrap().read_to_string(&mut s).unwrap();
+        assert!(s.contains("dashboard"), "内容应可原样读回，实际：{s}");
+
+        let _ = fs::remove_dir_all(&src);
+        let _ = fs::remove_file(&zip);
+    }
+
+    /// 安全回归：手工造一个「恶意」zip，确认越界条目一个字节都落不到目标目录之外。
+    #[test]
+    fn extract_skips_traversal_and_unknown_entries() {
+        let zip = std::env::temp_dir().join(format!("deskoverlay_bk_mal_{}.zip", std::process::id()));
+        let _ = fs::remove_file(&zip);
+        {
+            let mut z = zip::ZipWriter::new(fs::File::create(&zip).unwrap());
+            let o = zip::write::SimpleFileOptions::default();
+            for (n, body) in [
+                ("state.json", "{\"ok\":true}"),
+                ("plugins/weread/manifest.json", "{\"id\":\"weread\"}"),
+                ("../evil.txt", "pwned"),
+                ("fileindex.txt", "junk"),
+                ("wallpaper_cache/x.bin", "junk"),
+            ] {
+                z.start_file(n, o).unwrap();
+                z.write_all(body.as_bytes()).unwrap();
+            }
+            z.finish().unwrap();
+        }
+
+        let dest = tmp_dir("dest");
+        let mut written = extract_backup_zip(&dest, &zip).unwrap();
+        written.sort();
+        assert_eq!(
+            written,
+            vec!["plugins/weread/manifest.json".to_string(), "state.json".to_string()],
+            "只该还原白名单内的两个条目"
+        );
+
+        assert!(dest.join("state.json").exists());
+        assert!(dest.join("plugins/weread/manifest.json").exists());
+        assert!(!dest.join("fileindex.txt").exists(), "白名单外条目不该落盘");
+        assert!(!dest.join("wallpaper_cache").exists(), "未列入目录不该落盘");
+        // 越界条目的落点会是 dest 的上一级（临时目录）——必须不存在
+        assert!(!std::env::temp_dir().join("evil.txt").exists(), "越界条目写到目标目录之外了！");
+
+        let _ = fs::remove_dir_all(&dest);
+        let _ = fs::remove_file(&zip);
+    }
+
+    /// 悬停探测的退避档位与封顶。
+    #[test]
+    fn 悬停探测间隔按空闲轮数退避且封顶() {
+        assert_eq!(poll_ms(0), 120);
+        assert_eq!(poll_ms(4), 120, "前 5 轮不降频");
+        assert_eq!(poll_ms(5), 240, "第 6 轮进第二档");
+        assert_eq!(poll_ms(9), 240);
+        assert_eq!(poll_ms(10), 480);
+        assert_eq!(poll_ms(19), 480);
+        assert_eq!(poll_ms(20), 960);
+        assert_eq!(poll_ms(39), 960);
+        assert_eq!(poll_ms(40), 1000, "第 41 轮起封顶");
+        assert_eq!(poll_ms(u32::MAX), 1000, "极大值也必须封顶");
+    }
 }

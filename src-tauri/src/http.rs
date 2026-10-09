@@ -161,11 +161,19 @@ fn stream_canceled() -> &'static Mutex<HashSet<String>> {
     STREAM_CANCELED.get_or_init(|| Mutex::new(HashSet::new()))
 }
 
-/// 请求取消某条流。标志位只增不减（同一 stream_id 不会复用），避免泄漏清理的复杂度。
+/// 请求取消某条流。标志位由流的收尾负责清理（见 `post_stream_blocking` 末尾）。
 #[tauri::command]
 pub fn http_stream_cancel(stream_id: String) {
     if let Ok(mut set) = stream_canceled().lock() {
         set.insert(stream_id);
+    }
+}
+
+/// 流结束时摘掉取消标志。正常结束的流从未插入过，remove 返回 false 也无妨。
+/// 逐个 remove 而非 clear：并发多条流时不能清掉对方的取消意图。
+fn forget_stream(stream_id: &str) {
+    if let Ok(mut set) = stream_canceled().lock() {
+        set.remove(stream_id);
     }
 }
 
@@ -210,55 +218,60 @@ fn post_stream_blocking(
         let _ = app.emit("fund-ai://stream", payload);
     };
 
-    let resp = match build_headers(agent().post(u), &headers)
-        .timeout(std::time::Duration::from_millis(ms))
-        .send_string(&body)
-    {
-        Ok(r) => r,
-        Err(e) => {
-            emit(serde_json::json!({ "id": stream_id, "done": true, "error": e.to_string() }));
-            return Ok(());
-        }
-    };
-    let status = resp.status();
-
-    let mut reader = std::io::BufReader::new(resp.into_reader());
-    let mut pending = String::new();
-    let mut line = String::new();
-    loop {
-        if is_canceled() {
-            if !pending.is_empty() {
-                emit(serde_json::json!({ "id": stream_id, "chunk": pending }));
-            }
-            emit(serde_json::json!({ "id": stream_id, "done": true, "canceled": true }));
-            return Ok(());
-        }
-        line.clear();
-        match std::io::BufRead::read_line(&mut reader, &mut line) {
-            Ok(0) => break, // EOF
-            Ok(_) => {
-                let boundary = line.trim().is_empty(); // SSE 事件块以空行结束
-                pending.push_str(&line);
-                // 攒一批再发：逐 token 一次 IPC 会把事件通道打满
-                if boundary || pending.len() >= 512 {
-                    emit(serde_json::json!({ "id": stream_id, "chunk": pending }));
-                    pending.clear();
-                }
-            }
+    // 收流过程整体放进闭包：任何退出路径都会在闭包之后摘掉取消标志
+    let r = (|| -> Result<(), String> {
+        let resp = match build_headers(agent().post(u), &headers)
+            .timeout(std::time::Duration::from_millis(ms))
+            .send_string(&body)
+        {
+            Ok(r) => r,
             Err(e) => {
-                if !pending.is_empty() {
-                    emit(serde_json::json!({ "id": stream_id, "chunk": pending }));
-                }
                 emit(serde_json::json!({ "id": stream_id, "done": true, "error": e.to_string() }));
                 return Ok(());
             }
+        };
+        let status = resp.status();
+
+        let mut reader = std::io::BufReader::new(resp.into_reader());
+        let mut pending = String::new();
+        let mut line = String::new();
+        loop {
+            if is_canceled() {
+                if !pending.is_empty() {
+                    emit(serde_json::json!({ "id": stream_id, "chunk": pending }));
+                }
+                emit(serde_json::json!({ "id": stream_id, "done": true, "canceled": true }));
+                return Ok(());
+            }
+            line.clear();
+            match std::io::BufRead::read_line(&mut reader, &mut line) {
+                Ok(0) => break, // EOF
+                Ok(_) => {
+                    let boundary = line.trim().is_empty(); // SSE 事件块以空行结束
+                    pending.push_str(&line);
+                    // 攒一批再发：逐 token 一次 IPC 会把事件通道打满
+                    if boundary || pending.len() >= 512 {
+                        emit(serde_json::json!({ "id": stream_id, "chunk": pending }));
+                        pending.clear();
+                    }
+                }
+                Err(e) => {
+                    if !pending.is_empty() {
+                        emit(serde_json::json!({ "id": stream_id, "chunk": pending }));
+                    }
+                    emit(serde_json::json!({ "id": stream_id, "done": true, "error": e.to_string() }));
+                    return Ok(());
+                }
+            }
         }
-    }
-    if !pending.is_empty() {
-        emit(serde_json::json!({ "id": stream_id, "chunk": pending }));
-    }
-    emit(serde_json::json!({ "id": stream_id, "done": true, "status": status }));
-    Ok(())
+        if !pending.is_empty() {
+            emit(serde_json::json!({ "id": stream_id, "chunk": pending }));
+        }
+        emit(serde_json::json!({ "id": stream_id, "done": true, "status": status }));
+        Ok(())
+    })();
+    forget_stream(&stream_id);
+    r
 }
 
 
@@ -274,4 +287,22 @@ pub(crate) fn fetch_bytes(url: &str) -> Result<Vec<u8>, String> {
         .read_to_end(&mut out)
         .map_err(|e| e.to_string())?;
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 取消标志在流收尾时被摘除，不随调用次数累积。
+    #[test]
+    fn cancel_flag_is_forgotten_after_stream() {
+        let id = "stream-forget-test".to_string();
+        http_stream_cancel(id.clone());
+        assert!(stream_canceled().lock().unwrap().contains(&id), "取消标志应已置位");
+        forget_stream(&id);
+        assert!(!stream_canceled().lock().unwrap().contains(&id), "收尾后应已摘除");
+        // 幂等：重复摘除（正常结束、从未取消过的流）不能出错
+        forget_stream(&id);
+        assert!(!stream_canceled().lock().unwrap().contains(&id));
+    }
 }

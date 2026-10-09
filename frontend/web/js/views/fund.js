@@ -50,6 +50,14 @@ const STALE_WINDOW = 30 * 60 * 1000;
 // 请求超时（毫秒），防止个别接口长时间挂起拖垮整页
 const REQ_TIMEOUT = 12 * 1000;
 const HISTORY_POINTS = 20;
+// 走势弹窗周期选择（近1周/1月/3月/6月/1年），本地切片无需额外请求
+const CHART_PERIODS = [
+  { id: "1w", label: "近1周", days: 7 },
+  { id: "1m", label: "近1月", days: 30 },
+  { id: "3m", label: "近3月", days: 91 },
+  { id: "6m", label: "近6月", days: 182 },
+  { id: "1y", label: "近1年", days: 365 },
+];
 const RANK_SORTS = [
   { id: "1nzf", label: "近1周" },
   { id: "1yzf", label: "近1月" },
@@ -369,6 +377,7 @@ export function renderFund(view) {
   }
 
   async function fetchHistory(code, points) {
+    // 走势弹窗一次拉满近 1 年（约 250 个交易日），周期切换在本地切片，避免重复请求
     const n = points || HISTORY_POINTS;
     const key = "h:" + code + ":" + n;
     const hit = cached(key, "history");
@@ -380,9 +389,43 @@ export function renderFund(view) {
       const list = ((json && json.Data && json.Data.LSJZList) || []).map((r) => ({
         date: r.FSRQ,
         nav: num(r.DWJZ, 0),
+        // 走势图与持仓页统一走 nav；dwjz 为旧字段名，保留做兼容（部分图表仍引用）
+        dwjz: num(r.DWJZ, 0),
         accNav: num(r.LJJZ, 0),
         pct: r.JZZZL === "" ? null : num(r.JZZZL, 0),
       }));
+      storeCache("history", key, list);
+      return list;
+    } catch (e) {
+      const stale = cachedStale(key, "history");
+      if (stale) return stale.data;
+      throw e;
+    }
+  }
+  // 走势弹窗用的一次性拉满（近 1 年），独立 key 避免污染其他消费方的历史缓存
+  // 数据源：pingzhongdata 的 Data_netWorthTrend（一次返回全量，比 f10/lsjz 分页 13 次更稳）
+  async function fetchHistoryFull(code) {
+    const key = "hfull:" + code;
+    const hit = cached(key, "history");
+    if (hit) return hit;
+    try {
+      const js = await get(`https://fund.eastmoney.com/pingzhongdata/${encodeURIComponent(code)}.js?v=${Date.now()}`, REFERER_EM);
+      const arr = extractVar(js, "Data_netWorthTrend");
+      if (!Array.isArray(arr) || !arr.length) throw new Error("净值趋势数据为空");
+      const list = arr
+        .map((p) => {
+          const d = new Date(num(p.x, 0));
+          // 用本地时区格式化日期（中国东八区），避免 toISOString 的 UTC 日期偏移
+          const y = d.getFullYear(), mo = String(d.getMonth() + 1).padStart(2, "0"), da = String(d.getDate()).padStart(2, "0");
+          return {
+            date: isFinite(d.getTime()) ? y + "-" + mo + "-" + da : "",
+            nav: num(p.y, 0),
+            dwjz: num(p.y, 0),
+            pct: p.equityReturn === undefined || p.equityReturn === null || p.equityReturn === "" ? null : num(p.equityReturn, 0),
+          };
+        })
+        .filter((r) => r.date && r.nav > 0);
+      if (!list.length) throw new Error("净值趋势数据无效");
       storeCache("history", key, list);
       return list;
     } catch (e) {
@@ -3485,7 +3528,10 @@ export function renderFund(view) {
     return rec;
   }
 
-  // 净值走势弹窗：自绘 canvas 迷你折线 + 最近 20 个交易日
+  // 净值走势弹窗：自绘 canvas 迷你折线 + 周期切换（近1周/1月/3月/6月/1年）
+  // 数据源：pingzhongdata 的 Data_netWorthTrend 一次返回全量历史，
+  // 周期切换在本地切片（零额外请求）；画布按宽度等距降采样保证曲线平滑。
+  // 鼠标悬浮显示十字线 + 高亮点 + tooltip（日期 / 净值 / 日涨跌）。
   function openChart(code) {
     const w = (F.watchlist || []).find((x) => x.code === code);
     const h = (F.holdings || []).find((x) => x.code === code);
@@ -3495,7 +3541,8 @@ export function renderFund(view) {
     ov.innerHTML = `
       <div class="task-modal fund-modal fund-chart-modal">
         <h3>净值走势 · ${esc(title)}</h3>
-        <div class="chart-sub">${esc(code)} · 近 ${HISTORY_POINTS} 个交易日</div>
+        <div class="chart-sub">${esc(code)}</div>
+        <div class="chart-periods" id="fund-chart-periods"></div>
         <canvas id="fund-chart" width="560" height="180"></canvas>
         <div class="chart-legend" id="fund-chart-legend">加载中…</div>
         <div class="tm-actions"><button class="btn-primary cm-ok">关闭</button></div>
@@ -3505,31 +3552,76 @@ export function renderFund(view) {
     ov.querySelector(".cm-ok").addEventListener("click", close);
     ov.addEventListener("click", (e) => { if (e.target === ov) close(); });
     ov.addEventListener("keydown", (e) => { if (e.key === "Escape") close(); });
+
+    const periodEl = ov.querySelector("#fund-chart-periods");
+    const canvas = ov.querySelector("#fund-chart");
+    const legendEl = ov.querySelector("#fund-chart-legend");
+    const subEl = ov.querySelector(".chart-sub");
+    let fullList = null; // 升序完整历史
+    let curPeriod = "3m"; // 默认近 3 月，视觉更均衡
+
+    function renderPeriods() {
+      periodEl.innerHTML = CHART_PERIODS.map((p) =>
+        `<button class="seg-btn${p.id === curPeriod ? " active" : ""}" data-per="${p.id}">${p.label}</button>`
+      ).join("");
+      periodEl.querySelectorAll("[data-per]").forEach((b) =>
+        b.addEventListener("click", () => { curPeriod = b.dataset.per; render(); }));
+    }
+    // 按周期切片（按自然日，数据可能少于周期天数时退回可用范围）
+    function sliceByPeriod(list) {
+      const p = CHART_PERIODS.find((x) => x.id === curPeriod) || CHART_PERIODS[2];
+      const cutoff = Date.now() - p.days * 24 * 3600 * 1000;
+      const sliced = list.filter((r) => new Date(r.date + "T00:00:00").getTime() >= cutoff);
+      // 过滤后不足 2 点（新基金 / 数据缺失）退回完整数据
+      return sliced.length >= 2 ? sliced : list;
+    }
+    function renderLegend(asc) {
+      if (!asc || !asc.length) return;
+      const first = asc[0], last = asc[asc.length - 1];
+      const fv = first.dwjz ?? first.nav;
+      const lv = last.dwjz ?? last.nav;
+      const chg = fv > 0 ? ((lv - fv) / fv) * 100 : 0;
+      legendEl.innerHTML =
+        `<span>${esc(first.date)} 起</span> <span>至 <b>${esc(last.date)}</b></span> · ` +
+        `<span class="${pctClass(chg)}">累计 ${fmtPct(chg)}</span> · ` +
+        `<span>最新 <b>${lv ? lv.toFixed(4) : "--"}</b></span>`;
+    }
+    // 悬浮回调：把当前周期数据传进来，用 legend 行显示「日期 / 净值 / 日涨跌」
+    function onHover(idx, row) {
+      if (idx < 0 || !row) { renderLegend(sliceByPeriod(fullList.slice())); return; }
+      const v = row.dwjz ?? row.nav;
+      const p = row.pct;
+      legendEl.innerHTML =
+        `<b>${esc(row.date)}</b> · 单位净值 <b>${v ? v.toFixed(4) : "--"}</b>` +
+        (p === null || p === undefined ? "" : ` · 日涨跌 <b class="${pctClass(p)}">${fmtPct(p)}</b>`);
+    }
+    function render() {
+      renderPeriods();
+      if (!fullList || !fullList.length) return;
+      const asc = sliceByPeriod(fullList.slice());
+      drawChart(canvas, asc, onHover);
+      renderLegend(asc);
+    }
+    renderPeriods();
     (async () => {
       try {
-        const list = await fetchHistory(code);
-        const legend = ov.querySelector("#fund-chart-legend");
-        if (!list.length) {
-          legend.textContent = "暂无历史净值数据";
+        fullList = await fetchHistoryFull(code);
+        if (!fullList || !fullList.length) {
+          legendEl.textContent = "暂无历史净值数据";
           return;
         }
-        const asc = list.slice().reverse(); // 升序便于画线
-        drawChart(ov.querySelector("#fund-chart"), asc);
-        const first = asc[0], last = asc[asc.length - 1];
-        const chg = first && first.dwjz > 0 ? ((last.dwjz - first.dwjz) / first.dwjz) * 100 : 0;
-        legend.innerHTML =
-          `<span>${esc(first.date)} 起</span> <span>至 <b>${esc(last.date)}</b></span> · ` +
-          `<span class="${pctClass(chg)}">累计 ${fmtPct(chg)}</span> · ` +
-          `<span>最新 <b>${last.dwjz ? last.dwjz.toFixed(4) : "--"}</b></span>`;
+        // fetchHistoryFull 返回升序（旧→新），drawChart 直接画
+        fullList = fullList.slice();
+        render();
       } catch (e) {
-        const legend = ov.querySelector("#fund-chart-legend");
-        if (legend) legend.textContent = "走势加载失败：" + String(e && e.message || e);
+        legendEl.textContent = "走势加载失败：" + String(e && e.message || e);
       }
     })();
   }
 
 // 画净值折线（渐变面积），复用宿主系统健康页的画法
-  function drawChart(canvas, list) {
+  // onHover(idx, row, mx): 鼠标悬浮回调（返回 null 表示未命中）
+  function drawChart(canvas, list, onHover) {
     if (!canvas) return;
     const dpr = window.devicePixelRatio || 1;
     const w = canvas.clientWidth || canvas.width || 560;
@@ -3538,7 +3630,15 @@ export function renderFund(view) {
     const ctx = canvas.getContext("2d");
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
-    const vals = list.map((r) => num(r.dwjz, 0));
+    // 密集数据降采样：超过画布 2 倍宽度时等距抽样，保证曲线平滑不糊
+    let src = list;
+    const MAX_PTS = w * 2;
+    if (src.length > MAX_PTS) {
+      const step = Math.ceil(src.length / MAX_PTS);
+      src = src.filter((_, i) => i % step === 0);
+      if (src.length < 2) src = list;
+    }
+    const vals = src.map((r) => num(r.dwjz ?? r.nav, 0));
     if (vals.length < 2) return;
     const mn = Math.min.apply(null, vals), mx = Math.max.apply(null, vals);
     const span = mx - mn || 1;
@@ -3574,8 +3674,64 @@ export function renderFund(view) {
 
 // 起止日期刻度
     ctx.fillStyle = "#5b6675"; ctx.font = "10px system-ui, sans-serif"; ctx.textBaseline = "alphabetic";
-    ctx.textAlign = "left"; ctx.fillText(list[0].date, padL, h - 4);
-    ctx.textAlign = "right"; ctx.fillText(list[list.length - 1].date, w - padR, h - 4);
+    ctx.textAlign = "left"; ctx.fillText(src[0].date, padL, h - 4);
+    ctx.textAlign = "right"; ctx.fillText(src[src.length - 1].date, w - padR, h - 4);
+
+    // 鼠标悬浮：十字线 + 高亮点 + tooltip 数据回调
+    if (!onHover) return;
+    const hoverCtx = ctx;
+    const drawBase = () => {
+      hoverCtx.clearRect(0, 0, w, h);
+      // 面积
+      hoverCtx.beginPath();
+      hoverCtx.moveTo(x(0), h - padB);
+      for (let i = 0; i < vals.length; i++) hoverCtx.lineTo(x(i), y(vals[i]));
+      hoverCtx.lineTo(x(vals.length - 1), h - padB);
+      hoverCtx.closePath();
+      const g = hoverCtx.createLinearGradient(0, padT, 0, h - padB);
+      g.addColorStop(0, "rgba(88,166,255,0.28)");
+      g.addColorStop(1, "rgba(88,166,255,0)");
+      hoverCtx.fillStyle = g; hoverCtx.fill();
+      hoverCtx.beginPath();
+      for (let i = 0; i < vals.length; i++) { if (i === 0) hoverCtx.moveTo(x(i), y(vals[i])); else hoverCtx.lineTo(x(i), y(vals[i])); }
+      hoverCtx.strokeStyle = "#58a6ff"; hoverCtx.lineWidth = 1.6; hoverCtx.lineJoin = "round"; hoverCtx.lineCap = "round";
+      hoverCtx.stroke();
+      const imax2 = vals.indexOf(mx), imin2 = vals.indexOf(mn);
+      for (const i of [imax2, imin2]) {
+        if (i < 0) continue;
+        hoverCtx.beginPath();
+        hoverCtx.arc(x(i), y(vals[i]), 2.5, 0, Math.PI * 2);
+        hoverCtx.fillStyle = i === imax2 ? "#ff7b72" : "#3fb950";
+        hoverCtx.fill();
+      }
+      hoverCtx.fillStyle = "#5b6675"; hoverCtx.font = "10px system-ui, sans-serif"; hoverCtx.textBaseline = "alphabetic";
+      hoverCtx.textAlign = "left"; hoverCtx.fillText(src[0].date, padL, h - 4);
+      hoverCtx.textAlign = "right"; hoverCtx.fillText(src[src.length - 1].date, w - padR, h - 4);
+    };
+    canvas.onmousemove = (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const mpx = ((e.clientX - rect.left) / rect.width) * w;
+      if (mpx < padL || mpx > w - padR) { drawBase(); onHover(-1, null); return; }
+      let idx = Math.round((mpx - padL) / (w - padL - padR) * (vals.length - 1));
+      idx = Math.max(0, Math.min(vals.length - 1, idx));
+      const px = x(idx), py = y(vals[idx]);
+      drawBase();
+      // 十字线
+      hoverCtx.strokeStyle = "rgba(139,148,158,0.55)"; hoverCtx.lineWidth = 1;
+      hoverCtx.setLineDash([3, 3]);
+      hoverCtx.beginPath(); hoverCtx.moveTo(px, padT); hoverCtx.lineTo(px, h - padB); hoverCtx.stroke();
+      hoverCtx.beginPath(); hoverCtx.moveTo(padL, py); hoverCtx.lineTo(w - padR, py); hoverCtx.stroke();
+      hoverCtx.setLineDash([]);
+      // 高亮点
+      hoverCtx.beginPath(); hoverCtx.arc(px, py, 3.5, 0, Math.PI * 2);
+      hoverCtx.fillStyle = "#58a6ff"; hoverCtx.fill();
+      hoverCtx.lineWidth = 1.6; hoverCtx.strokeStyle = "#fff"; hoverCtx.stroke();
+      onHover(idx, src[idx]);
+    };
+    canvas.onmouseleave = () => {
+      drawBase();
+      onHover(-1, null);
+    };
   }
 
   // ---------- 刷新 ----------

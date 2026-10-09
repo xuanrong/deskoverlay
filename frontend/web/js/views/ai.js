@@ -6,10 +6,10 @@ import { esc, ymd, uid } from "../utils.js";
 import { showDialog } from "./common.js";
 import { createCheckin } from "./ai-checkin.js";
 import { ICON_EDIT, ICON_TRASH, ICON_EXTERNAL } from "../icons.js";
+import { normalizeCheckinResultDir } from "../config.js";
 
 const ID = "ai";
 const NEWS_TTL = 10 * 60 * 1000; // 资讯缓存 10 分钟
-const DEFAULT_RESULT_DIR = "C:\\Users\\qiuxr\\workbuddy-checkin\\logs";
 
 const DEFAULT_NEWS_SOURCES = [
   { id: "hf-papers", name: "Hugging Face Papers", type: "json", url: "https://huggingface.co/api/daily_papers", enabled: true },
@@ -34,7 +34,8 @@ function ensureAi() {
   if (typeof a.models.lastGitSchema !== "number") a.models.lastGitSchema = 0;
   if (!a.checkin || typeof a.checkin !== "object" || Array.isArray(a.checkin)) a.checkin = {};
   const c = a.checkin;
-  if (typeof c.resultDir !== "string" || !c.resultDir) c.resultDir = DEFAULT_RESULT_DIR;
+  // 结果目录：缺失 / 空 / 仍是旧路径 ⇒ 升级到 CHECKIN_RESULT_DIR（规则在 config.js，与 state.js 共用）
+  c.resultDir = normalizeCheckinResultDir(c.resultDir);
   for (const k of ["workbuddy", "trae"]) {
     if (!c[k] || typeof c[k] !== "object" || Array.isArray(c[k])) c[k] = { accounts: [], lastRun: 0 };
     if (!Array.isArray(c[k].accounts)) c[k].accounts = [];

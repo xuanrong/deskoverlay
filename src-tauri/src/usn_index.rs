@@ -124,9 +124,7 @@ fn enumerate_volume(root: &str) -> Option<Vec<Hit>> {
                 }
                 let nm = String::from_utf16_lossy(&wide);
                 let is_dir = attrs & FILE_ATTRIBUTE_DIRECTORY != 0;
-                // 插入期提前剪枝：SKIP 命中的目录不进 HashMap，省掉
-                // 构建期的临时峰值（Windows/Program Files 等目录的子树记录不再驻留）。
-                // 这些目录在 DFS 阶段本来就会被跳过，结果完全一致。
+                // 插入期提前剪枝：SKIP 命中的目录及其子树不进 HashMap，省掉构建期的临时峰值。
                 if is_dir && SKIP.contains(&nm.to_ascii_lowercase().as_str()) {
                     last = fre;
                     parsed += 1;

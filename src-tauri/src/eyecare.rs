@@ -1,11 +1,9 @@
 //! 全局护眼 —— 显卡 Gamma 查找表调节。
 //!
-//! 为什么不是「盖一层滤镜」：桌面应用加 CSS/覆盖窗只能影响自己或视觉遮挡，
-//! 独占全屏（游戏/全屏视频）、锁屏、UAC 一律盖不住，且全屏置顶窗会吞鼠标事件
-//! （见 reminder.html 注释里踩过的坑）。真正对**整机所有输出**生效的唯一路径是
-//! 改写显卡 Gamma LUT —— 它位于「帧缓冲 → 显示器」之间，不经过任何窗口层级。
+//! 唯一对**整机所有输出**生效的路径是改写显卡 Gamma LUT —— 它位于「帧缓冲 → 显示器」
+//! 之间，不经过任何窗口层级；CSS/覆盖窗方案对独占全屏、锁屏、UAC 一律无效。
 //!
-//! 官方限制（Microsoft Learn: SetDeviceGammaRamp）已逐条纳入设计：
+//! 官方限制（Microsoft Learn: SetDeviceGammaRamp）：
 //!   1. **静默失败**：ramp 若违反内部启发式会返回 TRUE 但不生效
 //!      → 写后必须 GetDeviceGammaRamp 回读比对，不能信返回值。
 //!   2. **偏差限制**：每项与恒等值偏差不得超过 32768（防屏幕变全黑无法恢复）
@@ -105,18 +103,16 @@ pub fn new_eyecare_state() -> EyeCareState {
 
 /// 原始 ramp 快照：**真实启用护眼前**保存，关闭/恢复原色时精确还原。
 ///
-/// 关键设计（修复「恢复原色像夜间一样暗」）：
-///   * **持久化到磁盘**（`eyecare_baseline.json`），而非进程内 static —— 进程重启后
-///     基准仍在，不会因「应用重启 → 自动恢复护眼 → 把调暗态误存为基准」而被污染。
-///   * **只在真实用户启用时保存**（`prev.enabled=false → true`）。启动自动恢复
-///     （`prev.enabled` 已为 true）绝不重新保存，直接复用磁盘基准。
-///   * `None` = 磁盘上尚无基准（从未真实启用过护眼），此时还原不写任何 ramp，
-///     避免破坏用户既有的 ICC 校色配置。
+/// * **持久化到磁盘**（`eyecare_baseline.json`）而非进程内 static —— 进程重启后
+///   基准仍在，不会把已调暗态误存为基准。
+/// * **只在真实用户启用时保存**（`prev.enabled=false → true`）；启动自动恢复
+///   （`prev.enabled` 已为 true）直接复用磁盘基准。
+/// * `None` = 磁盘上尚无基准（从未真实启用过护眼），此时还原不写任何 ramp。
 static ORIGINAL_RAMP: Mutex<Option<Ramp>> = Mutex::new(None);
 
 /// 基准文件名：与 state.json / music.json 并列放在 app_data_dir 下。
-/// 刻意独立成文件而非写进 state.json —— state.json 由前端整体覆盖写（save_state），
-/// 后端直接读写会与前端唯一写者冲突；独立文件由后端全权读写，互不干扰。
+/// 独立成文件而非写进 state.json —— state.json 由前端整体覆盖写（save_state），
+/// 独立文件由后端全权读写，互不干扰。
 const BASELINE_FILE: &str = "eyecare_baseline.json";
 
 /// 基准文件完整路径。
@@ -262,16 +258,13 @@ pub fn build_ramp(kelvin: f64, brightness: f64, contrast: f64) -> Ramp {
 
 /// 把值量化到 WORD 最高有效位，并夹到「与恒等值偏差 ≤ 32768」的安全区间内。
 ///
-/// 这条硬限制来自 SetDeviceGammaRamp 的启发式校验：超限会被**静默拒绝**
-/// （返回 TRUE 但不生效）。主动夹取可让「参数越界」表现为「色温略淡」，
-/// 而不是「UI 显示已开启但屏幕毫无变化」这种最难排查的故障。
+/// 超限会被 SetDeviceGammaRamp **静默拒绝**（返回 TRUE 但不生效），故主动夹取。
 ///
-/// 实现要点（两处都是实测踩出来的）：
-///   1. **先量化（& 0xFF00）再夹取**。若先夹后截，截断向下最多 255，
-///      会把已贴边界的值推出安全区间 —— 实测在 i=255 处产生 33023 偏差。
-///   2. **夹取边界本身也要对齐到 8 位网格**。边界 `id ± 32768` 在 id 为奇数时
-///      低字节非零（如 32769），直接作为结果会违反「值须存于最高有效位」。
-///      故边界向内取整到 256 的倍数，保证既满足偏差限制又是合法量化值。
+/// 实现要点：
+///   1. **先量化（& 0xFF00）再夹取** —— 若先夹后截，截断向下最多 255，
+///      会把已贴边界的值挤出安全区间。
+///   2. **夹取边界本身也要对齐到 8 位网格** —— 边界 `id ± 32768` 在 id 为奇数时
+///      低字节非零，直接作为结果会违反「值须存于最高有效位」。故边界向内取整到 256 的倍数。
 #[inline]
 fn clamp_to_safe_deviation(i: usize, v: f64) -> u16 {
     const MAX_DEV: i32 = 32768;
@@ -295,17 +288,14 @@ pub fn minutes_of_day(h: u8, m: u8) -> i32 {
 
 /// 时段状态：`(是否夜间, 距下一个切换点还有多少分钟, 该切换点是否为"进入夜间")`。
 ///
-/// 关键语义：`to_switch` 恒为「**距下一个**切换点的倒计时」（≥ 0），
-/// 而不是「距最近切换点的距离」。这个区别决定了过渡只被应用一次 ——
-/// 若用「距最近切换点」，切换点两侧都会落在过渡窗口内，
-/// 同一段过渡会被执行两次且方向相反（实测：07:00 正确取 5500K，
-/// 但 07:10 又退回 4800K，07:30 再跳回 5500K）。
+/// `to_switch` 恒为「**距下一个**切换点的倒计时」（≥ 0），而不是「距最近切换点的距离」——
+/// 后者会让切换点两侧都落在过渡窗口内，同一段过渡被执行两次且方向相反。
 ///
 /// `entering_night` 表示下一个切换点的方向（进入夜间 / 离开夜间），
 /// 插值方向由它决定，而不是由「当前是否夜间」推断 —— 后者在切换点两侧会取反。
 ///
 /// 跨午夜时段（如 22:00–07:00，from > to）与同日时段（如 13:00–14:00）都要正确 ——
-/// 跨午夜不能简单比较大小，这是时段功能最常见的 bug 来源。
+/// 跨午夜不能简单比较大小。
 pub fn schedule_state(now_min: i32, from: i32, to: i32) -> (bool, i32, bool) {
     // 时段长度（跨午夜时用 1440 补齐）
     let span = if from <= to { to - from } else { to + 1440 - from };
@@ -324,11 +314,9 @@ pub fn schedule_state(now_min: i32, from: i32, to: i32) -> (bool, i32, bool) {
 
 /// 计算某时刻的目标色温（含过渡区间线性插值）。
 ///
-/// 过渡逻辑：在**到达切换点之前**的 `transition_min` 分钟内做线性过渡，
-/// 避免「到点突然变黄」的突兀感（f.lux 的 slow 档同思路）。
+/// 过渡逻辑：在**到达切换点之前**的 `transition_min` 分钟内做线性过渡。
 ///
-/// 只在前侧过渡（不在切换点后侧再过渡一次）：后者会让同一段过渡执行两遍，
-/// 且第二遍方向相反 —— 表现为「到点正确变暖，过一会儿又弹回去再跳回来」。
+/// 只在前侧过渡：后侧再过渡会让同一段过渡执行两遍且第二遍方向相反。
 pub fn target_kelvin_at(cfg: &EyeCareConfig, now_min: i32) -> f64 {
     if cfg.mode == EyeMode::Manual {
         return cfg.kelvin;
@@ -359,9 +347,8 @@ pub fn target_kelvin_at(cfg: &EyeCareConfig, now_min: i32) -> f64 {
 // ────────────────────────── 恒等 ramp ──────────────────────────
 
 /// 恒等 ramp（不做任何调节的基准）。
-/// 保留为公开 API 而非删除：它是「写恒等值」这一**错误做法**的对照物 ——
 /// 关闭护眼时必须还原 `ORIGINAL_RAMP` 快照，而不是写这个恒等值，
-/// 否则会抹掉用户既有的 ICC 校色配置。留给后续 P1 的单元测试使用。
+/// 否则会抹掉用户既有的 ICC 校色配置。
 #[allow(dead_code)]
 pub fn identity_ramp() -> Ramp {
     let mut r = [0u16; 768];
@@ -434,9 +421,8 @@ pub fn set_device_ramp(ramp: &Ramp) -> bool {
 
 /// 保存原始 ramp：读取当前屏幕 gamma 作为基准，写内存缓存并落盘。
 ///
-/// 调用方必须保证**这是真实用户启用**（`prev.enabled=false → true`），
-/// 启动自动恢复不调用本函数 —— 否则会把已被护眼调暗的 gamma 误存为基准，
-/// 正是「恢复原色像夜间一样暗」的根因。
+/// 调用方必须保证**这是真实用户启用**（`prev.enabled=false → true`）——
+/// 否则会把已被护眼调暗的 gamma 误存为基准。
 fn save_original_ramp(app: &AppHandle) {
     let mut guard = ORIGINAL_RAMP.lock().expect("original ramp lock");
     if guard.is_some() {
@@ -467,8 +453,7 @@ pub fn restore_original_ramp() -> bool {
 /// 判定「本次是否为真实用户启用」（纯函数，便于单测）。
 ///
 /// 只有**上一状态关闭、新状态开启**才算真实启用，此时才允许保存/刷新原始基准。
-/// 启动自动恢复时 `prev_enabled` 已为 true（状态从磁盘读回），不会被误判，
-/// 从而杜绝「把已被护眼调暗的 gamma 存成原始基准」这一 bug 根源。
+/// 启动自动恢复时 `prev_enabled` 已为 true（状态从磁盘读回），不会被误判。
 #[inline]
 pub fn is_real_user_enable(prev_enabled: bool, enabled: bool) -> bool {
     !prev_enabled && enabled
@@ -535,7 +520,7 @@ pub fn set_eyecare_config(
 }
 
 /// 解析 "HH:MM" → (时, 分)；非法值回落到 22:00（夜间默认起点）。
-/// 不信任前端传入的字符串 —— 手改 state.json 或旧数据都可能带脏值。
+/// 不信任前端传入的字符串 —— 手改 state.json 也可能带脏值。
 fn parse_hhmm(s: &str) -> (u8, u8) {
     let parts: Vec<&str> = s.split(':').collect();
     if parts.len() != 2 {
@@ -551,7 +536,6 @@ fn parse_hhmm(s: &str) -> (u8, u8) {
 fn now_minutes() -> i32 {
     use std::time::{SystemTime, UNIX_EPOCH};
     // 用系统本地时间：直接读 UNIX 时间戳再按本地时区偏移换算。
-    // 不用 chrono 等新依赖 —— 项目现有代码（pomodoro 前端）也是这个思路。
     let secs = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
@@ -630,11 +614,9 @@ pub fn eyecare_status(state: State<EyeCareState>) -> Result<serde_json::Value, S
 
 /// 启动护眼守护线程（在 app setup 阶段调用一次）。
 ///
-/// 为什么需要轮询而不是事件驱动：Windows 没有「gamma ramp 被外部修改」的通知机制，
-/// 而官方明确「任何应用随时可覆盖」+「多数显示事件会重置 ramp」。轮询是
-/// f.lux / LightBulb 等工具的通行做法。
+/// 只能轮询：Windows 没有「gamma ramp 被外部修改」的通知机制，且多数显示事件会重置 ramp。
 ///
-/// 2 秒间隔的取舍：单次 SetDeviceGammaRamp 在某些硬件上需 200ms，因此**只在
+/// 2 秒间隔：单次 SetDeviceGammaRamp 在某些硬件上需 200ms，因此**只在
 /// 目标值变化或检测到被覆盖时才写入**，稳态下每轮仅一次回读（廉价）。
 pub fn start_eyecare_guardian(app: AppHandle, state: EyeCareState) {
     std::thread::spawn(move || {
@@ -688,8 +670,7 @@ pub fn start_eyecare_guardian(app: AppHandle, state: EyeCareState) {
             if set_device_ramp(&want) {
                 last_written = Some(want);
             } else {
-                // 写入失败（驱动屏蔽 / HDR）：清缓存，下一轮继续尝试；
-                // 同时通知前端，让 UI 能显示真实状态而非假装成功
+                // 写入失败（驱动屏蔽 / HDR）：清缓存，下一轮继续尝试，并通知前端
                 last_written = None;
                 let _ = app.emit("eyecare-failed", ());
             }
@@ -698,8 +679,7 @@ pub fn start_eyecare_guardian(app: AppHandle, state: EyeCareState) {
 }
 
 // ────────────────────────── 单元测试 ──────────────────────────
-// 时段曲线的边界情况（跨午夜、过渡方向、切换点归属）单靠人工验证极易漏，
-// 这里固化成测试，防止后续改动让算法悄悄漂移。
+// 时段曲线边界情况（跨午夜、过渡方向、切换点归属）固化为测试。
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -779,9 +759,7 @@ mod tests {
         assert!((t00 - 5500.0).abs() < 5.0, "终点应接近 dayKelvin，实为 {t00}");
     }
 
-    /// 回归测试：过渡只在前侧应用一次。
-    /// 曾经用「距最近切换点」的语义，导致切换点后侧再次落入过渡窗口，
-    /// 表现为 07:00 正确 5500K，但 07:10 退回 4800K、07:30 又跳回 5500K。
+    /// 回归测试：过渡只在前侧应用一次，切换点后侧不再落入过渡窗口。
     #[test]
     fn transition_not_applied_twice_after_switch() {
         let cfg = sched_cfg();
@@ -840,9 +818,7 @@ mod tests {
         assert_eq!(parse_hhmm("12:99"), (22, 0));
     }
 
-    /// 核心回归：只有「真实用户启用」才允许保存基准。
-    /// 修复方向 2 —— 启动自动恢复（prev=true）必须被排除，
-    /// 否则会把已被护眼调暗的 gamma 误存为原始基准，导致「恢复原色像夜间一样暗」。
+    /// 核心回归：只有「真实用户启用」才允许保存基准（启动自动恢复 prev=true 必须被排除）。
     #[test]
     fn only_real_user_enable_may_save_baseline() {
         // 真实启用：上一状态关闭 → 开启。允许保存。
