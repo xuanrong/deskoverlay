@@ -1,0 +1,1338 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>桌面工作台</title>
+    <style id="theme-vars">
+/* =====================================================================
+   DeskOverlay Dashboard — Design Tokens
+   Dark glassmorphism · semi-transparent panels · blue accent
+   Brand prefix: do (DeskOverlay)
+   ===================================================================== */
+
+/* ============ Root Tokens ============ */
+:root {
+  /* --- Background layers --- */
+  --do-bg-base: #0a0e15;
+  --do-bg-panel: rgba(16, 20, 28, 0.72);
+  --do-bg-panel-2: rgba(22, 27, 36, 0.66);
+  --do-bg-elevated: rgba(31, 38, 50, 0.92);
+  --do-bg-input: #111820;
+  --do-bg-hover: rgba(255, 255, 255, 0.06);
+  --do-bg-hover-strong: rgba(255, 255, 255, 0.1);
+  --do-soft-bg: rgba(255, 255, 255, 0.05);
+  --do-track: rgba(255, 255, 255, 0.16);
+
+  /* --- Semantic aliases (required by apply-html-head-contract.mjs) --- */
+  --do-background: #0a0e15;
+  --do-foreground: #e6edf3;
+  --do-card: rgba(22, 27, 36, 0.66);
+  --do-card-foreground: #e6edf3;
+  --do-popover: rgba(31, 38, 50, 0.95);
+  --do-popover-foreground: #e6edf3;
+  --do-primary: #58a6ff;
+  --do-primary-foreground: #061014;
+  --do-secondary: rgba(255, 255, 255, 0.06);
+  --do-secondary-foreground: #e6edf3;
+  --do-muted: rgba(255, 255, 255, 0.05);
+  --do-muted-foreground: #9aa7b4;
+  --do-accent: #58a6ff;
+  --do-accent-foreground: #061014;
+  --do-destructive: #ff7b72;
+  --do-destructive-foreground: #061014;
+
+  /* --- Borders & rings --- */
+  --do-border: rgba(255, 255, 255, 0.1);
+  --do-border-strong: rgba(255, 255, 255, 0.18);
+  --do-input: #2a3340;
+  --do-ring: rgba(88, 166, 255, 0.4);
+
+  /* --- Text hierarchy --- */
+  --do-text: #e6edf3;
+  --do-text-dim: #9aa7b4;
+  --do-text-faint: #5b6675;
+  --do-text-invert: #061014;
+
+  /* --- Semantic state colors --- */
+  --do-blue: #58a6ff;
+  --do-green: #3fb950;
+  --do-amber: #d29922;
+  --do-danger: #ff7b72;
+  --do-purple: #bc8cff;
+  --do-cyan: #39c5cf;
+  --do-tomato: #ff6b5e;
+
+  /* --- RGB components --- */
+  --do-blue-rgb: 88, 166, 255;
+  --do-green-rgb: 63, 185, 80;
+  --do-amber-rgb: 210, 153, 34;
+  --do-danger-rgb: 255, 123, 114;
+  --do-purple-rgb: 188, 140, 255;
+  --do-cyan-rgb: 57, 197, 207;
+
+  /* --- Typography --- */
+  --do-font: "Segoe UI Variable", "Segoe UI", "Microsoft YaHei", "PingFang SC", Inter, system-ui, sans-serif;
+  --do-font-mono: "Cascadia Mono", "JetBrains Mono", Consolas, monospace;
+
+  /* --- Spacing (4px grid) --- */
+  --do-sp-1: 4px;
+  --do-sp-2: 8px;
+  --do-sp-3: 12px;
+  --do-sp-4: 16px;
+  --do-sp-5: 20px;
+  --do-sp-6: 24px;
+  --do-sp-8: 32px;
+
+  /* --- Radius scale --- */
+  --do-radius-xs: 6px;
+  --do-radius-sm: 10px;
+  --do-radius-md: 14px;
+  --do-radius-lg: 18px;
+  --do-radius-full: 999px;
+
+  /* --- Shadows --- */
+  --do-shadow-xs: 0 1px 3px rgba(0, 0, 0, 0.25);
+  --do-shadow-sm: 0 4px 14px rgba(0, 0, 0, 0.3);
+  --do-shadow-soft: 0 8px 24px rgba(0, 0, 0, 0.35);
+  --do-shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
+  --do-shadow-lg: 0 30px 80px rgba(0, 0, 0, 0.6);
+
+  /* --- Transitions --- */
+  --do-t-fast: 120ms ease;
+  --do-t: 200ms cubic-bezier(0.22, 0.61, 0.36, 1);
+  --do-t-slow: 300ms ease;
+
+  /* --- Layout --- */
+  --do-grid-gap: 12px;
+  --do-grid-cell: 1fr;
+  --do-taskbar-h: 52px;
+  --do-blur: 20px;
+
+  /* --- Chart colors --- */
+  --do-chart-cpu: #58a6ff;
+  --do-chart-ram: #3fb950;
+  --do-chart-net: #bc8cff;
+}
+
+/* ============ Dark mode class ============ */
+html.dark {
+  color-scheme: dark;
+}
+
+html {
+  background: var(--do-background);
+  color: var(--do-foreground);
+  font-family: var(--do-font);
+}
+
+body {
+  margin: 0;
+  background: var(--do-background);
+  color: var(--do-foreground);
+  font-family: var(--do-font);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(120, 130, 150, 0.3);
+  border-radius: 6px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(120, 130, 150, 0.5);
+}
+
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.3.1/dist/index.global.js"></script>
+    <script src="https://unpkg.com/lucide@1.8.0/dist/umd/lucide.min.js"></script>
+    <style type="text/tailwindcss">
+  @theme inline {
+    --color-background: var(--do-background);
+    --color-foreground: var(--do-foreground);
+    --color-card: var(--do-card);
+    --color-card-foreground: var(--do-card-foreground);
+    --color-popover: var(--do-popover);
+    --color-popover-foreground: var(--do-popover-foreground);
+    --color-primary: var(--do-primary);
+    --color-primary-foreground: var(--do-primary-foreground);
+    --color-secondary: var(--do-secondary);
+    --color-secondary-foreground: var(--do-secondary-foreground);
+    --color-muted: var(--do-muted);
+    --color-muted-foreground: var(--do-muted-foreground);
+    --color-accent: var(--do-accent);
+    --color-accent-foreground: var(--do-accent-foreground);
+    --color-destructive: var(--do-destructive);
+    --color-destructive-foreground: var(--do-destructive-foreground);
+    --color-border: var(--do-border);
+    --color-input: var(--do-input);
+    --color-ring: var(--do-ring);
+    --radius-sm: var(--do-radius-sm);
+    --radius-md: var(--do-radius-md);
+    --radius-lg: var(--do-radius-lg);
+  }
+  @layer base {
+    body { background: var(--do-background); color: var(--do-foreground); }
+    td, th { @apply break-words; word-break: break-all; word-break: auto-phrase; }
+    th { @apply whitespace-nowrap; }
+  }
+    </style>
+    <style id="semantic-token-fallback">
+      .bg-background { background-color: var(--do-background); }
+      .text-background { color: var(--do-background); }
+      .border-background { border-color: var(--do-background); }
+      .ring-background { --tw-ring-color: var(--do-background); }
+      .bg-foreground { background-color: var(--do-foreground); }
+      .text-foreground { color: var(--do-foreground); }
+      .border-foreground { border-color: var(--do-foreground); }
+      .ring-foreground { --tw-ring-color: var(--do-foreground); }
+      .bg-card { background-color: var(--do-card); }
+      .text-card { color: var(--do-card); }
+      .border-card { border-color: var(--do-card); }
+      .ring-card { --tw-ring-color: var(--do-card); }
+      .bg-card-foreground { background-color: var(--do-card-foreground); }
+      .text-card-foreground { color: var(--do-card-foreground); }
+      .border-card-foreground { border-color: var(--do-card-foreground); }
+      .ring-card-foreground { --tw-ring-color: var(--do-card-foreground); }
+      .bg-popover { background-color: var(--do-popover); }
+      .text-popover { color: var(--do-popover); }
+      .border-popover { border-color: var(--do-popover); }
+      .ring-popover { --tw-ring-color: var(--do-popover); }
+      .bg-popover-foreground { background-color: var(--do-popover-foreground); }
+      .text-popover-foreground { color: var(--do-popover-foreground); }
+      .border-popover-foreground { border-color: var(--do-popover-foreground); }
+      .ring-popover-foreground { --tw-ring-color: var(--do-popover-foreground); }
+      .bg-primary { background-color: var(--do-primary); }
+      .text-primary { color: var(--do-primary); }
+      .border-primary { border-color: var(--do-primary); }
+      .ring-primary { --tw-ring-color: var(--do-primary); }
+      .bg-primary-foreground { background-color: var(--do-primary-foreground); }
+      .text-primary-foreground { color: var(--do-primary-foreground); }
+      .border-primary-foreground { border-color: var(--do-primary-foreground); }
+      .ring-primary-foreground { --tw-ring-color: var(--do-primary-foreground); }
+      .bg-secondary { background-color: var(--do-secondary); }
+      .text-secondary { color: var(--do-secondary); }
+      .border-secondary { border-color: var(--do-secondary); }
+      .ring-secondary { --tw-ring-color: var(--do-secondary); }
+      .bg-secondary-foreground { background-color: var(--do-secondary-foreground); }
+      .text-secondary-foreground { color: var(--do-secondary-foreground); }
+      .border-secondary-foreground { border-color: var(--do-secondary-foreground); }
+      .ring-secondary-foreground { --tw-ring-color: var(--do-secondary-foreground); }
+      .bg-muted { background-color: var(--do-muted); }
+      .text-muted { color: var(--do-muted); }
+      .border-muted { border-color: var(--do-muted); }
+      .ring-muted { --tw-ring-color: var(--do-muted); }
+      .bg-muted-foreground { background-color: var(--do-muted-foreground); }
+      .text-muted-foreground { color: var(--do-muted-foreground); }
+      .border-muted-foreground { border-color: var(--do-muted-foreground); }
+      .ring-muted-foreground { --tw-ring-color: var(--do-muted-foreground); }
+      .bg-accent { background-color: var(--do-accent); }
+      .text-accent { color: var(--do-accent); }
+      .border-accent { border-color: var(--do-accent); }
+      .ring-accent { --tw-ring-color: var(--do-accent); }
+      .bg-accent-foreground { background-color: var(--do-accent-foreground); }
+      .text-accent-foreground { color: var(--do-accent-foreground); }
+      .border-accent-foreground { border-color: var(--do-accent-foreground); }
+      .ring-accent-foreground { --tw-ring-color: var(--do-accent-foreground); }
+      .bg-destructive { background-color: var(--do-destructive); }
+      .text-destructive { color: var(--do-destructive); }
+      .border-destructive { border-color: var(--do-destructive); }
+      .ring-destructive { --tw-ring-color: var(--do-destructive); }
+      .bg-destructive-foreground { background-color: var(--do-destructive-foreground); }
+      .text-destructive-foreground { color: var(--do-destructive-foreground); }
+      .border-destructive-foreground { border-color: var(--do-destructive-foreground); }
+      .ring-destructive-foreground { --tw-ring-color: var(--do-destructive-foreground); }
+      .bg-border { background-color: var(--do-border); }
+      .text-border { color: var(--do-border); }
+      .border-border { border-color: var(--do-border); }
+      .ring-border { --tw-ring-color: var(--do-border); }
+      .bg-input { background-color: var(--do-input); }
+      .text-input { color: var(--do-input); }
+      .border-input { border-color: var(--do-input); }
+      .ring-input { --tw-ring-color: var(--do-input); }
+      .bg-ring { background-color: var(--do-ring); }
+      .text-ring { color: var(--do-ring); }
+      .border-ring { border-color: var(--do-ring); }
+      .ring-ring { --tw-ring-color: var(--do-ring); }
+    </style>
+    <style>
+      .no-scrollbar::-webkit-scrollbar { display: none; }
+      .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+      [data-icon] {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        -webkit-mask-size: contain;
+        mask-size: contain;
+        -webkit-mask-repeat: no-repeat;
+        mask-repeat: no-repeat;
+        -webkit-mask-position: center;
+        mask-position: center;
+        background-color: currentColor;
+      }
+    </style>
+</head>
+<body class="h-screen overflow-hidden font-sans antialiased">
+    <style>
+      /* ========== Critical Layout (app-shell frame) ========== */
+      [data-viewport-mode="app-shell"] {
+        height: 100vh;
+        max-height: 100vh;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+        position: relative;
+        background: var(--do-bg-base);
+      }
+      [data-viewport-mode="app-shell"] [data-scroll-region="primary"] {
+        flex: 1;
+        overflow-y: auto;
+        overflow-x: hidden;
+        position: relative;
+      }
+
+      /* ========== Top Clock Bar ========== */
+      .top-bar {
+        height: 66px;
+        flex-shrink: 0;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 var(--do-sp-4);
+        background: var(--do-bg-panel);
+        backdrop-filter: blur(var(--do-blur));
+        -webkit-backdrop-filter: blur(var(--do-blur));
+        border-bottom: 1px solid var(--do-border);
+        z-index: 10;
+        gap: var(--do-sp-4);
+      }
+      .top-bar__clock {
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        gap: 3px;
+      }
+      .top-bar__time {
+        font-family: var(--do-font-mono);
+        font-size: 24px;
+        font-weight: 700;
+        color: var(--do-cyan);
+        letter-spacing: 1px;
+        line-height: 1;
+      }
+      .top-bar__date {
+        font-size: 12px;
+        color: var(--do-text-dim);
+        display: flex;
+        align-items: center;
+        gap: var(--do-sp-1);
+      }
+      .top-bar__date .sep { color: var(--do-text-faint); }
+      .top-bar__date .highlight { color: var(--do-amber); }
+      .top-bar__reminders {
+        display: flex;
+        align-items: center;
+        gap: var(--do-sp-2);
+      }
+      .top-bar__search {
+        display: flex;
+        align-items: center;
+        gap: var(--do-sp-2);
+        width: 280px;
+        max-width: 32vw;
+        padding: 7px var(--do-sp-3);
+        border-radius: var(--do-radius-sm);
+        background: var(--do-soft-bg);
+        border: 1px solid var(--do-border);
+        color: var(--do-text-faint);
+        font-size: 12px;
+        cursor: pointer;
+        transition: background var(--do-t), border-color var(--do-t), color var(--do-t);
+      }
+      .top-bar__search:hover {
+        background: var(--do-bg-hover);
+        border-color: var(--do-border-strong);
+        color: var(--do-text-dim);
+      }
+      .top-bar__search svg { width: 14px; height: 14px; flex-shrink: 0; }
+      .top-bar__search span { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .top-bar__search kbd {
+        font-family: var(--do-font-mono);
+        font-size: 10px;
+        padding: 1px 5px;
+        border-radius: var(--do-radius-xs);
+        background: var(--do-bg-hover-strong);
+        color: var(--do-text-dim);
+      }
+      .reminder-icon {
+        width: 28px; height: 28px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: var(--do-radius-sm);
+        background: var(--do-soft-bg);
+        border: 1px solid var(--do-border);
+        color: var(--do-text-dim);
+        transition: background var(--do-t), color var(--do-t);
+        cursor: pointer;
+      }
+      .reminder-icon:hover {
+        background: var(--do-bg-hover);
+        color: var(--do-text);
+      }
+      .reminder-icon svg { width: 15px; height: 15px; }
+
+      .pomo-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--do-sp-1);
+        padding: 3px var(--do-sp-2);
+        border-radius: var(--do-radius-full);
+        background: rgba(var(--do-danger-rgb), 0.12);
+        border: 1px solid rgba(var(--do-danger-rgb), 0.3);
+        color: var(--do-tomato);
+        font-size: 11px;
+        font-weight: 600;
+        font-family: var(--do-font-mono);
+      }
+      .pomo-pill::before {
+        content: "";
+        width: 6px; height: 6px;
+        border-radius: 50%;
+        background: var(--do-tomato);
+        animation: pulse 2s ease-in-out infinite;
+      }
+      @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.4; }
+      }
+
+      /* ========== Widget Grid ========== */
+      .widget-grid {
+        display: grid;
+        grid-template-columns: repeat(6, 1fr);
+        gap: var(--do-grid-gap);
+        padding: var(--do-sp-3);
+        align-content: start;
+      }
+      .widget-grid__guides {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        opacity: 0;
+        background-image:
+          linear-gradient(rgba(var(--do-blue-rgb), 0.04) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(var(--do-blue-rgb), 0.04) 1px, transparent 1px);
+        background-size: calc((100% - 24px) / 6) 100%;
+        transition: opacity var(--do-t);
+        z-index: 0;
+      }
+
+      .widget {
+        background: var(--do-card);
+        backdrop-filter: blur(var(--do-blur));
+        -webkit-backdrop-filter: blur(var(--do-blur));
+        border: 1px solid var(--do-border);
+        border-radius: var(--do-radius-md);
+        transition: background var(--do-t), border-color var(--do-t), box-shadow var(--do-t);
+        position: relative;
+        overflow: hidden;
+      }
+      .widget:hover {
+        background: var(--do-bg-panel-2);
+        border-color: var(--do-border-strong);
+        box-shadow: var(--do-shadow-sm);
+      }
+
+      /* Grid spans */
+      .span-1 { grid-column: span 1; }
+      .span-2 { grid-column: span 2; }
+      .span-4 { grid-column: span 4; }
+
+      /* 1-cell widgets */
+      .widget--1 {
+        padding: var(--do-sp-2);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: var(--do-sp-1);
+        min-height: 84px;
+        cursor: pointer;
+      }
+      .widget--1 .w-icon {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .widget--1 .w-icon svg { width: 24px; height: 24px; }
+      .widget--1 .w-label {
+        font-size: 11px;
+        color: var(--do-text-dim);
+      }
+      .widget--1 .w-badge {
+        position: absolute;
+        top: 6px; right: 6px;
+        min-width: 16px; height: 16px;
+        padding: 0 4px;
+        border-radius: var(--do-radius-full);
+        background: var(--do-tomato);
+        color: #fff;
+        font-size: 10px;
+        font-weight: 700;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        line-height: 1;
+      }
+      .widget--1 .w-expand {
+        position: absolute;
+        bottom: 4px; right: 4px;
+        color: var(--do-text-faint);
+      }
+      .widget--1 .w-expand svg { width: 12px; height: 12px; }
+
+      /* 2-cell / 4-cell widget headers */
+      .widget--multi { padding: var(--do-sp-4); }
+      .widget__title {
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--do-text);
+        display: flex;
+        align-items: center;
+        gap: var(--do-sp-2);
+        margin-bottom: var(--do-sp-3);
+      }
+      .widget__title svg { width: 16px; height: 16px; color: var(--do-blue); }
+
+      /* ========== Focus / Habits 1-cell value ========== */
+      .w-value {
+        font-size: 15px;
+        font-weight: 700;
+        font-family: var(--do-font-mono);
+        line-height: 1;
+      }
+
+      /* ========== Pomodoro 2-cell ========== */
+      .pomo-body {
+        display: flex;
+        align-items: center;
+        gap: var(--do-sp-4);
+      }
+      .pomo-ring {
+        position: relative;
+        width: 64px; height: 64px;
+        flex-shrink: 0;
+      }
+      .pomo-ring svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+      .pomo-ring__track { fill: none; stroke: var(--do-track); stroke-width: 4; }
+      .pomo-ring__prog {
+        fill: none;
+        stroke: var(--do-tomato);
+        stroke-width: 4;
+        stroke-linecap: round;
+        stroke-dasharray: 175.93;
+        stroke-dashoffset: 52.78;
+      }
+      .pomo-ring__time {
+        position: absolute;
+        top: 50%; left: 50%;
+        transform: translate(-50%, -50%);
+        font-family: var(--do-font-mono);
+        font-size: 14px;
+        font-weight: 700;
+        color: var(--do-tomato);
+      }
+      .pomo-info { display: flex; flex-direction: column; gap: var(--do-sp-1); }
+      .pomo-mode {
+        font-size: 12px; font-weight: 600;
+        color: var(--do-tomato);
+        display: flex; align-items: center; gap: var(--do-sp-1);
+      }
+      .pomo-mode svg { width: 14px; height: 14px; }
+      .pomo-status { font-size: 11px; color: var(--do-text-dim); }
+      .pomo-play {
+        width: 28px; height: 28px;
+        border: none;
+        border-radius: 50%;
+        background: rgba(var(--do-danger-rgb), 0.15);
+        color: var(--do-tomato);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        transition: background var(--do-t);
+        margin-top: var(--do-sp-1);
+      }
+      .pomo-play:hover { background: rgba(var(--do-danger-rgb), 0.25); }
+      .pomo-play svg { width: 13px; height: 13px; }
+
+      /* ========== System 2-cell ========== */
+      .sys-row { display: flex; align-items: center; gap: var(--do-sp-2); margin-bottom: var(--do-sp-2); }
+      .sys-row__label { font-size: 11px; color: var(--do-text-dim); width: 32px; flex-shrink: 0; }
+      .sys-row__bar { flex: 1; height: 6px; background: var(--do-track); border-radius: var(--do-radius-full); overflow: hidden; }
+      .sys-row__fill { height: 100%; border-radius: var(--do-radius-full); }
+      .sys-row__fill--cpu { background: var(--do-blue); width: 23%; }
+      .sys-row__fill--ram { background: var(--do-green); width: 45%; }
+      .sys-row__val {
+        font-family: var(--do-font-mono);
+        font-size: 12px; font-weight: 600;
+        width: 38px; text-align: right; flex-shrink: 0;
+      }
+      .sys-row__val--cpu { color: var(--do-blue); }
+      .sys-row__val--ram { color: var(--do-green); }
+      .sys-spark { margin: var(--do-sp-2) 0; height: 36px; width: 100%; }
+      .sys-spark svg { width: 100%; height: 100%; }
+      .sys-net { display: flex; gap: var(--do-sp-4); margin-top: var(--do-sp-1); font-size: 11px; color: var(--do-text-dim); font-family: var(--do-font-mono); }
+      .sys-net .dl { color: var(--do-blue); }
+      .sys-net .ul { color: var(--do-purple); }
+      .sys-net span { display: inline-flex; align-items: center; gap: 3px; }
+
+      /* ========== Tasks 4-cell ========== */
+      .task-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--do-sp-2); }
+      .task-header h3 { font-size: 14px; font-weight: 600; color: var(--do-text); display: flex; align-items: center; gap: var(--do-sp-2); }
+      .task-header h3 svg { width: 16px; height: 16px; color: var(--do-blue); }
+      .task-count { font-size: 11px; color: var(--do-blue); background: rgba(var(--do-blue-rgb), 0.12); padding: 2px var(--do-sp-2); border-radius: var(--do-radius-full); font-weight: 600; }
+      .task-tabs { display: flex; gap: var(--do-sp-1); margin-bottom: var(--do-sp-3); flex-wrap: wrap; }
+      .task-tab {
+        padding: 3px var(--do-sp-2); border-radius: var(--do-radius-full);
+        font-size: 11px; color: var(--do-text-dim);
+        background: var(--do-soft-bg); border: 1px solid transparent;
+        cursor: pointer; transition: all var(--do-t);
+      }
+      .task-tab--active { color: var(--do-text); background: var(--do-bg-hover-strong); border-color: var(--do-border-strong); }
+      .task-list { display: flex; flex-direction: column; gap: 2px; max-height: 180px; overflow-y: auto; }
+      .task-item {
+        display: flex; align-items: center; gap: var(--do-sp-2);
+        padding: var(--do-sp-1) var(--do-sp-2);
+        border-radius: var(--do-radius-sm); transition: background var(--do-t);
+      }
+      .task-item:hover { background: var(--do-bg-hover); }
+      .task-prio { font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: var(--do-radius-xs); flex-shrink: 0; }
+      .task-prio--p0 { background: rgba(var(--do-danger-rgb), 0.18); color: var(--do-danger); }
+      .task-prio--p1 { background: rgba(var(--do-amber-rgb), 0.18); color: var(--do-amber); }
+      .task-prio--p2 { background: rgba(var(--do-blue-rgb), 0.18); color: var(--do-blue); }
+      .task-prio--p3 { background: var(--do-soft-bg); color: var(--do-text-faint); }
+      .task-title { flex: 1; font-size: 12px; color: var(--do-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .task-status { font-size: 10px; padding: 1px 6px; border-radius: var(--do-radius-full); flex-shrink: 0; }
+      .task-status--done { background: rgba(var(--do-green-rgb), 0.15); color: var(--do-green); }
+      .task-status--active { background: rgba(var(--do-blue-rgb), 0.15); color: var(--do-blue); }
+      .task-status--paused { background: rgba(var(--do-amber-rgb), 0.15); color: var(--do-amber); }
+      .task-status--pending { background: var(--do-soft-bg); color: var(--do-text-faint); }
+      .task-check {
+        width: 16px; height: 16px; border: 1.5px solid var(--do-border-strong);
+        border-radius: 4px; flex-shrink: 0; cursor: pointer; transition: all var(--do-t);
+        display: flex; align-items: center; justify-content: center;
+      }
+      .task-check--done { background: var(--do-green); border-color: var(--do-green); }
+      .task-check--done svg { width: 10px; height: 10px; color: var(--do-text-invert); }
+      .task-add {
+        margin-top: var(--do-sp-2); padding: var(--do-sp-2);
+        border: 1px dashed var(--do-border-strong);
+        border-radius: var(--do-radius-sm); font-size: 12px;
+        color: var(--do-text-dim); display: flex;
+        align-items: center; justify-content: center; gap: var(--do-sp-2);
+        cursor: pointer; transition: all var(--do-t);
+      }
+      .task-add:hover { border-color: var(--do-blue); color: var(--do-blue); }
+      .task-add svg { width: 14px; height: 14px; }
+
+      /* ========== Music 2-cell ========== */
+      .music-body { display: flex; align-items: center; gap: var(--do-sp-3); }
+      .music-art {
+        width: 44px; height: 44px; border-radius: var(--do-radius-sm);
+        background: linear-gradient(135deg, var(--do-purple), var(--do-blue));
+        flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+      }
+      .music-art svg { width: 18px; height: 18px; color: rgba(255,255,255,0.85); }
+      .music-info { flex: 1; min-width: 0; }
+      .music-title { font-size: 13px; font-weight: 600; color: var(--do-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .music-artist { font-size: 11px; color: var(--do-text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .music-progress { height: 3px; background: var(--do-track); border-radius: var(--do-radius-full); margin-top: var(--do-sp-2); overflow: hidden; }
+      .music-progress__fill { height: 100%; width: 42%; background: var(--do-blue); border-radius: var(--do-radius-full); }
+      .music-controls { display: flex; align-items: center; gap: var(--do-sp-1); margin-top: var(--do-sp-2); }
+      .music-btn {
+        width: 24px; height: 24px; border: none; background: transparent;
+        color: var(--do-text-dim); display: flex; align-items: center; justify-content: center;
+        cursor: pointer; border-radius: var(--do-radius-xs); transition: all var(--do-t);
+      }
+      .music-btn:hover { color: var(--do-text); background: var(--do-bg-hover); }
+      .music-btn--play { background: var(--do-soft-bg); color: var(--do-blue); }
+      .music-btn svg { width: 14px; height: 14px; }
+
+      /* ========== Scheduler 2-cell ========== */
+      .sched-list { display: flex; flex-direction: column; gap: var(--do-sp-2); }
+      .sched-item { display: flex; align-items: center; gap: var(--do-sp-3); }
+      .sched-time { font-family: var(--do-font-mono); font-size: 12px; font-weight: 600; color: var(--do-blue); width: 42px; flex-shrink: 0; }
+      .sched-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--do-blue); flex-shrink: 0; }
+      .sched-item--past .sched-dot { background: var(--do-text-faint); }
+      .sched-item--past .sched-time { color: var(--do-text-faint); }
+      .sched-name { font-size: 12px; color: var(--do-text); }
+      .sched-item--past .sched-name { color: var(--do-text-dim); }
+      .sched-line { width: 1px; height: 14px; background: var(--do-border); margin-left: 2.5px; }
+
+      /* ========== Quick Access 2-cell ========== */
+      .qa-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--do-sp-2); }
+      .qa-item {
+        display: flex; flex-direction: column; align-items: center; gap: var(--do-sp-1);
+        padding: var(--do-sp-2) var(--do-sp-1); border-radius: var(--do-radius-sm);
+        cursor: pointer; transition: background var(--do-t);
+      }
+      .qa-item:hover { background: var(--do-bg-hover); }
+      .qa-item svg { width: 18px; height: 18px; color: var(--do-blue); }
+      .qa-item span { font-size: 10px; color: var(--do-text-dim); }
+
+      /* ========== Bottom Taskbar ========== */
+      .taskbar {
+        height: var(--do-taskbar-h);
+        flex-shrink: 0;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 var(--do-sp-3);
+        background: var(--do-bg-panel);
+        backdrop-filter: blur(var(--do-blur));
+        -webkit-backdrop-filter: blur(var(--do-blur));
+        border-top: 1px solid var(--do-border);
+        z-index: 20;
+      }
+      .taskbar__left, .taskbar__center, .taskbar__right {
+        display: flex; align-items: center; gap: var(--do-sp-2);
+      }
+      .taskbar-btn {
+        display: inline-flex; align-items: center; gap: var(--do-sp-1);
+        padding: 6px var(--do-sp-3); border-radius: var(--do-radius-sm);
+        background: transparent; border: 1px solid transparent;
+        color: var(--do-text-dim); font-size: 12px; cursor: pointer;
+        transition: all var(--do-t);
+      }
+      .taskbar-btn:hover { background: var(--do-bg-hover-strong); color: var(--do-text); border-color: var(--do-border); }
+      .taskbar-btn svg { width: 16px; height: 16px; }
+      .taskbar-btn--exit:hover { color: var(--do-danger); }
+      .taskbar-btn--edit.active {
+        background: rgba(var(--do-blue-rgb), 0.15);
+        color: var(--do-blue); border-color: rgba(var(--do-blue-rgb), 0.3);
+      }
+      .taskbar-metric {
+        display: inline-flex; align-items: center; gap: var(--do-sp-1);
+        padding: 4px var(--do-sp-2); font-size: 11px; color: var(--do-text-dim);
+      }
+      .taskbar-metric svg { width: 14px; height: 14px; }
+      .taskbar-metric--cpu { color: var(--do-blue); }
+      .taskbar-metric--ram { color: var(--do-green); }
+      .taskbar-metric--time { font-family: var(--do-font-mono); color: var(--do-text); }
+      .taskbar-sep { width: 1px; height: 16px; background: var(--do-border); }
+
+      /* ========== Settings Panel ========== */
+      .settings-panel {
+        position: absolute;
+        bottom: calc(var(--do-taskbar-h) + 8px);
+        left: var(--do-sp-3);
+        width: 320px;
+        max-height: 440px;
+        overflow-y: auto;
+        background: var(--do-bg-elevated);
+        backdrop-filter: blur(calc(var(--do-blur) * 1.4));
+        -webkit-backdrop-filter: blur(calc(var(--do-blur) * 1.4));
+        border: 1px solid var(--do-border-strong);
+        border-radius: var(--do-radius-md);
+        box-shadow: var(--do-shadow);
+        z-index: 50;
+        opacity: 0;
+        pointer-events: none;
+        transform: translateY(8px);
+        transition: opacity var(--do-t), transform var(--do-t);
+      }
+      .settings-panel--open {
+        opacity: 1; pointer-events: auto; transform: translateY(0);
+      }
+      .settings-panel__section {
+        padding: var(--do-sp-3) var(--do-sp-4);
+        border-bottom: 1px solid var(--do-border);
+      }
+      .settings-panel__section:last-child { border-bottom: none; }
+      .settings-panel__heading {
+        font-size: 11px; font-weight: 600; color: var(--do-text-faint);
+        text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: var(--do-sp-2);
+      }
+      .settings-row {
+        display: flex; align-items: center; justify-content: space-between;
+        padding: var(--do-sp-1) 0; font-size: 13px; color: var(--do-text); cursor: pointer;
+      }
+      .settings-row:hover { color: var(--do-blue); }
+      .settings-row--danger { color: var(--do-danger); }
+      .settings-row svg { width: 14px; height: 14px; color: var(--do-text-faint); }
+      .settings-row:hover svg { color: var(--do-blue); }
+      .toggle {
+        position: relative; width: 34px; height: 18px;
+        background: var(--do-track); border-radius: var(--do-radius-full);
+        cursor: pointer; transition: background var(--do-t); flex-shrink: 0;
+      }
+      .toggle--on { background: var(--do-blue); }
+      .toggle::after {
+        content: ""; position: absolute; top: 2px; left: 2px;
+        width: 14px; height: 14px; border-radius: 50%; background: #fff;
+        transition: transform var(--do-t);
+      }
+      .toggle--on::after { transform: translateX(16px); }
+      .settings-check {
+        display: flex; align-items: center; gap: var(--do-sp-2);
+        padding: var(--do-sp-1) 0; font-size: 12px; color: var(--do-text-dim);
+      }
+      .settings-check input { width: 14px; height: 14px; accent-color: var(--do-blue); }
+
+      /* ========== Edit Mode ========== */
+      .widget-grid.edit-mode .widget {
+        border: 1px dashed var(--do-border-strong);
+        opacity: 0.85;
+      }
+      .widget-grid.edit-mode .widget::before {
+        content: ""; position: absolute; top: 4px; left: 50%;
+        transform: translateX(-50%); width: 20px; height: 3px;
+        border-radius: var(--do-radius-full); background: var(--do-blue); opacity: 0.6;
+        z-index: 5;
+      }
+      .widget-grid.edit-mode .widget::after {
+        content: ""; position: absolute; bottom: 4px; right: 4px;
+        width: 10px; height: 10px;
+        border-right: 2px solid var(--do-blue); border-bottom: 2px solid var(--do-blue);
+        opacity: 0.6; z-index: 5;
+      }
+      .widget-grid.edit-mode .widget-grid__guides { opacity: 1; }
+
+      /* ========== Lucide icon sizing ========== */
+      i[data-lucide] { display: inline-flex; }
+      .w-icon i[data-lucide] svg, .w-icon svg { width: 24px; height: 24px; }
+
+      /* ========== Responsive ========== */
+      @media (max-width: 768px) {
+        .widget-grid { grid-template-columns: repeat(2, 1fr); }
+        .span-1, .span-2, .span-4 { grid-column: span 2; }
+        .top-bar__date { display: none; }
+        .top-bar__reminders .pomo-pill { display: none; }
+      }
+    </style>
+
+    <main data-viewport-mode="app-shell">
+
+      <!-- ============ Section 1: Top Clock Bar ============ -->
+      <header class="top-bar" style="height: 66px; flex-grow: 0; flex-basis: auto;">
+        <div class="top-bar__clock">
+          <span class="top-bar__time">23:45:12</span>
+          <span class="top-bar__date">
+            <span>2026年10月15日 星期三</span>
+            <span class="sep">·</span>
+            <span class="highlight">距春节 100 天</span>
+          </span>
+        </div>
+        <div class="top-bar__search">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="11" cy="11" r="8"></circle>
+            <path d="m21 21-4.3-4.3"></path>
+          </svg>
+          <span>搜索或输入指令…</span>
+          <kbd>Ctrl</kbd>
+          <kbd>K</kbd>
+        </div>
+        <div class="top-bar__reminders">
+          <span class="pomo-pill">专注 25:00</span>
+          <!-- Water glass reminder -->
+          <div class="reminder-icon" title="饮水提醒">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M5 3h14l-1.5 9a5 5 0 0 1-5 4.5A5 5 0 0 1 6.5 12L5 3z"></path>
+              <path d="M5.5 6.5h13"></path>
+            </svg>
+          </div>
+          <!-- Fork/meal reminder -->
+          <div class="reminder-icon" title="用餐提醒">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 2v7c0 1.1.9 2 2 2a2 2 0 0 0 2-2V2"></path>
+              <path d="M7 2v20"></path>
+              <path d="M21 15V2a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3z"></path>
+            </svg>
+          </div>
+          <!-- Eye/rest reminder -->
+          <div class="reminder-icon" title="护眼提醒">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z"></path>
+              <circle cx="12" cy="12" r="3"></circle>
+            </svg>
+          </div>
+        </div>
+      </header>
+
+      <!-- ============ Section 2: Widget Grid ============ -->
+      <div class="widget-grid overflow-y-auto" id="widget-grid" data-scroll-region="primary">
+        <div class="widget-grid__guides"></div>
+
+        <!-- Row 1: pomodoro(2) + system(2) + focus-stats(1) + habits(1) -->
+
+        <!-- Pomodoro Widget (2 cells) -->
+        <div class="widget widget--multi span-2" id="pomodoro-widget">
+          <div class="widget__title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--do-tomato);">
+              <circle cx="12" cy="13" r="8"></circle>
+              <path d="M9 2h6"></path>
+              <path d="M12 9v4"></path>
+            </svg>
+            <span>番茄钟</span>
+          </div>
+          <div class="pomo-body">
+            <div class="pomo-ring">
+              <svg viewBox="0 0 60 60">
+                <circle class="pomo-ring__track" cx="30" cy="30" r="28"></circle>
+                <circle class="pomo-ring__prog" cx="30" cy="30" r="28"></circle>
+              </svg>
+              <span class="pomo-ring__time">25:00</span>
+            </div>
+            <div class="pomo-info">
+              <span class="pomo-mode">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <polygon points="6 3 20 12 6 21 6 3"></polygon>
+                </svg>
+                专注
+              </span>
+              <span class="pomo-status">点击开始</span>
+              <button class="pomo-play" title="开始">
+                <svg viewBox="0 0 24 24" fill="currentColor" stroke="none">
+                  <polygon points="6 3 20 12 6 21 6 3"></polygon>
+                </svg>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- System Health Widget (2 cells) -->
+        <div class="widget widget--multi span-2" id="system-widget">
+          <div class="widget__title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="4" y="4" width="16" height="16" rx="2"></rect>
+              <rect x="9" y="9" width="6" height="6"></rect>
+              <path d="M9 1v3"></path><path d="M15 1v3"></path><path d="M9 20v3"></path><path d="M15 20v3"></path>
+              <path d="M20 9h3"></path><path d="M20 14h3"></path><path d="M1 9h3"></path><path d="M1 14h3"></path>
+            </svg>
+            <span>系统健康</span>
+          </div>
+          <div class="sys-row">
+            <span class="sys-row__label">CPU</span>
+            <div class="sys-row__bar"><div class="sys-row__fill sys-row__fill--cpu"></div></div>
+            <span class="sys-row__val sys-row__val--cpu">23%</span>
+          </div>
+          <div class="sys-row">
+            <span class="sys-row__label">内存</span>
+            <div class="sys-row__bar"><div class="sys-row__fill sys-row__fill--ram"></div></div>
+            <span class="sys-row__val sys-row__val--ram">45%</span>
+          </div>
+          <div class="sys-spark">
+            <svg viewBox="0 0 200 36" preserveAspectRatio="none">
+              <defs>
+                <linearGradient id="sparkGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stop-color="var(--do-chart-cpu)" stop-opacity="0.3"></stop>
+                  <stop offset="100%" stop-color="var(--do-chart-cpu)" stop-opacity="0"></stop>
+                </linearGradient>
+              </defs>
+              <polyline points="0,22 20,20 40,24 60,17 80,21 100,16 120,19 140,14 160,18 180,12 200,15 200,36 0,36"
+                        fill="url(#sparkGrad)"></polyline>
+              <polyline points="0,22 20,20 40,24 60,17 80,21 100,16 120,19 140,14 160,18 180,12 200,15"
+                        fill="none" stroke="var(--do-chart-cpu)" stroke-width="1.5" stroke-linejoin="round"></polyline>
+            </svg>
+          </div>
+          <div class="sys-net">
+            <span class="dl">
+              <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 5v14"></path><path d="m19 12-7 7-7-7"></path>
+              </svg>
+              1.2MB/s
+            </span>
+            <span class="ul">
+              <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 19V5"></path><path d="m5 12 7-7 7 7"></path>
+              </svg>
+              256KB/s
+            </span>
+          </div>
+        </div>
+
+        <!-- Focus Stats Widget (1 cell) -->
+        <div class="widget widget--1 span-1" id="focus-stats-widget">
+          <div class="w-icon" style="color: var(--do-tomato);">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 8c-3.6 0-6.5 2.9-6.5 6.5S8.4 21 12 21s6.5-2.9 6.5-6.5S15.6 8 12 8z"></path>
+              <path d="M12 8c-.8-1.7-2.4-2.7-4.3-2.8.4 1.9 1.7 3.3 3.4 3.8"></path>
+              <path d="M12 8c.8-1.7 2.4-2.7 4.3-2.8-.4 1.9-1.7 3.3-3.4 3.8"></path>
+            </svg>
+          </div>
+          <span class="w-value" style="color: var(--do-tomato);">4 · 2h20m</span>
+          <span class="w-label">今日专注</span>
+        </div>
+
+        <!-- Habits Widget (1 cell) -->
+        <div class="widget widget--1 span-1" id="habits-widget">
+          <div class="w-icon" style="color: var(--do-green);">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+              <polyline points="22 4 12 14.01 9 11.01"></polyline>
+            </svg>
+          </div>
+          <span class="w-value" style="color: var(--do-green);">3 / 5</span>
+          <span class="w-label">习惯打卡</span>
+        </div>
+
+        <!-- Row 2: tasks(4) + ai(1) + notes(1) -->
+
+        <!-- Tasks Widget (4 cells) -->
+        <div class="widget widget--multi span-4" id="tasks-widget">
+          <div class="task-header">
+            <h3>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M9 11l3 3 8-8"></path>
+                <path d="M20 12v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h11"></path>
+              </svg>
+              待办事项
+            </h3>
+            <span class="task-count">12</span>
+          </div>
+          <div class="task-tabs">
+            <span class="task-tab task-tab--active">全部</span>
+            <span class="task-tab">P0</span>
+            <span class="task-tab">P1</span>
+            <span class="task-tab">P2</span>
+            <span class="task-tab">P3</span>
+          </div>
+          <div class="task-list">
+            <!-- Task 1 -->
+            <div class="task-item">
+              <div class="task-check"></div>
+              <span class="task-prio task-prio--p1">P1</span>
+              <span class="task-title">完成季度报告</span>
+              <span class="task-status task-status--active">进行中</span>
+            </div>
+            <!-- Task 2 -->
+            <div class="task-item">
+              <div class="task-check task-check--done">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="20 6 9 17 4 12"></polyline>
+                </svg>
+              </div>
+              <span class="task-prio task-prio--p0">P0</span>
+              <span class="task-title" style="text-decoration: line-through; color: var(--do-text-dim);">修复登录验证漏洞</span>
+              <span class="task-status task-status--done">已完成</span>
+            </div>
+            <!-- Task 3 -->
+            <div class="task-item">
+              <div class="task-check"></div>
+              <span class="task-prio task-prio--p2">P2</span>
+              <span class="task-title">更新依赖包版本</span>
+              <span class="task-status task-status--pending">待开始</span>
+            </div>
+            <!-- Task 4 -->
+            <div class="task-item">
+              <div class="task-check"></div>
+              <span class="task-prio task-prio--p2">P2</span>
+              <span class="task-title">优化首页加载速度</span>
+              <span class="task-status task-status--paused">已暂停</span>
+            </div>
+            <!-- Task 5 -->
+            <div class="task-item">
+              <div class="task-check"></div>
+              <span class="task-prio task-prio--p3">P3</span>
+              <span class="task-title">整理技术文档</span>
+              <span class="task-status task-status--pending">待开始</span>
+            </div>
+            <!-- Task 6 -->
+            <div class="task-item">
+              <div class="task-check"></div>
+              <span class="task-prio task-prio--p1">P1</span>
+              <span class="task-title">设计评审准备</span>
+              <span class="task-status task-status--active">进行中</span>
+            </div>
+          </div>
+          <div class="task-add">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M5 12h14"></path><path d="M12 5v14"></path>
+            </svg>
+            添加任务
+          </div>
+        </div>
+
+        <!-- AI Widget (1 cell) -->
+        <div class="widget widget--1 span-1" id="ai-widget">
+          <div class="w-icon" style="color: var(--do-purple);">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 3l1.9 5.8a3 3 0 0 0 2.3 2.3L22 13l-5.8 1.9a3 3 0 0 0-2.3 2.3L12 23l-1.9-5.8a3 3 0 0 0-2.3-2.3L2 13l5.8-1.9a3 3 0 0 0 2.3-2.3L12 3z"></path>
+            </svg>
+          </div>
+          <span class="w-label">AI</span>
+          <span class="w-badge">2</span>
+        </div>
+
+        <!-- Notes Widget (1 cell) -->
+        <div class="widget widget--1 span-1" id="notes-widget">
+          <div class="w-icon" style="color: var(--do-amber);">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+              <polyline points="14 2 14 8 20 8"></polyline>
+              <line x1="8" y1="13" x2="16" y2="13"></line>
+              <line x1="8" y1="17" x2="13" y2="17"></line>
+            </svg>
+          </div>
+          <span class="w-label">笔记</span>
+          <span class="w-badge">3</span>
+        </div>
+
+        <!-- Row 3: music(2) + scheduler(2) + quickaccess(2) -->
+
+        <!-- Music Player Widget (2 cells) -->
+        <div class="widget widget--multi span-2" id="music-widget">
+          <div class="widget__title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M9 18V5l12-2v13"></path>
+              <circle cx="6" cy="18" r="3"></circle>
+              <circle cx="18" cy="16" r="3"></circle>
+            </svg>
+            <span>音乐</span>
+          </div>
+          <div class="music-body">
+            <div class="music-art">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M9 18V5l12-2v13"></path>
+                <circle cx="6" cy="18" r="3"></circle>
+                <circle cx="18" cy="16" r="3"></circle>
+              </svg>
+            </div>
+            <div class="music-info">
+              <div class="music-title">夜空中最亮的星</div>
+              <div class="music-artist">逃跑计划</div>
+              <div class="music-progress"><div class="music-progress__fill"></div></div>
+              <div class="music-controls">
+                <button class="music-btn" title="上一首">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <polygon points="19 20 9 12 19 4 19 20"></polygon>
+                    <line x1="5" y1="19" x2="5" y2="5"></line>
+                  </svg>
+                </button>
+                <button class="music-btn music-btn--play" title="播放">
+                  <svg viewBox="0 0 24 24" fill="currentColor" stroke="none">
+                    <polygon points="6 3 20 12 6 21 6 3"></polygon>
+                  </svg>
+                </button>
+                <button class="music-btn" title="下一首">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <polygon points="5 4 15 12 5 20 5 4"></polygon>
+                    <line x1="19" y1="5" x2="19" y2="19"></line>
+                  </svg>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Scheduler Widget (2 cells) -->
+        <div class="widget widget--multi span-2" id="scheduler-widget">
+          <div class="widget__title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="4" width="18" height="18" rx="2"></rect>
+              <line x1="16" y1="2" x2="16" y2="6"></line>
+              <line x1="8" y1="2" x2="8" y2="6"></line>
+              <line x1="3" y1="10" x2="21" y2="10"></line>
+            </svg>
+            <span>今日日程</span>
+          </div>
+          <div class="sched-list">
+            <div class="sched-item sched-item--past">
+              <span class="sched-time">09:00</span>
+              <div class="sched-dot"></div>
+              <span class="sched-name">站会</span>
+            </div>
+            <div class="sched-item sched-item--past">
+              <span class="sched-time">14:00</span>
+              <div class="sched-dot"></div>
+              <span class="sched-name">评审会议</span>
+            </div>
+            <div class="sched-item">
+              <span class="sched-time">16:30</span>
+              <div class="sched-dot"></div>
+              <span class="sched-name">代码审查</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Quick Access Widget (2 cells) -->
+        <div class="widget widget--multi span-2" id="quickaccess-widget">
+          <div class="widget__title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="2" y="6" width="20" height="12" rx="2"></rect>
+              <path d="M6 12h.01"></path><path d="M10 12h.01"></path>
+              <path d="M14 12h.01"></path><path d="M18 12h.01"></path>
+            </svg>
+            <span>快捷方式</span>
+          </div>
+          <div class="qa-grid">
+            <div class="qa-item">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2z"></path>
+              </svg>
+              <span>文件</span>
+            </div>
+            <div class="qa-item">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="4" y="2" width="16" height="20" rx="2"></rect>
+                <line x1="8" y1="6" x2="16" y2="6"></line>
+                <path d="M9 18l3-3 3 3"></path>
+                <path d="M12 15v6"></path>
+              </svg>
+              <span>计算器</span>
+            </div>
+            <div class="qa-item">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="2" y="4" width="20" height="16" rx="2"></rect>
+                <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"></path>
+              </svg>
+              <span>邮件</span>
+            </div>
+            <div class="qa-item">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10"></circle>
+                <line x1="2" y1="12" x2="22" y2="12"></line>
+                <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+              </svg>
+              <span>浏览器</span>
+            </div>
+          </div>
+        </div>
+
+      </div><!-- /widget-grid -->
+
+      <!-- ============ Section 3: Bottom Taskbar ============ -->
+      <footer class="taskbar" id="taskbar">
+        <div class="taskbar__left">
+          <button class="taskbar-btn" id="settings-btn" title="设置">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path>
+              <circle cx="12" cy="12" r="3"></circle>
+            </svg>
+            <span>设置</span>
+          </button>
+        </div>
+
+        <div class="taskbar__center">
+          <div class="taskbar-metric taskbar-metric--cpu">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="4" y="4" width="16" height="16" rx="2"></rect>
+              <rect x="9" y="9" width="6" height="6"></rect>
+              <path d="M9 1v3"></path><path d="M15 1v3"></path>
+              <path d="M9 20v3"></path><path d="M15 20v3"></path>
+            </svg>
+            CPU 23%
+          </div>
+          <div class="taskbar-sep"></div>
+          <div class="taskbar-metric taskbar-metric--ram">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 12h18"></path>
+              <rect x="2" y="7" width="20" height="10" rx="2"></rect>
+              <path d="M7 17v2"></path><path d="M11 17v2"></path><path d="M15 17v2"></path>
+            </svg>
+            内存 45%
+          </div>
+          <div class="taskbar-sep"></div>
+          <div class="taskbar-metric taskbar-metric--time">23:45</div>
+        </div>
+
+        <div class="taskbar__right">
+          <button class="taskbar-btn taskbar-btn--edit" id="edit-mode-btn" title="编辑模式">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path>
+            </svg>
+            <span>编辑模式</span>
+          </button>
+          <button class="taskbar-btn taskbar-btn--exit" id="exit-btn" title="退出">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 2v10"></path>
+              <path d="M18.4 6.6a9 9 0 1 1-12.77.04"></path>
+            </svg>
+            <span>退出</span>
+          </button>
+        </div>
+      </footer>
+
+      <!-- ============ Section 4: Settings Panel (popup, hidden by default) ============ -->
+      <div class="settings-panel" id="settings-panel">
+        <!-- Section A: Mode toggles -->
+        <div class="settings-panel__section">
+          <div class="settings-panel__heading">模式</div>
+          <div class="settings-row">
+            <span>编辑拖拽模式</span>
+            <div class="toggle"></div>
+          </div>
+          <div class="settings-row">
+            <span>护眼模式</span>
+            <div class="toggle toggle--on"></div>
+          </div>
+          <div class="settings-row">
+            <span>开机启动</span>
+            <div class="toggle"></div>
+          </div>
+        </div>
+
+        <!-- Section B: Settings options -->
+        <div class="settings-panel__section">
+          <div class="settings-panel__heading">设置</div>
+          <div class="settings-row">
+            <span>设置页面</span>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="9 18 15 12 9 6"></polyline>
+            </svg>
+          </div>
+          <div class="settings-row">
+            <span>模块管理</span>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="9 18 15 12 9 6"></polyline>
+            </svg>
+          </div>
+          <div class="settings-row">
+            <span>主题设置</span>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="9 18 15 12 9 6"></polyline>
+            </svg>
+          </div>
+          <div class="settings-row settings-row--danger">
+            <span>退出应用</span>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+              <polyline points="16 17 21 12 16 7"></polyline>
+              <line x1="21" y1="12" x2="9" y2="12"></line>
+            </svg>
+          </div>
+        </div>
+
+        <!-- Section C: System monitoring config -->
+        <div class="settings-panel__section">
+          <div class="settings-panel__heading">系统监控配置</div>
+          <label class="settings-check"><input type="checkbox" checked> CPU</label>
+          <label class="settings-check"><input type="checkbox" checked> 内存</label>
+          <label class="settings-check"><input type="checkbox"> 网络</label>
+          <label class="settings-check"><input type="checkbox"> 电源</label>
+        </div>
+
+        <!-- Section D: Taskbar display config -->
+        <div class="settings-panel__section">
+          <div class="settings-panel__heading">任务栏显示</div>
+          <label class="settings-check"><input type="checkbox" checked> 时间</label>
+          <label class="settings-check"><input type="checkbox" checked> CPU使用率</label>
+          <label class="settings-check"><input type="checkbox" checked> 内存使用率</label>
+          <label class="settings-check"><input type="checkbox"> 天气</label>
+        </div>
+      </div>
+
+    </main>
+    <script>lucide.createIcons();</script>
+</body>
+</html>

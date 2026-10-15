@@ -28,6 +28,9 @@ const STATUS_META = {
   failed: { text: "失败", cls: "badge-danger" },
   timeout: { text: "超时", cls: "badge-amber" },
   canceled: { text: "已停止", cls: "badge-neutral" },
+  // 「计划时刻到了但没跑起来」——不是一次执行，所以没有退出码与耗时（后端给 duration=0）。
+  // 徽标用空心红，与热力图的漏跑同款；别退回 badge-danger，那和「失败」撞脸。
+  missed: { text: "漏跑", cls: "badge-missed" },
 };
 
 function relTime(ms) {
@@ -182,7 +185,7 @@ export function taskRowHtml(t, ctx) {
         <div class="sch-meta2">
           ${monthSummaryHtml(c.monthHeat)}
           ${triggers}
-          ${c.lastRun ? `<span>上次 <span data-rel="${c.lastRun.startedAt}">${relTime(c.lastRun.startedAt)}</span> · ${fmtDuration(c.lastRun.durationMs)}${c.lastRun.trigger === "catchup" ? " · 补跑" : ""}</span>` : ""}
+          ${c.lastRun ? `<span>上次 <span data-rel="${c.lastRun.startedAt}">${relTime(c.lastRun.startedAt)}</span> · ${c.lastRun.status === "missed" ? "未执行（漏跑）" : `${fmtDuration(c.lastRun.durationMs)}${c.lastRun.trigger === "catchup" ? " · 补跑" : ""}`}</span>` : ""}
           ${c.nextAt && t.enabled && t.scheduleEnabled ? `<span>下次 <span data-next="${c.nextAt}">${fmtClock(c.nextAt)}</span></span>` : ""}
         </div>
         ${t.note ? `<div class="sch-note">${esc(t.note)}</div>` : ""}
@@ -230,6 +233,9 @@ export function heatWorstOf(agg) {
   if (n("bad") > 0) return "bad";
   if (n("warn") > 0) return "warn";
   if (n("stop") > 0) return "stop";
+  // 漏跑（后端留痕的那种）排在成功之前：一天里既有跑成功的、也有压根没跑起来的，
+  // 画成绿色会把「静默漏掉」这一半藏起来 —— 而「藏起来」正是漏跑最坏的地方。
+  if (n("missed") > 0) return "missed";
   if (n("ok") > 0) return "ok";
   return null;
 }
@@ -365,8 +371,12 @@ export function monthHeatModel(t, daily, ctx) {
       if (n("bad")) parts.push(`失败 ×${n("bad")}`);
       if (n("warn")) parts.push(`超时 ×${n("warn")}`);
       if (n("stop")) parts.push(`已停止 ×${n("stop")}`);
+      if (n("missed")) parts.push(`漏跑 ×${n("missed")}`);
       tip = `${dateTip} · ${parts.join("，")}`;
-      if (worst === "ok") ok++; else failed++;
+      // 格子按「最差」着色、摘要按格子计数 ⇒ 两者必须永远对得上（否则会出现红格子配「成功1」）
+      if (worst === "ok") ok++;
+      else if (worst === "missed") miss++;
+      else failed++;
     } else if (today > 0 && d > today) {
       kind = "future";
       tip = `${dateTip} · 未到`;
@@ -484,7 +494,7 @@ export function renderScheduler(view) {
       `<span>面板内调度 <b>${scheduled}</b> 个</span>`,
       `<span>运行中 <b>${running}</b>/${s.maxConcurrent}</span>`,
       `<span>${esc(nextTxt)}</span>`,
-      `<span>启动补跑 <b>${s.catchUp ? "开" : "关"}</b></span>`,
+      `<span>补跑 <b>${s.catchUp ? "开" : "关"}</b></span>`,
     ].join('<i class="sch-sep"></i>');
   }
 
@@ -1110,12 +1120,16 @@ export function renderScheduler(view) {
       body.innerHTML = runs.map((r, i) => {
         const m = STATUS_META[r.status] || STATUS_META.failed;
         const tg = r.trigger === "cron" ? "定时" : r.trigger === "catchup" ? "补跑" : "手动";
+        // 漏跑不是一次执行：没有耗时、没有退出码。写「0ms · 定时」会把「压根没跑起来」说得像「跑了」
+        const meta = r.status === "missed"
+          ? `未执行 · ${tg}`
+          : `${fmtDuration(r.durationMs)} · ${tg}${r.exitCode != null ? ` · 退出码 ${r.exitCode}` : ""}`;
         return `
           <div class="sch-run" data-open="${i === 0 ? "1" : "0"}">
             <div class="sch-run-head">
               <span class="badge ${m.cls}">${m.text}</span>
               <span class="sch-run-time">${esc(new Date(r.startedAt).toLocaleString("zh-CN"))}</span>
-              <span class="sch-run-meta">${fmtDuration(r.durationMs)} · ${tg}${r.exitCode != null ? ` · 退出码 ${r.exitCode}` : ""}</span>
+              <span class="sch-run-meta">${meta}</span>
             </div>
             <pre class="sch-logtext">${esc(r.output || "（无输出）")}</pre>
           </div>`;
@@ -1165,9 +1179,10 @@ export function renderScheduler(view) {
           <label>并发上限（同时运行的任务数）</label>
           <input id="ss-max" type="number" min="1" max="8" value="${s.maxConcurrent}" />
         </div>
-        <label class="sch-sw"><input type="checkbox" id="ss-catchup"${s.catchUp ? " checked" : ""} /><span>启动时补跑错过的任务</span></label>
+        <label class="sch-sw"><input type="checkbox" id="ss-catchup"${s.catchUp ? " checked" : ""} /><span>补跑错过的任务</span></label>
         <div class="sch-hint">
-          补跑仅针对「app 未运行期间错过」的任务，且只补最近 6 小时内到期的（避免开机后涌出一堆过期任务）。
+          某个计划时刻到点时本进程没在转（app 未运行，或系统休眠/待机把进程冻住了），恢复后就会补跑它；
+          只补最近 6 小时内到期的，超出窗口的不补 —— 但会在运行历史里留一条「漏跑」，不会再静默消失。
           并发满时不会丢弃触发，而是等到有空位再执行。
         </div>
         <div class="tm-actions">

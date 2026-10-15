@@ -45,7 +45,8 @@ const OUT_CAP: usize = MAX_OUTPUT * 2;
 const OUT_CLIPPED: &str = "\n…（输出超过上限，后续内容已丢弃）";
 /// 单条实时日志事件的分片上限。
 const CHUNK: usize = 8_000;
-/// 错过执行的补跑窗口：超过该时长不再补跑（避免开机后突然涌出一堆过期任务）。
+/// 错过执行的补跑窗口：迟到超过该时长就不再补跑（避免开机/待机恢复后突然涌出一堆过期任务）。
+/// ⚠ 这是**补跑唯一的闸门** —— 2026-10-11 去掉了额外叠在它上面的「仅启动首轮」限制（见 `due_action`）。
 const CATCHUP_WINDOW_MS: i64 = 6 * 60 * 60 * 1000;
 /// Windows CREATE_NO_WINDOW：GUI 子系统进程里跑控制台程序不弹窗。
 #[cfg(windows)]
@@ -145,6 +146,11 @@ pub struct DayAgg {
     pub warn: u32,
     #[serde(default)]
     pub stop: u32,
+    /// 「错过了计划时刻、且没补跑」的次数。
+    /// ⛔ 必须与 `stop`（用户主动停止）分开：漏跑是**根本没启动**，混进 `stop` 会被画成
+    /// 「已停止」的浅灰，等于把「静默漏掉」藏起来 —— 与 `daily`/`runs` 解耦同一个动机。
+    #[serde(default)]
+    pub missed: u32,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -330,6 +336,7 @@ fn bump_daily(daily: &mut HashMap<String, HashMap<String, DayAgg>>, rec: &RunRec
         "success" => e.ok += 1,
         "failed" => e.bad += 1,
         "timeout" => e.warn += 1,
+        "missed" => e.missed += 1,
         _ => e.stop += 1,
     }
 }
@@ -346,6 +353,22 @@ fn prune_daily(daily: &mut HashMap<String, HashMap<String, DayAgg>>) {
             map.remove(k);
         }
     }
+}
+
+/// 把一条记录并入 store 并落盘。
+///
+/// **一处真相**：执行结束（`start_run`）与「漏跑留痕」（`record_missed`）都走这里 ——
+/// 两边各写一份「累加 → insert(0) → 截断 → prune → 落盘」必然有一天不同步
+/// （漏的通常是截断或 prune，副作用是记录无限长）。
+/// ⚠ 顺序不能反：`bump_daily` 要在 `runs.insert`（move）**之前**。
+fn push_run(app: &AppHandle, store: &mut Store, rec: RunRecord) {
+    bump_daily(&mut store.daily, &rec);
+    store.runs.insert(0, rec);
+    if store.runs.len() > MAX_RUNS {
+        store.runs.truncate(MAX_RUNS);
+    }
+    prune_daily(&mut store.daily);
+    write_store(app, store);
 }
 
 /// 截断到字符边界，避免把多字节 UTF-8 切坏。
@@ -1134,14 +1157,7 @@ fn start_run(app: &AppHandle, st: &SchedulerState, t: &TaskDef, trigger: &str) -
         };
         {
             let mut store = state.store.lock().expect("store lock");
-            // 先累加再 move 进 runs（顺序不能反）
-            bump_daily(&mut store.daily, &rec);
-            store.runs.insert(0, rec);
-            if store.runs.len() > MAX_RUNS {
-                store.runs.truncate(MAX_RUNS);
-            }
-            prune_daily(&mut store.daily);
-            write_store(&app2, &store);
+            push_run(&app2, &mut store, rec);
         }
         state.runs.lock().expect("runs lock").remove(&rid);
         let _ = app2.emit(
@@ -1175,14 +1191,9 @@ pub fn start_scheduler(app: AppHandle) {
         }
         *st.store.lock().expect("store lock") = store;
     }
-    std::thread::spawn(move || {
-        // 首轮允许补跑：上次运行期间错过的任务在这里被捡回来
-        let mut first = true;
-        loop {
-            tick(&app, first);
-            first = false;
-            std::thread::sleep(TICK);
-        }
+    std::thread::spawn(move || loop {
+        tick(&app);
+        std::thread::sleep(TICK);
     });
 }
 
@@ -1194,7 +1205,92 @@ fn set_due(app: &AppHandle, st: &SchedulerState, task_id: &str, due: i64) {
     write_store(app, &s);
 }
 
-fn tick(app: &AppHandle, allow_catchup: bool) {
+/// 一次「到点」该怎么处置。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DueAction {
+    /// 到点后一个 tick 内发现 ⇒ 正常触发
+    Run,
+    /// 迟到超过一个 tick：确实错过了那一时刻，且允许补跑
+    Catchup,
+    /// 错过了但不补跑（原因会写进运行历史）
+    Skip(&'static str),
+}
+
+/// 判定「这次到点该怎么处置」。
+///
+/// 抽成纯函数只为一件事：能**脱离 `AppHandle` 单测**（`tick` 要 AppHandle，根本测不了，
+/// 判定逻辑一直躲在它里面）。
+///
+/// 为什么「迟到超过一个 tick」本身就是「错过了」的充分证据：
+/// 循环每 20s 转一圈，正常运转时某次到点必然在 `due` 之后的**一个 tick 之内**被看到。
+/// 能迟到超过一个 tick，只可能是那段时间**循环没在转** —— 应用没运行，或系统休眠/待机
+/// 把进程冻住了。所以不需要再叠一层「仅启动首轮」的闸门：
+/// 那层闸门管不住「应用开着但机器睡了」（唤醒后它早已不是首轮），而这恰恰是常驻桌面应用
+/// 最常见的情形 —— 2026-10-11 实测：待机跨过 10:00，4 条签到被静默吞掉、零记录。
+/// 真正需要防的「开机后把积压的若干次全补出来」由 `CATCHUP_WINDOW_MS` 兜住。
+fn due_action(late_ms: i64, tick_ms: i64, catchup_on: bool) -> DueAction {
+    if late_ms <= tick_ms {
+        return DueAction::Run;
+    }
+    if !catchup_on {
+        return DueAction::Skip("全局「补跑」开关已关闭");
+    }
+    if late_ms > CATCHUP_WINDOW_MS {
+        return DueAction::Skip("已超出 6 小时补跑窗口");
+    }
+    DueAction::Catchup
+}
+
+/// ms 时间戳 → 本地「YYYY-MM-DD HH:MM:SS」。
+/// 写进运行历史给用户看的时刻必须是**本地时间**（与 `day_key` 同口径）。
+fn fmt_local(ms: i64) -> String {
+    use chrono::{Local, TimeZone};
+    Local
+        .timestamp_millis_opt(ms)
+        .single()
+        .map(|d| d.format("%Y-%m-%d %H:%M:%S").to_string())
+        .unwrap_or_else(|| ms.to_string())
+}
+
+/// 时长 → 人读文案（分钟 / 小时）
+fn fmt_span(ms: i64) -> String {
+    let mins = ms.max(0) / 60_000;
+    if mins < 60 {
+        format!("{mins} 分钟")
+    } else {
+        format!("{:.1} 小时", mins as f64 / 60.0)
+    }
+}
+
+/// 记一条「错过了计划时刻」的记录。
+///
+/// 它不是一次执行：`duration_ms = 0`、没有退出码。`started_at` 取**应触发的时刻**而不是
+/// 发现它的时刻 —— 这样它落在「漏跑那一天」的格子里，而不是被顺延记到第二天。
+/// 跑还是没跑，在运行历史里必须能一眼分开（否则「静默漏掉」和「压根没这任务」长得一模一样）。
+fn record_missed(app: &AppHandle, st: &SchedulerState, t: &TaskDef, due: i64, late: i64, reason: &str) {
+    let rec = RunRecord {
+        run_id: format!("miss{}", st.seq.fetch_add(1, Ordering::Relaxed)),
+        task_id: t.id.clone(),
+        name: t.name.clone(),
+        trigger: "cron".into(),
+        started_at: due,
+        duration_ms: 0,
+        status: "missed".into(),
+        exit_code: None,
+        output: format!(
+            "[漏跑] 计划时刻 {} 未执行：{}\n迟到 {}，本次不补跑，下次触发已顺延。\n\
+             （该时刻本进程没在转：应用未运行，或系统休眠/待机把进程冻住了；补跑窗口 {} 小时）",
+            fmt_local(due),
+            reason,
+            fmt_span(late),
+            CATCHUP_WINDOW_MS / 3_600_000,
+        ),
+    };
+    let mut store = st.store.lock().expect("store lock");
+    push_run(app, &mut store, rec);
+}
+
+fn tick(app: &AppHandle) {
     let (tasks, (max_conc, catchup_on)) = read_tick_config(app);
     if tasks.is_empty() {
         return;
@@ -1229,10 +1325,16 @@ fn tick(app: &AppHandle, allow_catchup: bool) {
             continue;
         }
 
-        // 迟到超过一个 tick 视为「错过」：只有启动首轮 + 全局开启补跑 + 未超出补跑窗口才执行
+        // 到点后一个 tick 内发现 ⇒ 正常触发；迟到超过一个 tick ⇒ 那一时刻真的错过了
+        // （循环 20s 一轮，正常运转不可能迟到这么久 ⇒ 只能是我们那段时间没在转：
+        //  应用没运行，或系统休眠/待机把进程冻住了）。判定细则见 `due_action`。
         let late = now - due;
-        let catchup = late > tick_ms;
-        if catchup && !(allow_catchup && catchup_on && late <= CATCHUP_WINDOW_MS) {
+        let action = due_action(late, tick_ms, catchup_on);
+
+        // 放弃补跑：**先留痕、再顺延**。不留痕的话，「应跑没跑」在界面上与「那会儿还没这任务」
+        // 长得一模一样 —— 这正是 2026-10-11 那次最难查的地方（四条签到一条记录都没有）。
+        if let DueAction::Skip(reason) = action {
+            record_missed(app, state, t, due, late, reason);
             // 不补跑也要把 next_due 推向未来，否则后续每轮都会判定为「已到期」
             if let Some(n) = next_due_after(expr, now) {
                 set_due(app, state, &t.id, n);
@@ -1247,6 +1349,7 @@ fn tick(app: &AppHandle, allow_catchup: bool) {
 
         // 正常触发：从「本次应触发时刻」往后推；补跑则从当前时刻往后推，
         // 避免补跑瞬间又把历史积压的若干次全补出来。
+        let catchup = action == DueAction::Catchup;
         let anchor = if catchup { now } else { due };
         if let Some(n) = next_due_after(expr, anchor) {
             set_due(app, state, &t.id, n);
@@ -1871,5 +1974,69 @@ mod tests {
         assert_eq!(settings_from(&serde_json::json!({ "scheduler": { "maxConcurrent": 99 } })).0, 8);
         assert_eq!(settings_from(&serde_json::json!({ "scheduler": { "maxConcurrent": 0 } })).0, 1);
         assert_eq!(settings_from(&serde_json::json!({ "scheduler": { "maxConcurrent": "x" } })).0, 2);
+    }
+
+    // ---------- 补跑判定（due_action）与漏跑留痕 ----------
+    //
+    // 这组用例为什么存在：2026-10-11「机器待机跨过 10:00 ⇒ 4 条签到静默漏跑」的根因是判据里
+    // 叠了一层「仅启动首轮」，而 `tick` 要 AppHandle、根本没法单测 ⇒ 判定现已抽成纯函数。
+
+    const TICK_MS: i64 = 20_000;
+
+    #[test]
+    fn 到点后一个tick内视为正常触发() {
+        assert_eq!(due_action(0, TICK_MS, true), DueAction::Run);
+        assert_eq!(due_action(TICK_MS, TICK_MS, true), DueAction::Run, "边界取等号算准时");
+        assert_eq!(due_action(TICK_MS, TICK_MS, false), DueAction::Run, "准时与补跑开关无关");
+    }
+
+    #[test]
+    fn 迟到超过一个tick就要补跑() {
+        assert_eq!(due_action(TICK_MS + 1, TICK_MS, true), DueAction::Catchup);
+        // 待机 2h31m 后恢复 —— 10-11 那 4 条签到的真实迟到量，必须能补
+        assert_eq!(due_action(151 * 60_000, TICK_MS, true), DueAction::Catchup);
+        // 窗口边界：正好 6 小时还补；多 1ms 就不补
+        assert_eq!(due_action(CATCHUP_WINDOW_MS, TICK_MS, true), DueAction::Catchup);
+        assert_eq!(
+            due_action(CATCHUP_WINDOW_MS + 1, TICK_MS, true),
+            DueAction::Skip("已超出 6 小时补跑窗口")
+        );
+    }
+
+    #[test]
+    fn 开关关闭时迟到也不补跑且原因单独区分() {
+        assert_eq!(
+            due_action(2 * 60_000, TICK_MS, false),
+            DueAction::Skip("全局「补跑」开关已关闭")
+        );
+        // 同时「开关关 + 超窗口」时报开关：那是用户主动关的，不是窗口的问题
+        assert_eq!(
+            due_action(CATCHUP_WINDOW_MS + 1, TICK_MS, false),
+            DueAction::Skip("全局「补跑」开关已关闭")
+        );
+    }
+
+    #[test]
+    fn 漏跑进独立桶而不是已停止() {
+        let mut daily: HashMap<String, HashMap<String, DayAgg>> = HashMap::new();
+        let t0 = local_midnight(2026, 10, 11) + 10 * 3600_000;
+        bump_daily(&mut daily, &rec("a", t0, "missed"));
+        bump_daily(&mut daily, &rec("a", t0 + 60_000, "missed"));
+        let a = daily.get("a").expect("应有数据").get("2026-10-11").expect("当天");
+        assert_eq!((a.missed, a.stop, a.bad), (2, 0, 0), "漏跑不能混进 stop（那是用户主动停的）");
+    }
+
+    #[test]
+    fn 漏跑记录的时间戳归到应触发那一天() {
+        // record_missed 拿 due（而不是发现它的时刻）当 started_at ——
+        // 待机到第二天才恢复时，记录必须留在「漏掉的那一天」，否则热力图上凭空多一天、少一天
+        let due = local_midnight(2026, 10, 11) + 10 * 3600_000;
+        assert_eq!(day_key(due), "2026-10-11");
+        // 迟到文案：分钟 / 小时两档
+        assert_eq!(fmt_span(20 * 60_000), "20 分钟");
+        assert_eq!(fmt_span(151 * 60_000), "2.5 小时");
+        // 本地时刻格式化（必须与 day_key 同一天，别偷偷用 UTC）
+        assert_eq!(fmt_local(due), "2026-10-11 10:00:00");
+        assert_eq!(&fmt_local(due)[..10], day_key(due));
     }
 }

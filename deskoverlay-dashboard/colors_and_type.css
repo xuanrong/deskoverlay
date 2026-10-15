@@ -1,0 +1,145 @@
+/* =====================================================================
+   DeskOverlay Dashboard — Design Tokens
+   Dark glassmorphism · semi-transparent panels · blue accent
+   Brand prefix: do (DeskOverlay)
+   ===================================================================== */
+
+/* ============ Root Tokens ============ */
+:root {
+  /* --- Background layers --- */
+  --do-bg-base: #0a0e15;
+  --do-bg-panel: rgba(16, 20, 28, 0.72);
+  --do-bg-panel-2: rgba(22, 27, 36, 0.66);
+  --do-bg-elevated: rgba(31, 38, 50, 0.92);
+  --do-bg-input: #111820;
+  --do-bg-hover: rgba(255, 255, 255, 0.06);
+  --do-bg-hover-strong: rgba(255, 255, 255, 0.1);
+  --do-soft-bg: rgba(255, 255, 255, 0.05);
+  --do-track: rgba(255, 255, 255, 0.16);
+
+  /* --- Semantic aliases (required by apply-html-head-contract.mjs) --- */
+  --do-background: #0a0e15;
+  --do-foreground: #e6edf3;
+  --do-card: rgba(22, 27, 36, 0.66);
+  --do-card-foreground: #e6edf3;
+  --do-popover: rgba(31, 38, 50, 0.95);
+  --do-popover-foreground: #e6edf3;
+  --do-primary: #58a6ff;
+  --do-primary-foreground: #061014;
+  --do-secondary: rgba(255, 255, 255, 0.06);
+  --do-secondary-foreground: #e6edf3;
+  --do-muted: rgba(255, 255, 255, 0.05);
+  --do-muted-foreground: #9aa7b4;
+  --do-accent: #58a6ff;
+  --do-accent-foreground: #061014;
+  --do-destructive: #ff7b72;
+  --do-destructive-foreground: #061014;
+
+  /* --- Borders & rings --- */
+  --do-border: rgba(255, 255, 255, 0.1);
+  --do-border-strong: rgba(255, 255, 255, 0.18);
+  --do-input: #2a3340;
+  --do-ring: rgba(88, 166, 255, 0.4);
+
+  /* --- Text hierarchy --- */
+  --do-text: #e6edf3;
+  --do-text-dim: #9aa7b4;
+  --do-text-faint: #5b6675;
+  --do-text-invert: #061014;
+
+  /* --- Semantic state colors --- */
+  --do-blue: #58a6ff;
+  --do-green: #3fb950;
+  --do-amber: #d29922;
+  --do-danger: #ff7b72;
+  --do-purple: #bc8cff;
+  --do-cyan: #39c5cf;
+  --do-tomato: #ff6b5e;
+
+  /* --- RGB components --- */
+  --do-blue-rgb: 88, 166, 255;
+  --do-green-rgb: 63, 185, 80;
+  --do-amber-rgb: 210, 153, 34;
+  --do-danger-rgb: 255, 123, 114;
+  --do-purple-rgb: 188, 140, 255;
+  --do-cyan-rgb: 57, 197, 207;
+
+  /* --- Typography --- */
+  --do-font: "Segoe UI Variable", "Segoe UI", "Microsoft YaHei", "PingFang SC", Inter, system-ui, sans-serif;
+  --do-font-mono: "Cascadia Mono", "JetBrains Mono", Consolas, monospace;
+
+  /* --- Spacing (4px grid) --- */
+  --do-sp-1: 4px;
+  --do-sp-2: 8px;
+  --do-sp-3: 12px;
+  --do-sp-4: 16px;
+  --do-sp-5: 20px;
+  --do-sp-6: 24px;
+  --do-sp-8: 32px;
+
+  /* --- Radius scale --- */
+  --do-radius-xs: 6px;
+  --do-radius-sm: 10px;
+  --do-radius-md: 14px;
+  --do-radius-lg: 18px;
+  --do-radius-full: 999px;
+
+  /* --- Shadows --- */
+  --do-shadow-xs: 0 1px 3px rgba(0, 0, 0, 0.25);
+  --do-shadow-sm: 0 4px 14px rgba(0, 0, 0, 0.3);
+  --do-shadow-soft: 0 8px 24px rgba(0, 0, 0, 0.35);
+  --do-shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
+  --do-shadow-lg: 0 30px 80px rgba(0, 0, 0, 0.6);
+
+  /* --- Transitions --- */
+  --do-t-fast: 120ms ease;
+  --do-t: 200ms cubic-bezier(0.22, 0.61, 0.36, 1);
+  --do-t-slow: 300ms ease;
+
+  /* --- Layout --- */
+  --do-grid-gap: 12px;
+  --do-grid-cell: 1fr;
+  --do-taskbar-h: 52px;
+  --do-blur: 20px;
+
+  /* --- Chart colors --- */
+  --do-chart-cpu: #58a6ff;
+  --do-chart-ram: #3fb950;
+  --do-chart-net: #bc8cff;
+}
+
+/* ============ Dark mode class ============ */
+html.dark {
+  color-scheme: dark;
+}
+
+html {
+  background: var(--do-background);
+  color: var(--do-foreground);
+  font-family: var(--do-font);
+}
+
+body {
+  margin: 0;
+  background: var(--do-background);
+  color: var(--do-foreground);
+  font-family: var(--do-font);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(120, 130, 150, 0.3);
+  border-radius: 6px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(120, 130, 150, 0.5);
+}

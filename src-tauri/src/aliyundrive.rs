@@ -787,7 +787,7 @@ fn serve_audio(
     // 故将窗口均分 4 段并行 Range 拉取，按序转发给媒体栈 + 逐块入预读缓存。
     const STREAM_PAR: usize = 4;
     let seg_len = PREFETCH_WINDOW / STREAM_PAR as u64;
-    let n_segs = if window_len == 0 { 0 } else { ((window_len + seg_len - 1) / seg_len) as usize };
+    let n_segs = if window_len == 0 { 0 } else { window_len.div_ceil(seg_len) as usize };
     let slots: std::sync::Arc<std::sync::Mutex<Vec<Option<Vec<u8>>>>> =
         std::sync::Arc::new(std::sync::Mutex::new(vec![None; n_segs]));
     let cv = std::sync::Arc::new(std::sync::Condvar::new());
@@ -1250,6 +1250,19 @@ pub fn ad_upload_list() -> Result<Vec<serde_json::Value>, String> {
         .collect();
     out.sort_by_key(|v| -(v["id"].as_u64().unwrap_or(0) as i64));
     Ok(out)
+}
+
+/// 获取云盘文件直链（OSS 原始地址，带时效 token）——供「下载到本地」使用
+/// （流式服务地址不能用于下载：无 Range 的 GET 只返回预读窗口前 4MB）。
+#[tauri::command]
+pub async fn ad_direct_url(app: AppHandle, file_id: String) -> Result<String, String> {
+    if file_id.is_empty() || file_id.contains('/') || file_id.contains('\\') {
+        return Err("非法 file_id".to_string());
+    }
+    let app2 = app.clone();
+    tauri::async_runtime::spawn_blocking(move || cached_url(&app2, &file_id, false))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 // ── 音频内嵌元数据（歌词 + 封面） ─────────────────────────────

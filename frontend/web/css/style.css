@@ -1152,6 +1152,10 @@ html {
 .badge-danger { background: rgba(var(--danger-rgb), 0.15); color: var(--danger); }
 .badge-purple { background: rgba(var(--purple-rgb), 0.15); color: var(--purple); }
 .badge-neutral{ background: var(--bg-hover); color: var(--text-dim); }
+/* 漏跑：沿用热力图那套「空心=没跑起来 / 实心=跑失败」的视觉语法，
+   否则「漏跑」与「失败」同用一个实心红，扫一眼分不出「根本没启动」和「启动了但失败」 */
+.badge-missed { background: rgba(var(--danger-rgb), 0.07); color: var(--danger);
+                box-shadow: inset 0 0 0 1px rgba(var(--danger-rgb), 0.6); }
 
 /* ---------- 列表行（hover 反馈） ---------- */
 .list-row {
@@ -1619,6 +1623,42 @@ html {
 .queue-item.cur .qi-idx { color: var(--blue); font-weight: 700; }
 .qi-title { color: var(--text); flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .qi-artist { color: var(--text-dim); flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qi-dl {
+  flex: 0 0 auto; padding: 4px 6px; border-radius: 6px;
+  border: 1px solid transparent; background: transparent;
+  color: var(--text-dim); cursor: pointer; line-height: 1;
+  transition: all var(--t-fast);
+}
+.qi-dl:hover { color: var(--blue); background: var(--bg-hover); }
+.qi-dl svg, .qi-fav svg {
+  width: 14px; height: 14px; display: block;
+  fill: none; stroke: currentColor; stroke-width: 1.8;
+  stroke-linecap: round; stroke-linejoin: round;
+}
+.qi-fav {
+  flex: 0 0 auto; padding: 4px 6px; border-radius: 6px;
+  border: 1px solid transparent; background: transparent;
+  color: var(--text-dim); cursor: pointer; line-height: 1;
+  transition: all var(--t-fast);
+}
+.qi-fav:hover { color: var(--cyan); background: var(--bg-hover); }
+.qi-fav.active { color: var(--cyan); }
+.qi-fav.active svg { fill: currentColor; }
+#mc-moremenu {
+  position: fixed; z-index: 16000;
+  min-width: 150px; padding: 4px;
+  background: var(--bg-elevated, rgba(20,24,32,.96));
+  border: 1px solid var(--border-strong); border-radius: 10px;
+  box-shadow: 0 10px 28px rgba(0,0,0,.45);
+  backdrop-filter: blur(18px);
+}
+#mc-moremenu .dl-q-item { flex-direction: row; align-items: center; gap: 8px; }
+#mc-moremenu .dl-q-item svg {
+  width: 15px; height: 15px; flex: 0 0 15px; display: block;
+  fill: none; stroke: currentColor; stroke-width: 1.8;
+  stroke-linecap: round; stroke-linejoin: round;
+}
+#mc-moremenu .dl-q-item:hover { background: var(--bg-hover); color: var(--text); }
 .q-random-on { font-size: 11px; color: var(--blue); margin-left: 8px; }
 
 /* 音源管理弹窗：双区布局（左列表 + 右添加面板） */

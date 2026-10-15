@@ -480,7 +480,7 @@ function toggleRandom() {
 // 本地/无 song 数据回退 url。songIdentity 用插件歌曲的唯一字段，缺失时退化为标题+歌手。
 function songIdentity(song) {
   if (!song) return "";
-  return String(song.hash ?? song.id ?? song.songId ?? song.copyrightId ?? `${song.title || song.name || ""}|${song.artist || ""}`);
+  return String(song.hash ?? song.id ?? song.songId ?? song.copyrightId ?? song.fileId ?? `${song.title || song.name || ""}|${song.artist || ""}`);
 }
 function favKeyOf(f) {
   return f.srcId && f.song ? `p:${f.srcId}:${songIdentity(f.song)}` : (f.url || "");
@@ -876,13 +876,17 @@ function renderFavoritesInto(el) {
 function playFavorites(idx) {
   const favs = state.favorites || [];
   if (!favs.length) return;
-  playQueue = favs.map((f) => ({
-    meta: { title: f.title, artist: f.artist, artwork: f.artwork },
-    song: f.song || null,
-    srcId: f.srcId || null,
-    url: f.url || "",
-    type: "喜欢",
-  }));
+  playQueue = favs.map((f) => {
+    // 云盘收藏项（song.fileId + srcId cloud）标记为云盘类型，取流走 loadQueueItem 云盘分支
+    const isCloud = !!(f.song && f.song.fileId && (!f.srcId || f.srcId === "cloud"));
+    return {
+      meta: { title: f.title, artist: f.artist, artwork: f.artwork },
+      song: f.song || null,
+      srcId: f.srcId || null,
+      url: f.url || "",
+      type: isCloud ? "云盘" : "喜欢",
+    };
+  });
   queueIndex = Math.max(0, Math.min(idx, playQueue.length - 1));
   loadQueueItem(queueIndex);
 }
@@ -897,12 +901,20 @@ function showQueue() {
     <div class="task-modal queue-modal">
       <h3>播放队列 <span class="dash-count">${playQueue.length}</span>${randomMode ? ' <span class="q-random-on">${ICON_SHUFFLE} 随机</span>' : ""}</h3>
       <div class="queue-list">
-        ${playQueue.length ? playQueue.map((it, i) => `
+        ${playQueue.length ? playQueue.map((it, i) => {
+          const favKey = it.song && (it.srcId || it.song.fileId)
+            ? favKeyOf({ url: "", song: it.song, srcId: it.srcId || (it.song.fileId ? "cloud" : null) })
+            : null;
+          const faved = favKey && (state.favorites || []).some((f) => favKeyOf(f) === favKey);
+          return `
           <div class="queue-item${i === queueIndex ? " cur" : ""}" data-i="${i}">
             <span class="qi-idx">${i + 1}</span>
             <span class="qi-title">${esc(it.meta.title || "")}</span>
             <span class="qi-artist">${esc(it.meta.artist || "")}</span>
-          </div>`).join("") : `<div class="dash-empty">队列为空</div>`}
+            ${favKey ? `<button class="qi-fav${faved ? " active" : ""}" data-fav="${i}" title="${faved ? "取消喜欢" : "加到喜欢"}">${ICON_HEART}</button>` : ""}
+            <button class="qi-dl" data-dl="${i}" title="下载">${ICON_DOWNLOAD}</button>
+          </div>`;
+        }).join("") : `<div class="dash-empty">队列为空</div>`}
       </div>
       <div class="tm-actions"><button class="tm-cancel q-locate" title="滚动到正在播放的歌曲">${ICON_LOCATE}<span>定位当前</span></button><button class="btn-primary cm-ok">关闭</button></div>
     </div>`;
@@ -934,6 +946,44 @@ function showQueue() {
     row.addEventListener("click", () => {
       loadQueueItem(Number(row.dataset.i));
       close();
+    });
+  });
+  // 行内收藏按钮：与音源行 ♡ 同一套收藏体系（云盘按 fileId、在线按 srcId+song）
+  ov.querySelectorAll(".qi-fav").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const it = playQueue[Number(btn.dataset.fav)];
+      if (!it || !it.song) return;
+      const srcId = it.srcId === "cloud" || it.song.fileId ? "cloud" : it.srcId;
+      toggleFavSong(it.song, srcId, { title: it.meta.title, artist: it.meta.artist });
+      const faved = (state.favorites || []).some((f) =>
+        favKeyOf(f) === favKeyOf({ url: "", song: it.song, srcId }));
+      btn.classList.toggle("active", faved);
+      btn.title = faved ? "取消喜欢" : "加到喜欢";
+    });
+  });
+  // 行内下载按钮：云盘歌曲保持原始音质直接下；在线歌曲走音质选择（不触发播放/关闭）
+  ov.querySelectorAll(".qi-dl").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const it = playQueue[Number(btn.dataset.dl)];
+      if (!it) return;
+      if (it.type === "云盘" && it.song?.fileId) {
+        downloadCloudSong(it.song.fileId, it.meta.title, it.meta.artist, it.song.ext || "")
+          .then(toast)
+          .catch((err) => toast(String(err && err.message || err)));
+      } else if (it.song && it.srcId) {
+        const src = (state.musicSources || []).find((x) => x.id === it.srcId);
+        if (src) {
+          showQualityMenu(btn, async (q) => {
+            try { toast(await downloadSong(it.song, src, q)); } catch (err) { toast(String(err && err.message || err)); }
+          });
+        } else {
+          toast("该歌曲的音源已失效，无法下载");
+        }
+      } else {
+        toast("该歌曲不支持下载");
+      }
     });
   });
   // 打开队列时自动定位到当前播放的歌曲（瞬间滚动，不平滑）
@@ -1748,7 +1798,7 @@ export function renderMusic(view) {
   listBtn.addEventListener("click", showQueue);
   body.querySelector("#mc-dl").addEventListener("click", showDownloads);
   body.querySelector("#mc-online").addEventListener("click", openOnlineMusic);
-  body.querySelector("#mc-more").addEventListener("click", () => {});
+  body.querySelector("#mc-more").addEventListener("click", (e) => showMoreMenu(e.currentTarget));
 
   lyricBtnEl = body.querySelector("#mc-lyric");
   lyricBtnEl.addEventListener("click", () => {
@@ -1818,8 +1868,8 @@ function playCloudList(list, index) {
   if (!list || !list.length) return;
   playQueue = list.map((s) => ({
     meta: { title: s.title, artist: "云盘", artwork: null },
-    song: { fileId: s.fileId },
-    srcId: null,
+    song: { fileId: s.fileId, ext: s.ext || "" },
+    srcId: "cloud",
     url: null,
     type: "云盘",
   }));
@@ -1841,6 +1891,70 @@ function bindAdExpiryRetry() {
       .catch(() => {});
   };
   musicAudio.addEventListener("error", onErr, { once: true });
+}
+
+// 云盘歌曲下载到本地：OSS 直链 → 内嵌歌词 → download_start（文件保持原始格式）
+async function downloadCloudSong(fileId, title, artist, ext) {
+  const dlKey = `cloud:${fileId}`;
+  for (const t of dlTasks.values()) {
+    if (t.status !== "failed" && t.key === dlKey) {
+      return t.status === "done" ? "该歌曲已下载" : "该歌曲正在下载中";
+    }
+  }
+  const url = await invoke("ad_direct_url", { fileId });
+  const fext = (ext || "mp3").toLowerCase();
+  const filename = safeFilename(`${artist || "云盘"} - ${title}.${fext}`);
+  // 内嵌歌词同步落盘（拉取失败不阻塞下载）
+  let lyric = null;
+  try {
+    const meta = await invoke("ad_track_meta", { fileId, ext });
+    lyric = meta?.lyric || null;
+  } catch (_) { lyric = null; }
+  const id = await invoke("download_start", { url, filename, lyric, artworkUrl: null });
+  dlTasks.set(id, { key: dlKey, title, artist: artist || "云盘", received: 0, total: 0, status: "running", id });
+  return "已加入下载";
+}
+
+// 下载当前播放歌曲（三点菜单入口）：云盘歌曲保持原始音质直接下；在线歌曲走音质选择
+async function downloadCurrentSong(anchor) {
+  const cs = currentSong;
+  if (!cs) { toast("当前没有播放中的歌曲"); return; }
+  if (cs.type === "云盘" && cs.song?.fileId) {
+    try {
+      toast(await downloadCloudSong(cs.song.fileId, cs.title, cs.artist, cs.song.ext || ""));
+    } catch (e) {
+      toast(String(e && e.message || e));
+    }
+    return;
+  }
+  if (cs.song && cs.srcId) {
+    const src = (state.musicSources || []).find((x) => x.id === cs.srcId);
+    if (src) {
+      showQualityMenu(anchor, async (q) => {
+        try { toast(await downloadSong(cs.song, src, q)); } catch (e) { toast(String(e && e.message || e)); }
+      });
+      return;
+    }
+  }
+  toast("当前歌曲不支持下载");
+}
+
+// 三点菜单：当前歌曲操作（向上弹出，避开底部控制条）
+function showMoreMenu(anchor) {
+  document.getElementById("mc-moremenu")?.remove();
+  const menu = document.createElement("div");
+  menu.id = "mc-moremenu";
+  menu.innerHTML = `<div class="dl-q-item" data-act="download"><span class="dl-q-label">${ICON_DOWNLOAD}<span>下载当前歌曲</span></span></div>`;
+  document.body.appendChild(menu);
+  const r = anchor.getBoundingClientRect();
+  menu.style.left = Math.min(r.left, window.innerWidth - menu.offsetWidth - 8) + "px";
+  menu.style.top = Math.max(8, r.top - menu.offsetHeight - 6) + "px";
+  const close = () => menu.remove();
+  menu.querySelector('[data-act="download"]').addEventListener("click", () => { close(); downloadCurrentSong(anchor); });
+  setTimeout(() => {
+    document.addEventListener("click", (e) => { if (!menu.contains(e.target)) close(); }, { once: true });
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape") close(); }, { once: true });
+  }, 0);
 }
 
 // 云盘歌曲元数据补全：从音频内嵌标签（ID3/Vorbis）提取歌词与封面。
@@ -1960,7 +2074,7 @@ async function loadAdFolder(resultsEl, folderId) {
   }
 }
 
-// 渲染云盘歌曲列表（复用 online-result 行样式；点击即播，不整列表入队——直链时效短，逐首现取）
+// 渲染云盘歌曲列表（复用音源行样式：♡ 收藏 + ⬇ 下载按钮，点击行整列表入队）
 function renderAdFiles(resultsEl, songs, ctx) {
   resultsEl.innerHTML = "";
   if (ctx) {
@@ -1973,14 +2087,43 @@ function renderAdFiles(resultsEl, songs, ctx) {
     resultsEl.appendChild(bar);
   }
   if (!songs.length) return;
+  const favs = state.favorites || [];
+  const keyOfCloud = (s) => `p:cloud:${s.fileId}`;
+  const isFav = (s) => favs.some((f) => favKeyOf(f) === keyOfCloud(s));
   const frag = document.createElement("div");
   frag.innerHTML = songs.slice(0, 200).map((s) => `
     <div class="online-result">
       <span class="mr-play">${ICON_PLAY}</span>
       <span class="mr-title">${esc(s.title)}</span>
       <span class="mr-artist">${esc(s.artist)}</span>
+      <button class="mr-fav${isFav(s) ? " active" : ""}" data-fav="${esc(s.fileId)}" title="${isFav(s) ? "取消喜欢" : "加到喜欢"}">${ICON_HEART}</button>
+      <button class="mr-dl" data-dl="${esc(s.fileId)}" title="下载">${ICON_DOWNLOAD}</button>
     </div>`).join("");
   frag.querySelectorAll(".online-result").forEach((row, idx) => row.addEventListener("click", () => playCloudList(songs, idx)));
+  // ♡ 收藏：与音源行同款 toggleFavSong（song 含 fileId/ext，key 稳定）
+  frag.querySelectorAll(".mr-fav").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const s = songs.find((x) => x.fileId === btn.dataset.fav);
+      if (!s) return;
+      toggleFavSong(s, "cloud", { title: s.title, artist: s.artist });
+      btn.classList.toggle("active");
+      btn.title = btn.classList.contains("active") ? "取消喜欢" : "加到喜欢";
+    });
+  });
+  // ⬇ 下载：云盘歌曲保持原始音质直接下
+  frag.querySelectorAll(".mr-dl").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const s = songs.find((x) => x.fileId === btn.dataset.dl);
+      if (!s) return;
+      btn.disabled = true;
+      downloadCloudSong(s.fileId, s.title, s.artist, s.ext || "")
+        .then(toast)
+        .catch((err) => toast(String(err && err.message || err)))
+        .finally(() => { btn.disabled = false; });
+    });
+  });
   resultsEl.appendChild(frag);
 }
 
