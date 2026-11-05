@@ -3,7 +3,6 @@
 import { renderDashboard } from "./views/dashboard.js";
 import { renderSystem } from "./views/system.js";
 import { renderMusic } from "./views/music.js";
-import { renderRelax } from "./views/relax.js";
 import { renderNotes } from "./views/notes.js";
 import { renderWorkLog } from "./views/worklog.js";
 import { renderIdeabox } from "./views/ideabox.js";
@@ -23,7 +22,6 @@ export const VIEW_RENDERERS = {
   ai: renderAi,
   scheduler: renderScheduler,
   music: renderMusic,
-  relax: renderRelax,
   notes: renderNotes,
   settings: renderSettings,
 };

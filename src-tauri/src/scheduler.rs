@@ -47,7 +47,24 @@ const OUT_CLIPPED: &str = "\n…（输出超过上限，后续内容已丢弃）
 const CHUNK: usize = 8_000;
 /// 错过执行的补跑窗口：迟到超过该时长就不再补跑（避免开机/待机恢复后突然涌出一堆过期任务）。
 /// ⚠ 这是**补跑唯一的闸门** —— 2026-10-11 去掉了额外叠在它上面的「仅启动首轮」限制（见 `due_action`）。
-const CATCHUP_WINDOW_MS: i64 = 6 * 60 * 60 * 1000;
+///
+/// 2026-10-17 由 6h 调到 12h：常驻桌面应用最常见的漏跑是「晚上关机/待机、次日开机」，
+/// 6h 覆盖不到（22:00 睡 → 09:00 开 = 11h，会被判「超窗」而彻底不补）。
+/// 调大窗口**不会**造成「开机后把积压的若干次全补出来」—— 补跑时 `anchor = now`，
+/// 每次只补最近那一跳（见 `tick`）。
+const CATCHUP_WINDOW_MS: i64 = 12 * 60 * 60 * 1000;
+
+/// 自动触发的任务失败/超时后，隔多久重排一次。
+///
+/// 为什么需要它：超时截止时间走 `Instant`（QPC 单调时钟，**睡眠期间照样计时**）。
+/// 2026-10-17 实测：机器 10:37 醒了一下触发补跑 → 随即又睡 → 12:06 真醒，
+/// 此时 5 个任务的 `Instant` 已走 89 分钟 ≫ 300s ⇒ 醒来瞬间全部 `kill_tree` 并记 timeout；
+/// 而 `next_due` 早在 `start_run` 之前就推到明天了 ⇒ **当天彻底作废、零重试**。
+/// 现在改成「失败/超时 ⇒ 15 分钟后重排」，等网络/环境恢复后 tick 自然补上（见 `finish_run`）。
+const RETRY_DELAY_MS: i64 = 15 * 60 * 1000;
+
+/// 单个任务每天最多延迟重试几次（4 × 15min ⇒ 1 小时重试窗口，再不行就等下一个 cron 周期）。
+const RETRY_MAX: u32 = 4;
 /// Windows CREATE_NO_WINDOW：GUI 子系统进程里跑控制台程序不弹窗。
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -151,6 +168,19 @@ pub struct DayAgg {
     /// 「已停止」的浅灰，等于把「静默漏掉」藏起来 —— 与 `daily`/`runs` 解耦同一个动机。
     #[serde(default)]
     pub missed: u32,
+    /// 当天**最后一次**运行的 status（"success" | "failed" | "timeout" | "canceled" | "missed"）。
+    ///
+    /// 热力图按它着色，而不是按「最差」—— **最终结果**才是有意义的代表：
+    /// · 失败 → 重试成功 ⇒ 显示成功
+    /// · 成功 → 随后又失败 ⇒ 显示失败
+    /// ⚠ 这与「取最好」有本质区别：取最好只看「有没有成功过」，不看先后，
+    ///   会把「早上成功、晚上失败」画成绿色而掩盖问题。
+    #[serde(default)]
+    pub last: String,
+    /// `last` 那条运行的时间戳。用于在**乱序**调用（如从 `runs` 回填）时判断先后 ——
+    /// 只有不早于当前记录才覆盖，否则 `last` 会退化成「谁最后被遍历到」。
+    #[serde(default)]
+    pub last_at: i64,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -165,6 +195,22 @@ struct Store {
     /// taskId -> "YYYY-MM-DD" -> 当日聚合。每个任务只保留最近 `DAY_KEEP` 天。
     #[serde(default)]
     daily: HashMap<String, HashMap<String, DayAgg>>,
+    /// taskId -> 当天的延迟重试标记。跨天自动失效（见 `plan_retry`）。
+    #[serde(default)]
+    retry: HashMap<String, RetryMark>,
+}
+
+/// 「今天已经为这个任务重试过几次」。
+///
+/// 带 `day` 是为了**跨天自动清零** —— 否则一次失败会永久占满额度，
+/// 第二天 cron 正常触发却再也不重试了（这种「静默永久失效」最难查）。
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+struct RetryMark {
+    /// "YYYY-MM-DD"（本地时区，与 `day_key` 同口径）
+    #[serde(default)]
+    day: String,
+    #[serde(default)]
+    count: u32,
 }
 
 struct RunCtl {
@@ -332,6 +378,12 @@ fn bump_daily(daily: &mut HashMap<String, HashMap<String, DayAgg>>, rec: &RunRec
         .or_default()
         .entry(key)
         .or_default();
+    // 记「最后一次」：按 started_at 比较，**不是**按调用顺序 —— 从 `runs` 回填是「新→旧」遍历，
+    // 直接赋值会让 `last` 变成当天最早那次，刚好反了。
+    if rec.started_at >= e.last_at {
+        e.last = rec.status.clone();
+        e.last_at = rec.started_at;
+    }
     match rec.status.as_str() {
         "success" => e.ok += 1,
         "failed" => e.bad += 1,
@@ -339,6 +391,39 @@ fn bump_daily(daily: &mut HashMap<String, HashMap<String, DayAgg>>, rec: &RunRec
         "missed" => e.missed += 1,
         _ => e.stop += 1,
     }
+}
+
+/// 就绪升级：给**老版本写下的** `daily` 条目补 `last` / `last_at`。
+///
+/// 为什么必须单独做一次回填：`last` 是后加的字段，旧 `scheduler-store.json` 里没有它，
+/// 反序列化后是空串 ⇒ 前端只能回退到「取最差」⇒ **「先失败、后重试成功」的日子依旧画成失败**，
+/// 也就是本次需求对既有历史数据完全不生效。
+/// ⚠ 这正是本项目屡次踩的「旧值非空 ⇒ 只改默认值不生效」：不能只靠在 `daily.is_empty()` 时
+///   从 runs 重建（`daily` 明明有数据），必须按条目检测缺失。
+///
+/// 幂等：只填 `last` 为空的日子，已有真实值的一律跳过；不重算 ok/bad 等计数（计数本来就在）。
+/// ⚠ `runs` 有条数上限，覆盖不到的老日子补不了 —— 它们继续回退「取最差」，这是诚实的。
+/// 返回是否有改动（决定要不要落盘）。
+fn backfill_last(daily: &mut HashMap<String, HashMap<String, DayAgg>>, runs: &[RunRecord]) -> bool {
+    let mut changed = false;
+    // `runs` 是「新→旧」排列，故每个 (任务, 日) 第一次遇到的就是当天最后一次运行 ——
+    // 不必比较时间戳；填进去之后 `last` 非空，后续更早的记录自然被跳过。
+    for rec in runs {
+        let day = day_key(rec.started_at);
+        if day.is_empty() {
+            continue;
+        }
+        let Some(e) = daily.get_mut(&rec.task_id).and_then(|m| m.get_mut(&day)) else {
+            continue; // 该日聚合已被 prune 掉（或本来就没有）→ 无从回填
+        };
+        if !e.last.is_empty() {
+            continue;
+        }
+        e.last = rec.status.clone();
+        e.last_at = rec.started_at;
+        changed = true;
+    }
+    changed
 }
 
 /// 每个任务只保留最近 `DAY_KEEP` 天。日期键的字典序即时间序，故升序排序后掐头。
@@ -369,6 +454,52 @@ fn push_run(app: &AppHandle, store: &mut Store, rec: RunRecord) {
     }
     prune_daily(&mut store.daily);
     write_store(app, store);
+}
+
+/// 记录一次运行，并在「自动触发 + 失败/超时」时安排当天内的延迟重试。
+///
+/// 一个锁里做三件事（算重试、改 `next_due`、写运行记录）：分开加锁会让
+/// `retry` 计数 / `next_due` / 运行记录三者可能不一致；而且 `push_run` 自己就落盘，
+/// 没必要写两次盘。
+///
+/// 为什么要在这里改 `next_due`：`tick` 是在 `start_run` **之前**就把 `next_due` 推进的
+/// （防止触发瞬间崩溃导致重复触发）。代价就是——失败时它不会回滚。所以必须由任务结束时
+/// 主动把 `next_due` 拉回到「15 分钟后」，否则当天再也没有触发机会。
+fn finish_run(app: &AppHandle, st: &SchedulerState, t: &TaskDef, mut rec: RunRecord) {
+    let now = now_ms();
+    let today = day_key(now);
+    let mut s = st.store.lock().expect("store lock");
+
+    match plan_retry(&rec.status, &rec.trigger, s.retry.get(&t.id), &today, now) {
+        RetryPlan::Reset => {
+            s.retry.remove(&t.id);
+        }
+        RetryPlan::None => {}
+        RetryPlan::Exhausted => {
+            rec.output.push_str(&format!(
+                "\n\n[已放弃重试] 今天已重试 {} 次仍失败，等下一个 cron 周期。",
+                RETRY_MAX
+            ));
+        }
+        RetryPlan::Schedule { count, at } => {
+            s.retry.insert(
+                t.id.clone(),
+                RetryMark {
+                    day: today,
+                    count,
+                },
+            );
+            s.next_due.insert(t.id.clone(), at);
+            rec.output.push_str(&format!(
+                "\n\n[已排重试] {} 后自动重试（今天第 {}/{} 次）。",
+                fmt_span(RETRY_DELAY_MS),
+                count,
+                RETRY_MAX
+            ));
+        }
+    }
+
+    push_run(app, &mut s, rec);
 }
 
 /// 截断到字符边界，避免把多字节 UTF-8 切坏。
@@ -1155,10 +1286,8 @@ fn start_run(app: &AppHandle, st: &SchedulerState, t: &TaskDef, trigger: &str) -
             exit_code: code,
             output: clip(&out, MAX_OUTPUT),
         };
-        {
-            let mut store = state.store.lock().expect("store lock");
-            push_run(&app2, &mut store, rec);
-        }
+        // 失败/超时 ⇒ 在同一次加锁里把 next_due 重排到 15 分钟后（见 finish_run）
+        finish_run(&app2, state, &t2, rec);
         state.runs.lock().expect("runs lock").remove(&rid);
         let _ = app2.emit(
             "scheduler://done",
@@ -1177,6 +1306,7 @@ pub fn start_scheduler(app: AppHandle) {
     {
         let st: State<SchedulerState> = app.state();
         let mut store = read_store(&app);
+        let mut dirty = false;
         // 老版本没有 `daily` 字段（升级上来的用户）→ 从现有 runs 回填一次，
         // 否则热力图要等好几天才画得出来。
         // ⚠ 回填只能覆盖 runs 还在的范围；更早的日子会显示成「无数据（斜纹）」——
@@ -1187,6 +1317,14 @@ pub fn start_scheduler(app: AppHandle) {
                 bump_daily(&mut store.daily, rec);
             }
             prune_daily(&mut store.daily);
+            dirty = true;
+        }
+        // 就绪升级：`daily` 有数据但条目缺 `last`（老版本写的）→ 从 runs 补，否则热力图
+        // 对今天「先失败、后重试成功」仍显示失败。见 `backfill_last` 的说明。
+        if backfill_last(&mut store.daily, &store.runs) {
+            dirty = true;
+        }
+        if dirty {
             write_store(&app, &store);
         }
         *st.store.lock().expect("store lock") = store;
@@ -1236,9 +1374,61 @@ fn due_action(late_ms: i64, tick_ms: i64, catchup_on: bool) -> DueAction {
         return DueAction::Skip("全局「补跑」开关已关闭");
     }
     if late_ms > CATCHUP_WINDOW_MS {
-        return DueAction::Skip("已超出 6 小时补跑窗口");
+        // ⚠ 不带具体小时数：`Skip` 是 `&'static str`，写死数字会与实际常量脱钩。
+        // 具体窗口时长由 `record_missed` 拼进输出（那里能读到 CATCHUP_WINDOW_MS）。
+        return DueAction::Skip("已超出补跑窗口");
     }
     DueAction::Catchup
+}
+
+/// 一次运行结束后，要不要为「失败/超时」安排延迟重试。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RetryPlan {
+    /// 不需要动（用户主动取消 / 手动触发）
+    None,
+    /// 成功：把今天的计数清掉，下次失败重新给满额度
+    Reset,
+    /// 重排到 `at`，这是今天的第 `count` 次重试
+    Schedule { count: u32, at: i64 },
+    /// 今天额度已用尽
+    Exhausted,
+}
+
+/// 判定「失败/超时后是否要延迟重试」。
+///
+/// 与 `due_action` 同样抽成纯函数，只为能脱离 `AppHandle` 单测
+/// （`finish_run` 要 `AppHandle`，根本测不了，判定逻辑会一直躲在它里面）。
+///
+/// 四条边界，每条都有具体理由：
+/// - `success` → 只清计数、**不重排**（成功还重跑就成了重复执行）
+/// - `canceled` → **不重试**（用户点了「停止」，它再自己爬起来是最糟的体验）
+/// - `manual` → **不重试**（用户就坐在旁边，重跑让他自己决定）
+/// - 计数按 `today` 归零（跨天重新给满 `RETRY_MAX` 次，否则会永久失效）
+fn plan_retry(
+    status: &str,
+    trigger: &str,
+    mark: Option<&RetryMark>,
+    today: &str,
+    now: i64,
+) -> RetryPlan {
+    if status == "success" {
+        return RetryPlan::Reset;
+    }
+    if status == "canceled" || trigger == "manual" {
+        return RetryPlan::None;
+    }
+    // 跨天（或从没记过）⇒ 从 0 开始算
+    let count = match mark {
+        Some(m) if m.day == today => m.count,
+        _ => 0,
+    };
+    if count >= RETRY_MAX {
+        return RetryPlan::Exhausted;
+    }
+    RetryPlan::Schedule {
+        count: count + 1,
+        at: now + RETRY_DELAY_MS,
+    }
 }
 
 /// ms 时间戳 → 本地「YYYY-MM-DD HH:MM:SS」。
@@ -1879,6 +2069,90 @@ mod tests {
         assert_eq!((b.ok, b.bad), (0, 1));
     }
 
+    /// ⭐ 热力图按「最后一次」着色：失败后重试成功**必须显示成功**（2026-10-17 用户要求）。
+    #[test]
+    fn 当天最后一次成功则代表色为成功() {
+        let mut daily: HashMap<String, HashMap<String, DayAgg>> = HashMap::new();
+        let t0 = local_midnight(2026, 10, 17) + 10 * 3600_000;
+        bump_daily(&mut daily, &rec("a", t0, "timeout"));                 // 10:00 超时
+        bump_daily(&mut daily, &rec("a", t0 + 15 * 60_000, "success"));   // 10:15 重试成功
+        let a = daily.get("a").unwrap().get("2026-10-17").expect("当天");
+        assert_eq!(a.last, "success", "最终成功 ⇒ 代表色为成功");
+        assert_eq!((a.warn, a.ok), (1, 1), "计数仍完整保留（明细不丢）");
+    }
+
+    #[test]
+    fn 成功后失败则代表色为失败() {
+        let mut daily: HashMap<String, HashMap<String, DayAgg>> = HashMap::new();
+        let t0 = local_midnight(2026, 10, 17) + 8 * 3600_000;
+        bump_daily(&mut daily, &rec("a", t0, "success"));
+        bump_daily(&mut daily, &rec("a", t0 + 60_000, "failed"));
+        let a = daily.get("a").unwrap().get("2026-10-17").expect("当天");
+        assert_eq!(a.last, "failed", "最后失败 ⇒ 代表色为失败（不掩盖问题）");
+    }
+
+    /// ⛔ 从 `runs` 回填是「新→旧」遍历。若按调用顺序赋值，`last` 会变成当天**最早**那次，
+    /// 正好与语义相反 —— 必须按 `started_at` 比较。
+    #[test]
+    fn 乱序回填时last仍取最新那次() {
+        let mut daily: HashMap<String, HashMap<String, DayAgg>> = HashMap::new();
+        let t0 = local_midnight(2026, 10, 17) + 10 * 3600_000;
+        bump_daily(&mut daily, &rec("a", t0 + 15 * 60_000, "success"));   // 新的先喂
+        bump_daily(&mut daily, &rec("a", t0, "timeout"));                 // 旧的后喂
+        let a = daily.get("a").unwrap().get("2026-10-17").expect("当天");
+        assert_eq!(a.last, "success", "乱序也必须取时间最晚的那条");
+    }
+
+    /// ⛔ 只给 `daily` 加字段是不够的：老 `scheduler-store.json` 里已有数据但**没有 `last`**
+    /// （反序列化成空串）⇒ 前端回退「取最差」⇒ 既有历史里「先失败后成功」的日子依旧画成失败。
+    /// 必须按条目回填（这就是本项目反复踩的「旧值非空 ⇒ 默认值不生效」）。
+    #[test]
+    fn 老数据缺last时从runs回填出最后一次() {
+        // 模拟老版本落盘的数据：计数齐全、last 为空
+        let t0 = local_midnight(2026, 10, 17) + 10 * 3600_000;
+        let mut daily: HashMap<String, HashMap<String, DayAgg>> = HashMap::new();
+        daily.entry("a".into()).or_default().insert(
+            "2026-10-17".into(),
+            DayAgg { warn: 1, ok: 1, ..Default::default() },
+        );
+        // runs 是「新→旧」
+        let runs = vec![rec("a", t0 + 15 * 60_000, "success"), rec("a", t0, "timeout")];
+        assert!(backfill_last(&mut daily, &runs), "有缺失 ⇒ 必须报告改动以触发落盘");
+
+        let a = daily.get("a").unwrap().get("2026-10-17").unwrap();
+        assert_eq!(a.last, "success", "回填后取当天最后一次（成功）");
+        assert_eq!(a.last_at, t0 + 15 * 60_000, "时间戳也要一起补，否则后续乱序比较会错");
+        assert_eq!((a.warn, a.ok), (1, 1), "回填绝不能重算计数（会翻倍）");
+    }
+
+    #[test]
+    fn 已回填过的条目再跑一次不重复也不改值() {
+        let t0 = local_midnight(2026, 10, 17) + 10 * 3600_000;
+        let mut daily: HashMap<String, HashMap<String, DayAgg>> = HashMap::new();
+        let runs = vec![rec("a", t0 + 15 * 60_000, "success"), rec("a", t0, "timeout")];
+        for r in &runs {
+            bump_daily(&mut daily, r);
+        }
+        // bump_daily 已经写好 last ⇒ backfill 必须一个都不碰（幂等，重启不会每次都写盘）
+        assert!(!backfill_last(&mut daily, &runs), "无缺失 ⇒ 不应报告改动");
+        assert_eq!(daily.get("a").unwrap().get("2026-10-17").unwrap().last, "success");
+    }
+
+    /// `runs` 有条数上限，很早的日子在里面已经找不到了 —— 此时**保持空**，
+    /// 让前端回退「取最差」。绝不能凭计数猜一个 `last`，那等于编造事实。
+    #[test]
+    fn runs覆盖不到的旧日子保持缺失() {
+        let mut daily: HashMap<String, HashMap<String, DayAgg>> = HashMap::new();
+        daily.entry("a".into()).or_default().insert(
+            "2026-09-01".into(),
+            DayAgg { bad: 1, ok: 1, ..Default::default() },
+        );
+        let t0 = local_midnight(2026, 10, 17) + 10 * 3600_000;
+        let runs = vec![rec("a", t0, "success")];
+        assert!(!backfill_last(&mut daily, &runs), "覆盖不到 ⇒ 不应有改动");
+        assert!(daily.get("a").unwrap().get("2026-09-01").unwrap().last.is_empty());
+    }
+
     #[test]
     fn 跨天分桶而不是累加到同一天() {
         let mut daily: HashMap<String, HashMap<String, DayAgg>> = HashMap::new();
@@ -1995,11 +2269,11 @@ mod tests {
         assert_eq!(due_action(TICK_MS + 1, TICK_MS, true), DueAction::Catchup);
         // 待机 2h31m 后恢复 —— 10-11 那 4 条签到的真实迟到量，必须能补
         assert_eq!(due_action(151 * 60_000, TICK_MS, true), DueAction::Catchup);
-        // 窗口边界：正好 6 小时还补；多 1ms 就不补
+        // 窗口边界：正好落在窗口上还补；多 1ms 就不补（时长见 CATCHUP_WINDOW_MS）
         assert_eq!(due_action(CATCHUP_WINDOW_MS, TICK_MS, true), DueAction::Catchup);
         assert_eq!(
             due_action(CATCHUP_WINDOW_MS + 1, TICK_MS, true),
-            DueAction::Skip("已超出 6 小时补跑窗口")
+            DueAction::Skip("已超出补跑窗口")
         );
     }
 
@@ -2013,6 +2287,70 @@ mod tests {
         assert_eq!(
             due_action(CATCHUP_WINDOW_MS + 1, TICK_MS, false),
             DueAction::Skip("全局「补跑」开关已关闭")
+        );
+    }
+
+    // ---------- 失败/超时后的延迟重试（plan_retry） ----------
+    //
+    // 这组用例为什么存在：2026-10-17「睡 89 分钟醒来 ⇒ 5 个任务瞬间全 timeout、
+    // 而 next_due 早已推到明天 ⇒ 当天彻底作废」——「超时不重试」的旧规则在
+    // 「睡眠 + 没网」面前完全失效（它假设超时 = 任务本身跑太久）。
+
+    #[test]
+    fn 成功只清计数不重排() {
+        let mark = RetryMark { day: "2026-10-17".into(), count: 3 };
+        assert_eq!(
+            plan_retry("success", "cron", Some(&mark), "2026-10-17", 0),
+            RetryPlan::Reset,
+            "成功还重排就成了重复执行"
+        );
+    }
+
+    #[test]
+    fn 取消与手动触发都不自动重试() {
+        assert_eq!(
+            plan_retry("canceled", "cron", None, "2026-10-17", 0),
+            RetryPlan::None,
+            "用户点了停止，它再自己爬起来是最糟的体验"
+        );
+        assert_eq!(
+            plan_retry("failed", "manual", None, "2026-10-17", 0),
+            RetryPlan::None,
+            "手动触发由用户自己决定要不要重跑"
+        );
+    }
+
+    #[test]
+    fn 失败与超时都排重试() {
+        let now = 1_700_000_000_000;
+        assert_eq!(
+            plan_retry("timeout", "catchup", None, "2026-10-17", now),
+            RetryPlan::Schedule { count: 1, at: now + RETRY_DELAY_MS },
+            "睡醒超时必须能排重试 —— 这正是 10-17 那条漏跑的现场"
+        );
+        assert_eq!(
+            plan_retry("failed", "cron", None, "2026-10-17", now),
+            RetryPlan::Schedule { count: 1, at: now + RETRY_DELAY_MS }
+        );
+    }
+
+    #[test]
+    fn 当天额度用尽后不再重排() {
+        let mark = RetryMark { day: "2026-10-17".into(), count: RETRY_MAX };
+        assert_eq!(
+            plan_retry("failed", "cron", Some(&mark), "2026-10-17", 0),
+            RetryPlan::Exhausted
+        );
+    }
+
+    #[test]
+    fn 跨天后额度重新给满() {
+        // ⛔ 这条最关键：若不带 day 校验，一次失败会永久占满额度，
+        //    第二天 cron 正常触发却再也不重试 —— 属于「静默永久失效」。
+        let mark = RetryMark { day: "2026-10-16".into(), count: RETRY_MAX };
+        assert_eq!(
+            plan_retry("failed", "cron", Some(&mark), "2026-10-17", 0),
+            RetryPlan::Schedule { count: 1, at: RETRY_DELAY_MS }
         );
     }
 

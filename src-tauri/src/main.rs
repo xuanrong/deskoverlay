@@ -1266,6 +1266,91 @@ fn export_text_file(
     Ok(Some(path))
 }
 
+/// 笔记附件目录（app_data/note-attachments），首次使用时创建。
+fn note_attach_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?.join("note-attachments");
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir)
+}
+
+/// 保存笔记图片：接收 data URL，解码写入 note-attachments，返回可写入 Markdown 的相对路径。
+/// 文件名净化后加时间戳后缀；正文只存短链接（Obsidian 式），便于编辑与粘贴。
+#[tauri::command]
+fn save_note_image(app: tauri::AppHandle, name: String, data_url: String) -> Result<String, String> {
+    use base64::engine::general_purpose::STANDARD;
+    use base64::Engine;
+    let dir = note_attach_dir(&app)?;
+    let comma = data_url.find(',').ok_or("图片数据格式错误".to_string())?;
+    let meta = &data_url[..comma];
+    let mime = meta.strip_prefix("data:").and_then(|m| m.split(';').next()).unwrap_or("");
+    let ext = match mime {
+        "image/png" => "png",
+        "image/jpeg" => "jpg",
+        "image/webp" => "webp",
+        "image/gif" => "gif",
+        "image/svg+xml" => "svg",
+        "image/bmp" => "bmp",
+        _ => "png",
+    };
+    let bytes = STANDARD.decode(&data_url[comma + 1..]).map_err(|e| format!("图片解码失败：{e}"))?;
+    if bytes.len() > 20 * 1024 * 1024 {
+        return Err("图片过大（上限 20MB）".to_string());
+    }
+    // 仅保留字母/数字/中文与 - _，去掉空格与路径分隔符，避免 Markdown 链接与路径问题
+    let base: String = name
+        .chars()
+        .filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_')
+        .take(40)
+        .collect();
+    let base = if base.is_empty() { "image".to_string() } else { base };
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_micros())
+        .unwrap_or(0);
+    let file = format!("{base}-{stamp}.{ext}");
+    fs::write(dir.join(&file), bytes).map_err(|e| format!("写入图片失败：{e}"))?;
+    Ok(format!("note-attachments/{file}"))
+}
+
+/// 读取笔记附件为 data URL（预览渲染用）。仅允许附件目录内的纯文件名，拒绝路径穿越。
+#[tauri::command]
+fn read_note_image(app: tauri::AppHandle, name: String) -> Result<String, String> {
+    use base64::engine::general_purpose::STANDARD;
+    use base64::Engine;
+    let dir = note_attach_dir(&app)?;
+    let file = std::path::Path::new(&name)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .ok_or("非法文件名".to_string())?;
+    let path = dir.join(file);
+    let data = fs::read(&path).map_err(|e| e.to_string())?;
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+    let mime = match ext.as_str() {
+        "jpg" | "jpeg" => "image/jpeg",
+        "webp" => "image/webp",
+        "gif" => "image/gif",
+        "svg" => "image/svg+xml",
+        "bmp" => "image/bmp",
+        _ => "image/png",
+    };
+    Ok(format!("data:{mime};base64,{}", STANDARD.encode(data)))
+}
+
+/// 删除笔记附件（仅允许附件目录内的纯文件名）。文件不存在视为已删除。
+#[tauri::command]
+fn delete_note_image(app: tauri::AppHandle, name: String) -> Result<(), String> {
+    let dir = note_attach_dir(&app)?;
+    let file = std::path::Path::new(&name)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .ok_or("非法文件名".to_string())?;
+    match fs::remove_file(dir.join(file)) {
+        Ok(_) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
 /// 读取持久化状态。
 /// state.json 存业务数据；音乐相关（音源插件脚本 musicSources / 收藏 favorites / 播放状态 playback）
 /// 统一独立存 music.json；workLogs（工作记录）独立存 worklogs.json；notes（笔记列表）独立存 notes.json。
@@ -2028,7 +2113,7 @@ fn main() {
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![quit_app, autostart::autostart_status, autostart::set_autostart, downloader::download_start, downloader::download_cancel, downloader::downloaded_list, downloader::downloaded_delete, downloader::local_track_assets, aliyundrive::ad_auth_bind, aliyundrive::ad_auth_status, aliyundrive::ad_unbind, aliyundrive::ad_list, aliyundrive::ad_search, aliyundrive::ad_play_url, aliyundrive::ad_upload_start, aliyundrive::ad_upload_cancel, aliyundrive::ad_upload_list, aliyundrive::ad_track_meta, aliyundrive::ad_direct_url, show_reminder, hide_reminder, reminder_ready, show_lyric, hide_lyric, lyric_ready, lyric_sync, lyric_set_locked, lyric_move, lyric_pos_commit, lyric_commit_display, lyric_menu_toggle, lyric_menu_ready, read_text_file, export_text_file, run_wasm_backend, install_plugin_package, build_wasm_backend, http::http_get, http::http_get_bytes, http::http_post, http::http_post_stream, http::http_stream_cancel, fetch_favicon, load_state, save_state, backup_data, restore_data, get_theme, broadcast_theme, read_bg_data_url, prepare_wallpaper, list_desktop_files, image_thumbnail, open_file, open_path, pick_folder, pick_file, reveal_file, delete_file, rename_file, reveal_path, delete_path, rename_path, show_lock, hide_lock, file_index::index_status, file_index::search_files, file_index::rebuild_index, sys_bridge::start_system_sampling, sys_bridge::stop_system_sampling, sys_bridge::check_media_playing, sys_bridge::set_lock_monitor_enabled, sedentary::set_sedentary_config, eyecare::set_eyecare_config, eyecare::restore_native_color, eyecare::eyecare_status, checkin::collect_checkin_state, scheduler::scheduler_runs, scheduler::scheduler_heat, scheduler::scheduler_run_now, scheduler::scheduler_cancel, scheduler::scheduler_clear_runs, scheduler::scheduler_reload_store, scheduler::scheduler_status, scheduler::scheduler_check_cron, scheduler_export::scheduler_export_preview, scheduler_export::scheduler_export_task, scheduler_export::scheduler_unexport_task, scheduler_export::scheduler_export_status, scheduler_export::scheduler_read_os_log, scheduler_export::scheduler_clear_os_log])
+        .invoke_handler(tauri::generate_handler![quit_app, autostart::autostart_status, autostart::set_autostart, downloader::download_start, downloader::download_cancel, downloader::downloaded_list, downloader::downloaded_delete, downloader::local_track_assets, aliyundrive::ad_auth_bind, aliyundrive::ad_auth_status, aliyundrive::ad_unbind, aliyundrive::ad_list, aliyundrive::ad_search, aliyundrive::ad_play_url, aliyundrive::ad_upload_start, aliyundrive::ad_upload_cancel, aliyundrive::ad_upload_list, aliyundrive::ad_track_meta, aliyundrive::ad_direct_url, show_reminder, hide_reminder, reminder_ready, show_lyric, hide_lyric, lyric_ready, lyric_sync, lyric_set_locked, lyric_move, lyric_pos_commit, lyric_commit_display, lyric_menu_toggle, lyric_menu_ready, read_text_file, export_text_file, save_note_image, read_note_image, delete_note_image, run_wasm_backend, install_plugin_package, build_wasm_backend, http::http_get, http::http_get_bytes, http::http_post, http::http_post_stream, http::http_stream_cancel, fetch_favicon, load_state, save_state, backup_data, restore_data, get_theme, broadcast_theme, read_bg_data_url, prepare_wallpaper, list_desktop_files, image_thumbnail, open_file, open_path, pick_folder, pick_file, reveal_file, delete_file, rename_file, reveal_path, delete_path, rename_path, show_lock, hide_lock, file_index::index_status, file_index::search_files, file_index::rebuild_index, sys_bridge::start_system_sampling, sys_bridge::stop_system_sampling, sys_bridge::check_media_playing, sys_bridge::set_lock_monitor_enabled, sedentary::set_sedentary_config, eyecare::set_eyecare_config, eyecare::restore_native_color, eyecare::eyecare_status, checkin::collect_checkin_state, scheduler::scheduler_runs, scheduler::scheduler_heat, scheduler::scheduler_run_now, scheduler::scheduler_cancel, scheduler::scheduler_clear_runs, scheduler::scheduler_reload_store, scheduler::scheduler_status, scheduler::scheduler_check_cron, scheduler_export::scheduler_export_preview, scheduler_export::scheduler_export_task, scheduler_export::scheduler_unexport_task, scheduler_export::scheduler_export_status, scheduler_export::scheduler_read_os_log, scheduler_export::scheduler_clear_os_log])
         .run(tauri::generate_context!())
         .expect("DeskOverlay 运行失败");
 }

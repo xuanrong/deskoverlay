@@ -139,11 +139,15 @@ function computeThemeVars(cfg) {
     "--panel-alpha": String(alpha),
     "--panel-alpha-2": String(clamp(alpha - 0.06, 0.35, 0.95)),
     "--panel-alpha-elevated": String(clamp(alpha + 0.18, 0.5, 0.97)),
+    // ⛔ 这里的基准值与 css/style.css :root 的 --blur-* 必须一致（CSS 只是 JS 未就绪时的兜底）
     "--blur-scrim": `${Math.round(6 * m)}px`,
     "--blur-panel": `${Math.round(20 * m)}px`,
     "--blur-overlay": `${Math.round(28 * m)}px`,
   };
-  return { scheme, skinId: c.skinId, vars, config: c };
+  // m === 0 ⇒ 用户把模糊关掉了。此时 blur(0px) 仍是「非 none」的 backdrop-filter，
+  // 浏览器照样为每个玻璃层分配一张 backdrop 纹理并跑 saturate 色彩矩阵 ⇒ 纯浪费。
+  // 用 data-blur="off" 让 CSS 把这些层整体摘成 backdrop-filter:none。
+  return { scheme, skinId: c.skinId, vars, config: c, blurOff: m <= 0 };
 }
 
 // -------------------- 归一化（老数据/非法值防御） --------------------
@@ -256,11 +260,12 @@ function withTransition(doc, fn) {
 
 // 幂等应用：方案 → 变量 → 背景层。opts.transition 控制是否带过渡动画。
 async function applyTheme(doc, cfg, opts = {}) {
-  const { scheme, vars, skinId, config } = computeThemeVars(cfg);
+  const { scheme, vars, skinId, config, blurOff } = computeThemeVars(cfg);
   const html = doc.documentElement;
   const run = () => {
     html.dataset.scheme = scheme;
     html.dataset.skin = skinId;
+    html.dataset.blur = blurOff ? "off" : "on";
     for (const [k, v] of Object.entries(vars)) html.style.setProperty(k, v);
     for (const [k, v] of Object.entries(config.overrides || {})) html.style.setProperty(k, String(v));
   };

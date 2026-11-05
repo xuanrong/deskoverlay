@@ -5,6 +5,7 @@ import { state, saveState } from "../state.js";
 import { invoke } from "../bus.js";
 import { toast } from "../toast.js";
 import { esc, uid, ymd, hhmm } from "../utils.js";
+import { showDialog } from "./common.js";
 
 // ─── marked.js 初始化 ───
 let _markedReady = false;
@@ -57,6 +58,8 @@ const SVG = {
   table: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="10" y1="4" x2="10" y2="20"/></svg>',
   hr: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="8" x2="7" y2="8" opacity=".4"/><line x1="17" y1="8" x2="20" y2="8" opacity=".4"/></svg>',
   more: '<svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>',
+  // 插入图片：山与太阳（图片占位语义）
+  img: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5" fill="currentColor" stroke="none"/><path d="m21 15-5-5L5 21"/></svg>',
 };
 
 // ─── 时间格式化 ───
@@ -125,6 +128,7 @@ export function renderNotes(view) {
   let saveTimer = 0;
   let isPreviewMode = false; // 默认编辑页；每篇笔记的状态记录在 navState.notes.noteModes，切换/重启后恢复
   let dirty = false; // 是否有未保存的编辑
+  const IMG_CACHE = new Map(); // 附件名 → data URL，预览时避免重复读盘
 
   // ─── 构建 DOM ───
   body.innerHTML = `
@@ -155,6 +159,7 @@ export function renderNotes(view) {
           <textarea id="nt-textarea" class="nt-editor-edit" spellcheck="false" placeholder="开始输入…（支持 Markdown）"></textarea>
           <div id="nt-preview" class="nt-editor-preview" hidden></div>
         </div>
+        <input id="nt-img-input" type="file" accept="image/*" style="display:none" />
         <div class="nt-status">
           <span id="nt-count">0 字</span>
           <span class="nt-sep"></span>
@@ -176,13 +181,17 @@ export function renderNotes(view) {
   const elExport = body.querySelector("#nt-export");
   const elTextarea = body.querySelector("#nt-textarea");
   const elPreview = body.querySelector("#nt-preview");
+  const elImgInput = body.querySelector("#nt-img-input");
   const elCount = body.querySelector("#nt-count");
   const elReadtime = body.querySelector("#nt-readtime");
   const elSaved = body.querySelector("#nt-saved");
 
-  // ═══ Editing Toolbar（一期：固定格式栏）═══
+  // ═══ Editing Toolbar（二期：格式栏 + 文字颜色/字号 + 插入图片）═══
   const elFmt = body.querySelector("#nt-fmt");
   let fmtCollapsed = localStorage.getItem("notes.toolbarCollapsed") === "1";
+  // 二期：文字颜色与字号（Markdown 无原生语法，用内联 span，marked 原样透传渲染）
+  const TEXT_COLORS = ["#e06c75", "#e5c07b", "#98c379", "#56b6c2", "#61afef", "#c678dd", "#d19a66", "#9aa7b4"];
+  const FONT_SIZES = [12, 14, 16, 18, 20, 24];
 
   elFmt.innerHTML = `
     <div class="et-full">
@@ -198,6 +207,29 @@ export function renderNotes(view) {
       <button class="et-btn" data-fmt="strike" title="删除线 Ctrl+Shift+X"><span class="et-g st">S</span></button>
       <button class="et-btn" data-fmt="highlight" title="高亮 Ctrl+Shift+H"><span class="et-g hl">高</span></button>
       <button class="et-btn" data-fmt="icode" title="行内代码 Ctrl+E">${SVG.code}</button>
+      <div class="et-menuwrap">
+        <button class="et-btn" id="et-style" title="文字颜色 / 字号"><span class="et-style-glyph">A</span></button>
+        <div class="et-menu et-menu-right" id="et-style-menu" hidden>
+          <div class="et-pop-label">文字颜色</div>
+          <div class="et-swatches">
+            ${TEXT_COLORS.map((c) => `<button class="et-sw" data-color="${c}" style="background:${c}" title="${c}"></button>`).join("")}
+            <button class="et-sw reset" data-color="inherit" title="默认颜色">×</button>
+          </div>
+          <div class="et-pop-label">字号</div>
+          <div class="et-sizes">
+            <button class="et-sz" data-size="inherit">默认</button>
+            ${FONT_SIZES.map((n) => `<button class="et-sz" data-size="${n}px">${n}</button>`).join("")}
+          </div>
+        </div>
+      </div>
+      <button class="et-btn" data-fmt="img" title="插入图片">${SVG.img}</button>
+      <div class="et-menuwrap">
+        <button class="et-btn" id="et-imgdel" title="删除本篇图片">${SVG.del}</button>
+        <div class="et-menu et-menu-right" id="et-imgdel-menu" hidden>
+          <div class="et-img-head">本篇图片（点击删除）</div>
+          <div id="et-imgdel-list"></div>
+        </div>
+      </div>
       <span class="et-sep"></span>
       <button class="et-btn" data-fmt="ul" title="无序列表 Ctrl+Shift+8">${SVG.ul}</button>
       <button class="et-btn" data-fmt="ol" title="有序列表">${SVG.ol}</button>
@@ -214,9 +246,6 @@ export function renderNotes(view) {
         <div class="et-menu et-menu-right" id="et-more-menu" hidden>
           <div class="et-mi" data-fmt="ts"><span class="chk"></span>插入时间戳<span class="sp"></span><span class="et-kbd">Ctrl+;</span></div>
           <div class="et-mi" data-fmt="toc"><span class="chk"></span>插入目录 TOC</div>
-          <div class="et-mi dis"><span class="chk"></span>字号<span class="sp"></span><span class="tag2">二期</span></div>
-          <div class="et-mi dis"><span class="chk"></span>文字颜色<span class="sp"></span><span class="tag2">二期</span></div>
-          <div class="et-mi dis"><span class="chk"></span>插入图片<span class="sp"></span><span class="tag2">二期</span></div>
         </div>
       </div>
       <button class="et-btn" id="et-collapse" title="收起工具栏">${SVG.chevU}</button>
@@ -250,6 +279,70 @@ export function renderNotes(view) {
       return;
     }
     replaceRange(s, e, pre + v.slice(s, e) + post, s + pre.length, e + pre.length);
+  }
+
+  // 二期：颜色/字号——用内联 span 包裹选区，marked 预览原样透传 HTML
+  function applyStyle(prop, value) {
+    wrapInline(`<span style="${prop}:${value}">`, "</span>", "文字");
+    syncActive();
+  }
+
+  // 二期：图片读取 → 等比压缩（最长边 1600px，webp 优先）→ 内联 data URL
+  function readAsDataUrl(file) {
+    return new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(String(r.result || ""));
+      r.onerror = () => reject(r.error);
+      r.readAsDataURL(file);
+    });
+  }
+  function compressImage(dataUrl, mime) {
+    // SVG 矢量 / GIF 动图不做栅格化，原样内联
+    if (mime === "image/svg+xml" || mime === "image/gif") return Promise.resolve(dataUrl);
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        const max = 1600;
+        let w = img.naturalWidth, h = img.naturalHeight;
+        if (!w || !h) { resolve(dataUrl); return; }
+        if (w > max || h > max) {
+          const r = Math.min(max / w, max / h);
+          w = Math.round(w * r);
+          h = Math.round(h * r);
+        }
+        const c = document.createElement("canvas");
+        c.width = w; c.height = h;
+        const ctx = c.getContext("2d");
+        if (!ctx) { resolve(dataUrl); return; }
+        ctx.drawImage(img, 0, 0, w, h);
+        let out = c.toDataURL("image/webp", 0.85);
+        if (!out.startsWith("data:image/webp")) out = c.toDataURL("image/png");
+        resolve(out);
+      };
+      img.onerror = () => resolve(dataUrl);
+      img.src = dataUrl;
+    });
+  }
+
+  // 二期（Obsidian 式）：插入图片落盘为附件，正文只写短链接，便于后续编辑
+  async function insertImageFile(file) {
+    if (!file) return;
+    try {
+      const raw = await readAsDataUrl(file);
+      const url = await compressImage(raw, file.type);
+      const rel = await invoke("save_note_image", {
+        name: (file.name || "").replace(/\.[^.]+$/, "") || "image",
+        dataUrl: url,
+      });
+      if (isPreviewMode) setMode(false, { focus: true });
+      const s = elTextarea.selectionStart, e = elTextarea.selectionEnd;
+      const alt = (file.name || "图片").replace(/\.[^.]+$/, "").replace(/[\[\]]/g, "") || "图片";
+      replaceRange(s, e, `\n![${alt}](${rel})\n`);
+      syncActive();
+    } catch (err) {
+      console.error("[notes] 插入图片失败", err);
+      toast("插入图片失败");
+    }
   }
 
   // 块级样式：对选区覆盖的每一行做变换（再点一次取消）
@@ -332,14 +425,23 @@ export function renderNotes(view) {
       const s = elTextarea.selectionStart;
       replaceRange(s, elTextarea.selectionEnd, "\n\n## 目录\n\n" + heads.map((t) => "- " + t).join("\n") + "\n");
     },
+    img: () => { elImgInput.value = ""; elImgInput.click(); },
   };
 
   // ─── 菜单开合 ───
   function closeMenus() {
     elFmt.querySelector("#et-h-menu").hidden = true;
     elFmt.querySelector("#et-more-menu").hidden = true;
+    elFmt.querySelector("#et-style-menu").hidden = true;
+    elFmt.querySelector("#et-imgdel-menu").hidden = true;
   }
   elFmt.addEventListener("click", (e) => {
+    const sw = e.target.closest(".et-sw");
+    if (sw) { applyStyle("color", sw.dataset.color); closeMenus(); return; }
+    const sz = e.target.closest(".et-sz");
+    if (sz) { applyStyle("font-size", sz.dataset.size); closeMenus(); return; }
+    const delItem = e.target.closest(".img-del-item");
+    if (delItem) { const n = delItem.dataset.img; closeMenus(); deleteImageByAttachment(n); return; }
     const mi = e.target.closest(".et-mi:not(.dis)");
     const btn = e.target.closest(".et-btn");
     if (mi) {
@@ -352,14 +454,31 @@ export function renderNotes(view) {
     if (!btn) return;
     if (btn.id === "et-h") {
       const m = elFmt.querySelector("#et-h-menu");
-      m.hidden = !m.hidden;
-      elFmt.querySelector("#et-more-menu").hidden = true;
+      const wasHidden = m.hidden;
+      closeMenus();
+      m.hidden = !wasHidden;
       return;
     }
     if (btn.id === "et-more") {
       const m = elFmt.querySelector("#et-more-menu");
-      m.hidden = !m.hidden;
-      elFmt.querySelector("#et-h-menu").hidden = true;
+      const wasHidden = m.hidden;
+      closeMenus();
+      m.hidden = !wasHidden;
+      return;
+    }
+    if (btn.id === "et-style") {
+      const m = elFmt.querySelector("#et-style-menu");
+      const wasHidden = m.hidden;
+      closeMenus();
+      m.hidden = !wasHidden;
+      return;
+    }
+    if (btn.id === "et-imgdel") {
+      const m = elFmt.querySelector("#et-imgdel-menu");
+      const wasHidden = m.hidden;
+      closeMenus();
+      fillImageDeleteList();
+      m.hidden = !wasHidden;
       return;
     }
     if (btn.id === "et-collapse") {
@@ -521,6 +640,79 @@ export function renderNotes(view) {
       return;
     }
     elPreview.innerHTML = marked.parse(content);
+    resolvePreviewImages(elPreview);
+  }
+
+  // 预览中的附件短链接（note-attachments/xxx）异步读盘转为 data URL；外链与旧内联图不动
+  function resolvePreviewImages(container) {
+    container.querySelectorAll("img").forEach((img) => {
+      const src = img.getAttribute("src") || "";
+      if (!src.startsWith("note-attachments/")) return;
+      const name = src.slice("note-attachments/".length);
+      const cached = IMG_CACHE.get(name);
+      if (cached) { img.src = cached; return; }
+      invoke("read_note_image", { name })
+        .then((url) => {
+          if (url) { IMG_CACHE.set(name, url); img.src = url; }
+        })
+        .catch(() => {});
+    });
+  }
+
+  // 附件是否仍被其他笔记引用（避免误删共享文件）
+  function attachmentUsedElsewhere(name, excludeId) {
+    return (state.notes || []).some(
+      (n) => n.id !== excludeId && n.content && n.content.includes(`note-attachments/${name}`)
+    );
+  }
+  function attachmentNamesIn(content) {
+    return [...String(content || "").matchAll(/\]\(note-attachments\/([^)]+)\)/g)].map((m) => m[1]);
+  }
+  // 删除笔记时清理其附件；仍被其他笔记引用的保留
+  function removeNoteAttachments(content, noteId) {
+    attachmentNamesIn(content).forEach((name) => {
+      if (!attachmentUsedElsewhere(name, noteId)) {
+        invoke("delete_note_image", { name }).catch(() => {});
+      }
+    });
+  }
+  // 编辑态删除图片：移除正文所有指向该附件的链接，并在无其他引用时删除磁盘文件
+  async function deleteImageByAttachment(name) {
+    const note = (state.notes || []).find((n) => n.id === activeId);
+    if (!note) return;
+    const ok = await showDialog({
+      title: "删除图片",
+      message: `删除图片「${name}」？将从本篇笔记移除，并从磁盘删除附件。`,
+      okText: "删除",
+      danger: true,
+    });
+    if (!ok) return;
+    const escName = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const re = new RegExp("\\n?!\\[[^\\]]*\\]\\(note-attachments/" + escName + "\\)", "g");
+    const next = elTextarea.value.replace(re, "");
+    elTextarea.value = next;
+    note.content = next;
+    note.updatedAt = Date.now();
+    dirty = false;
+    if (!attachmentUsedElsewhere(name, activeId)) {
+      try { await invoke("delete_note_image", { name }); } catch (_) {}
+    }
+    IMG_CACHE.delete(name);
+    saveState();
+    updateStatus(next);
+    renderList();
+    syncActive();
+    toast("已删除图片");
+  }
+
+  // 填充编辑态「删除图片」菜单：列出本篇引用的所有附件
+  function fillImageDeleteList() {
+    const list = elFmt.querySelector("#et-imgdel-list");
+    if (!list) return;
+    const names = attachmentNamesIn(elTextarea.value);
+    list.innerHTML = names.length
+      ? names.map((name) => `<div class="et-mi img-del-item" data-img="${esc(name)}"><span class="chk">×</span><span class="img-name">${esc(name)}</span></div>`).join("")
+      : `<div class="et-mi dis"><span class="chk"></span>本篇暂无图片</div>`;
   }
 
   // ─── 无笔记时的空态：保留编辑页，但禁用输入并给出引导 ───
@@ -601,6 +793,23 @@ export function renderNotes(view) {
     return sameH1 ? body + "\n" : `# ${t}\n\n${body}\n`;
   }
 
+  // 导出时把附件短链接内联为 data URL，保持导出的 .md 自包含
+  async function inlineAttachments(content) {
+    const re = /(!\[[^\]]*\]\()note-attachments\/([^)]+)(\))/g;
+    let out = content;
+    for (const m of [...content.matchAll(re)]) {
+      try {
+        let url = IMG_CACHE.get(m[2]);
+        if (!url) {
+          url = await invoke("read_note_image", { name: m[2] });
+          IMG_CACHE.set(m[2], url);
+        }
+        if (url) out = out.split(m[0]).join(m[1] + url + m[3]);
+      } catch (_) {}
+    }
+    return out;
+  }
+
   // 导出当前笔记：先落盘保证内容最新，再弹系统「另存为」写入 .md
   async function exportNote() {
     if (!activeId) return;
@@ -610,9 +819,10 @@ export function renderNotes(view) {
     if (!note) return;
     const title = note.title || extractTitle(note.content) || "未命名笔记";
     try {
+      const content = await inlineAttachments(note.content);
       const saved = await invoke("export_text_file", {
         defaultName: safeFileName(title) + ".md",
-        content: buildMarkdown(title, note.content),
+        content: buildMarkdown(title, content),
         filterName: "Markdown 文档",
         extensions: ["md"],
       });
@@ -740,7 +950,10 @@ export function renderNotes(view) {
     if (!state.notes) return;
     const idx = state.notes.findIndex((n) => n.id === id);
     if (idx < 0) return;
+    const removed = state.notes[idx];
     state.notes.splice(idx, 1);
+    // 清理该笔记引用的图片附件（仍被其他笔记引用的保留）
+    removeNoteAttachments(removed.content, id);
     // 清理该笔记的模式记录（navState.notes.noteModes 只存预览态偏差）
     if (state.navState?.notes?.noteModes) {
       delete state.navState.notes.noteModes[id];
@@ -764,6 +977,33 @@ export function renderNotes(view) {
   }
 
   // ─── 事件绑定 ───
+  // 二期：插入图片（文件选择）与直接粘贴图片，均落盘为附件后插入短链接
+  elImgInput.addEventListener("change", () => {
+    const f = elImgInput.files && elImgInput.files[0];
+    if (f) insertImageFile(f);
+    elImgInput.value = "";
+  });
+  elTextarea.addEventListener("paste", (e) => {
+    const items = e.clipboardData && e.clipboardData.items;
+    if (!items) return;
+    const img = Array.from(items).find((it) => it.type && it.type.startsWith("image/"));
+    if (!img) return; // 无图片时走默认文本粘贴
+    e.preventDefault();
+    const f = img.getAsFile();
+    if (f) insertImageFile(f);
+  });
+  // 拖拽图片文件进编辑器 → 同样落盘并插入短链接
+  elTextarea.addEventListener("dragover", (e) => {
+    if (e.dataTransfer && e.dataTransfer.types.includes("Files")) e.preventDefault();
+  });
+  elTextarea.addEventListener("drop", (e) => {
+    const files = e.dataTransfer && e.dataTransfer.files;
+    if (!files || !files.length) return;
+    const imgs = Array.from(files).filter((f) => f.type && f.type.startsWith("image/"));
+    if (!imgs.length) return;
+    e.preventDefault();
+    imgs.forEach((f) => insertImageFile(f));
+  });
   elNew.addEventListener("click", createNote);
   elSearch.addEventListener("input", () => {
     searchQuery = elSearch.value.trim();

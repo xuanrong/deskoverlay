@@ -249,20 +249,50 @@
         },
         {
           "htmlSrc": "pages/dashboard.html",
+          "selector": "#tasks-widget",
+          "label": "todo list hero widget",
+          "source": "user requirement"
+        },
+        {
+          "htmlSrc": "pages/dashboard.html",
+          "selector": "#notes-widget",
+          "label": "notes widget",
+          "source": "user requirement"
+        },
+        {
+          "htmlSrc": "pages/dashboard.html",
+          "selector": "#music-widget",
+          "label": "music player widget",
+          "source": "user requirement"
+        },
+        {
+          "htmlSrc": "pages/dashboard.html",
+          "selector": "#scheduler-widget",
+          "label": "today schedule widget",
+          "source": "user requirement"
+        },
+        {
+          "htmlSrc": "pages/dashboard.html",
+          "selector": "#quickaccess-widget",
+          "label": "quick access shortcuts widget",
+          "source": "user requirement"
+        },
+        {
+          "htmlSrc": "pages/dashboard.html",
+          "selector": "#file-center-widget",
+          "label": "file center widget",
+          "source": "user requirement"
+        },
+        {
+          "htmlSrc": "pages/dashboard.html",
           "selector": "#taskbar",
           "label": "bottom taskbar with settings",
           "source": "user requirement"
         },
         {
           "htmlSrc": "pages/dashboard.html",
-          "selector": "#pomodoro-widget",
-          "label": "pomodoro timer widget",
-          "source": "user requirement"
-        },
-        {
-          "htmlSrc": "pages/dashboard.html",
-          "selector": "#system-widget",
-          "label": "system health widget",
+          "selector": "#taskbar-fund",
+          "label": "taskbar fund module showing market index and daily P&L",
           "source": "user requirement"
         },
         {
@@ -465,9 +495,9 @@
         "overlap-risk: settings popup over grid"
       ],
       "sections": [
-        "top-clock-bar with date and reminders",
-        "widget-grid with adaptive widgets (1-cell icons, 2-cell compact, 4-cell detailed)",
-        "bottom-taskbar with settings button, quick widgets, and exit"
+        "top-bar with grouped clock/date and command search",
+        "widget-grid: todo hero (4x2) + notes/music right column + scheduler/quickaccess/file-center bottom row",
+        "bottom-taskbar with settings button, system metrics, and exit"
       ]
     }
   ]

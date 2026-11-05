@@ -217,6 +217,9 @@ export const HEAT_COLS = 7;                       // 每行 = 一周（列 1 = �
 const HEAT_WD = ["日", "一", "二", "三", "四", "五", "六"];   // 下标就是 Date#getDay()，别再自己推星期
 /// 这四种「当天有记录」的态走状态色阶；其余态（未到 / 今天未到点 / 漏跑 / 无数据 / 停用）各有自己的类名
 const HEAT_WORST = { ok: 1, bad: 1, warn: 1, stop: 1 };
+/// 运行状态 → 热力图色阶。后端 `DayAgg.last` 存的是**运行状态名**（success/failed/…），
+/// 前端按这套映射着色 —— 两边命名不同是刻意的（后端存事实，前端管画法）。
+const HEAT_KIND = { success: "ok", failed: "bad", timeout: "warn", canceled: "stop", missed: "missed" };
 
 /// 本地日期 YYYY-MM-DD。
 /// ⚠ 不能用 `toISOString().slice(0,10)`：那是 UTC，东八区 00:00–07:59 会落到**前一天**。
@@ -225,10 +228,21 @@ export function todayKey(d) {
   return `${x.getFullYear()}-${pad2(x.getMonth() + 1)}-${pad2(x.getDate())}`;
 }
 
-/// 一天里跑过多次时取**最差**的那次作为代表色：失败 > 超时 > 已停止 > 成功。
-/// 反之（取最好）会把「早上成功、晚上失败」画成绿色，正好掩盖最该看的那次。
+/// 一天里跑过多次时，以**最后一次**的结果作为代表色。
+///
+/// ⭐ 2026-10-17 改：原规则是「取最差」（失败 > 超时 > 已停止 > 漏跑 > 成功）。
+/// 那条规则解决了「早上成功、晚上失败被画成绿色」的问题，但**反向不成立** ——
+/// 「早上失败、重试后成功」会被画成红色，可任务当天其实已经达成了（用户明确要求这种情况显示成功）。
+/// 按时间序取「最后一次」，两个方向同时正确：
+/// · 成功 → 后来失败 ⇒ 红（不掩盖问题）
+/// · 失败 → 后来成功 ⇒ 绿（最终达成）
+/// ⚠ 这与「取最好」有本质区别：取最好只看「有没有成功过」，不看先后顺序。
 export function heatWorstOf(agg) {
   if (!agg) return null;
+  const byLast = HEAT_KIND[agg.last];
+  if (byLast) return byLast;
+  // 旧数据没有 `last`（该字段是后加的）⇒ 回退到原来的「取最差」，
+  // 否则历史格子会因为缺字段被画成空白。
   const n = (k) => Number(agg[k]) || 0;
   if (n("bad") > 0) return "bad";
   if (n("warn") > 0) return "warn";

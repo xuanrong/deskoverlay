@@ -17,16 +17,13 @@
   },
   "operatingMode": "free-explore",
   "renderBlockingErrorCount": 0,
-  "softWarningCount": 11,
+  "softWarningCount": 8,
   "renderBlockingErrors": [],
   "errorSignatures": [],
   "softWarnings": [
     "[orchestration-summary] runtime-orchestration-summary.json is missing skillProvenance.name/version/version_source. Version provenance will be reported as observed_unknown by external evaluators.",
     "[repair-ledger] validationRepairLedger[0].repairActions[0].preEditFileHashes[] is missing (legacy optional evidence)",
     "[repair-ledger] validationRepairLedger[0].repairActions[0].postEditFileHashes[] is missing (legacy optional evidence)",
-    "[repair-ledger] validationRepairLedger[0].revalidationReportPath is missing",
-    "[repair-ledger] validationRepairLedger[0].revalidationReportHash is missing",
-    "[repair-ledger] validationRepairLedger[0].revalidationSuccess should be a boolean",
     "[html-quality] colors_and_type.css: free-explore brand CSS must use one primary hue only; forbidden secondary/accent brand variables found (--do-secondary, --do-secondary-foreground, --do-accent, --do-accent-foreground). Use --state-success/warning/error/info only for semantic states.",
     "[html-quality] colors_and_type.css: free-explore radius tokens must stay within the restrained 2/4/8/12/16px scale; oversized or forbidden radius tokens found (--do-radius-lg: 18px). Do not use 20px+ radii unless the user explicitly requested large rounded shapes.",
     "[html-quality] colors_and_type.css: ordinary/static shadow tokens must keep every shadow alpha <= 0.05; deeper shadows are allowed only for floating-layer tokens such as modal/popover/dropdown/drawer/overlay (--do-shadow-xs: 0 1px 3px rgba(0, 0, 0, 0.25), --do-shadow-sm: 0 4px 14px rgba(0, 0, 0, 0.3), --do-shadow-soft: 0 8px 24px rgba(0, 0, 0, 0.35), --do-shadow: 0 18px 50px rgba(0, 0, 0, 0.45), --do-shadow-lg: 0 30px 80px rgba(0, 0, 0, 0.6)).",
@@ -50,15 +47,12 @@
   ],
   "repairActionTable": [],
   "errorCount": 0,
-  "warningCount": 11,
+  "warningCount": 8,
   "errors": [],
   "warnings": [
     "[orchestration-summary] runtime-orchestration-summary.json is missing skillProvenance.name/version/version_source. Version provenance will be reported as observed_unknown by external evaluators.",
     "[repair-ledger] validationRepairLedger[0].repairActions[0].preEditFileHashes[] is missing (legacy optional evidence)",
     "[repair-ledger] validationRepairLedger[0].repairActions[0].postEditFileHashes[] is missing (legacy optional evidence)",
-    "[repair-ledger] validationRepairLedger[0].revalidationReportPath is missing",
-    "[repair-ledger] validationRepairLedger[0].revalidationReportHash is missing",
-    "[repair-ledger] validationRepairLedger[0].revalidationSuccess should be a boolean",
     "[html-quality] colors_and_type.css: free-explore brand CSS must use one primary hue only; forbidden secondary/accent brand variables found (--do-secondary, --do-secondary-foreground, --do-accent, --do-accent-foreground). Use --state-success/warning/error/info only for semantic states.",
     "[html-quality] colors_and_type.css: free-explore radius tokens must stay within the restrained 2/4/8/12/16px scale; oversized or forbidden radius tokens found (--do-radius-lg: 18px). Do not use 20px+ radii unless the user explicitly requested large rounded shapes.",
     "[html-quality] colors_and_type.css: ordinary/static shadow tokens must keep every shadow alpha <= 0.05; deeper shadows are allowed only for floating-layer tokens such as modal/popover/dropdown/drawer/overlay (--do-shadow-xs: 0 1px 3px rgba(0, 0, 0, 0.25), --do-shadow-sm: 0 4px 14px rgba(0, 0, 0, 0.3), --do-shadow-soft: 0 8px 24px rgba(0, 0, 0, 0.35), --do-shadow: 0 18px 50px rgba(0, 0, 0, 0.45), --do-shadow-lg: 0 30px 80px rgba(0, 0, 0, 0.6)).",
@@ -69,7 +63,7 @@
     "declared": true,
     "restoreMode": false,
     "maxFullValidationRuns": 2,
-    "validationHistoryCount": 1,
+    "validationHistoryCount": 2,
     "repairLedgerCount": 1,
     "softWarningsTriggerRepair": false,
     "terminalState": null,
@@ -102,7 +96,7 @@
       "reason": "runtime-orchestration-summary.json missing skillProvenance; used skill-release-manifest.json"
     },
     "renderBlockingErrorCount": 0,
-    "softWarningCount": 11,
+    "softWarningCount": 8,
     "renderBlockingErrors": [],
     "repairActionTable": [],
     "nextCheck": {
@@ -119,13 +113,13 @@
     ]
   },
   "projectFileHashes": {
-    "deskoverlay-dashboard.design": "7d5446b513660a07c467c05786bae58fcf73fa057fed07a233af3fbac2a52df6",
+    "deskoverlay-dashboard.design": "2f5a5f89d39fe8a962fca8ae8fedbd403e2bede97671a9d50c2678bc22ebd7b3",
     "colors_and_type.css": "454e8cdf0aca7e5b86561268605edebdf12e510879ed0118ff2d467c3db3096c",
-    "runtime-orchestration-summary.json": "59fe9628bcfbc65e048b5d465b1c37d832b17249deeaa6b2e3ac245e51a702d2",
-    "pages/dashboard.html": "2638c576359764db9c7b302b696ec9c0d50a43a5039b4cec018b45be678f488c"
+    "runtime-orchestration-summary.json": "0ac35c9597b0311ff020a684dd80c0650c73506bb45e8250a343ada0fef3f7cc",
+    "pages/dashboard.html": "6e6893a11543e8d48af6a7ccaa942c46681957ce91de4d97c48bd0018f8a379a"
   },
   "designDir": "c:\\TraeProjects\\deskoverlay\\deskoverlay-dashboard",
   "expectedPages": 1,
   "requireInteractions": null,
-  "checkedAt": "2026-10-15T14:45:39.376Z"
+  "checkedAt": "2026-10-18T12:55:11.218Z"
 }

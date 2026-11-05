@@ -64,8 +64,6 @@ export const ICON_VOLUME_MUTE = `<svg viewBox="0 0 24 24"><path d="M11 5 6 9H2v6
 // 桌面歌词（条状浮层 + 两行歌词文本）
 export const ICON_LYRICS = `<svg viewBox="0 0 24 24"><rect x="2.5" y="5" width="19" height="14" rx="2.5"/><path d="M6.5 10h7"/><path d="M6.5 14h11"/></svg>`;
 
-// 休息一下 / 小游戏
-export const ICON_GAME = `<svg viewBox="0 0 24 24"><path d="M6 11h4"/><path d="M8 9v4"/><path d="M15 12.5h.01M17.5 10h.01"/><rect x="2" y="6" width="20" height="12" rx="4"/></svg>`;
 export const ICON_GRID = `<svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/></svg>`;
 
 // 灵感碎片

@@ -419,6 +419,7 @@ body {
       .widget-grid {
         display: grid;
         grid-template-columns: repeat(6, 1fr);
+        grid-auto-rows: minmax(150px, auto);
         gap: var(--do-grid-gap);
         padding: var(--do-sp-3);
         align-content: start;
@@ -456,6 +457,7 @@ body {
       .span-1 { grid-column: span 1; }
       .span-2 { grid-column: span 2; }
       .span-4 { grid-column: span 4; }
+      .row-2 { grid-row: span 2; }
 
       /* 1-cell widgets */
       .widget--1 {
@@ -513,13 +515,63 @@ body {
       }
       .widget__title svg { width: 16px; height: 16px; color: var(--do-blue); }
 
-      /* ========== Focus / Habits 1-cell value ========== */
-      .w-value {
-        font-size: 15px;
-        font-weight: 700;
-        font-family: var(--do-font-mono);
-        line-height: 1;
+      /* ========== Notes 2-cell list ========== */
+      .note-list { display: flex; flex-direction: column; gap: var(--do-sp-2); }
+      .note-item {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--do-sp-2);
+        padding: var(--do-sp-2) var(--do-sp-3);
+        border-radius: var(--do-radius-sm);
+        background: var(--do-soft-bg);
+        border: 1px solid var(--do-border);
       }
+      .note-item__title {
+        font-size: 12px;
+        color: var(--do-text);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .note-item__time {
+        font-size: 10px;
+        color: var(--do-text-faint);
+        font-family: var(--do-font-mono);
+        flex-shrink: 0;
+      }
+
+      /* ========== File Center 2-cell list ========== */
+      .file-list { display: flex; flex-direction: column; gap: var(--do-sp-2); }
+      .file-item {
+        display: flex;
+        align-items: center;
+        gap: var(--do-sp-3);
+        padding: var(--do-sp-2) var(--do-sp-3);
+        border-radius: var(--do-radius-sm);
+        background: var(--do-soft-bg);
+        border: 1px solid var(--do-border);
+      }
+      .file-item__icon {
+        width: 30px; height: 30px;
+        flex-shrink: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: var(--do-radius-sm);
+        background: rgba(var(--do-blue-rgb), 0.12);
+        color: var(--do-blue);
+      }
+      .file-item__icon svg { width: 16px; height: 16px; }
+      .file-item__meta { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+      .file-item__name {
+        font-size: 12px;
+        color: var(--do-text);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .file-item__sub { font-size: 10px; color: var(--do-text-faint); }
 
       /* ========== Pomodoro 2-cell ========== */
       .pomo-body {
@@ -730,6 +782,24 @@ body {
       .taskbar-metric--ram { color: var(--do-green); }
       .taskbar-metric--time { font-family: var(--do-font-mono); color: var(--do-text); }
       .taskbar-sep { width: 1px; height: 16px; background: var(--do-border); }
+      .taskbar-fund {
+        display: inline-flex; align-items: center; gap: var(--do-sp-2);
+        padding: 0 var(--do-sp-2);
+      }
+      .taskbar-fund__icon { width: 16px; height: 16px; color: var(--do-amber); flex-shrink: 0; }
+      .taskbar-fund__rows { display: flex; flex-direction: column; gap: 1px; }
+      .taskbar-fund__row {
+        display: flex; align-items: center; gap: var(--do-sp-1);
+        font-size: 10px; line-height: 1.35; white-space: nowrap;
+      }
+      .taskbar-fund__label { color: var(--do-text-faint); }
+      .taskbar-fund__value { font-family: var(--do-font-mono); color: var(--do-text); }
+      .taskbar-fund__chg { font-family: var(--do-font-mono); font-weight: 600; }
+      .taskbar-fund__chg--up { color: var(--do-danger); }
+      .taskbar-fund__chg--down { color: var(--do-green); }
+      .taskbar-fund__pnl { font-family: var(--do-font-mono); font-weight: 600; }
+      .taskbar-fund__pnl--up { color: var(--do-danger); }
+      .taskbar-fund__pnl--down { color: var(--do-green); }
 
       /* ========== Settings Panel ========== */
       .settings-panel {
@@ -843,7 +913,6 @@ body {
           <kbd>K</kbd>
         </div>
         <div class="top-bar__reminders">
-          <span class="pomo-pill">专注 25:00</span>
           <!-- Water glass reminder -->
           <div class="reminder-icon" title="饮水提醒">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -873,123 +942,10 @@ body {
       <div class="widget-grid overflow-y-auto" id="widget-grid" data-scroll-region="primary">
         <div class="widget-grid__guides"></div>
 
-        <!-- Row 1: pomodoro(2) + system(2) + focus-stats(1) + habits(1) -->
+        <!-- Row 1-2: 待办事项 hero(4x2) + 笔记(2) + 音乐(2) -->
 
-        <!-- Pomodoro Widget (2 cells) -->
-        <div class="widget widget--multi span-2" id="pomodoro-widget">
-          <div class="widget__title">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--do-tomato);">
-              <circle cx="12" cy="13" r="8"></circle>
-              <path d="M9 2h6"></path>
-              <path d="M12 9v4"></path>
-            </svg>
-            <span>番茄钟</span>
-          </div>
-          <div class="pomo-body">
-            <div class="pomo-ring">
-              <svg viewBox="0 0 60 60">
-                <circle class="pomo-ring__track" cx="30" cy="30" r="28"></circle>
-                <circle class="pomo-ring__prog" cx="30" cy="30" r="28"></circle>
-              </svg>
-              <span class="pomo-ring__time">25:00</span>
-            </div>
-            <div class="pomo-info">
-              <span class="pomo-mode">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <polygon points="6 3 20 12 6 21 6 3"></polygon>
-                </svg>
-                专注
-              </span>
-              <span class="pomo-status">点击开始</span>
-              <button class="pomo-play" title="开始">
-                <svg viewBox="0 0 24 24" fill="currentColor" stroke="none">
-                  <polygon points="6 3 20 12 6 21 6 3"></polygon>
-                </svg>
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <!-- System Health Widget (2 cells) -->
-        <div class="widget widget--multi span-2" id="system-widget">
-          <div class="widget__title">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <rect x="4" y="4" width="16" height="16" rx="2"></rect>
-              <rect x="9" y="9" width="6" height="6"></rect>
-              <path d="M9 1v3"></path><path d="M15 1v3"></path><path d="M9 20v3"></path><path d="M15 20v3"></path>
-              <path d="M20 9h3"></path><path d="M20 14h3"></path><path d="M1 9h3"></path><path d="M1 14h3"></path>
-            </svg>
-            <span>系统健康</span>
-          </div>
-          <div class="sys-row">
-            <span class="sys-row__label">CPU</span>
-            <div class="sys-row__bar"><div class="sys-row__fill sys-row__fill--cpu"></div></div>
-            <span class="sys-row__val sys-row__val--cpu">23%</span>
-          </div>
-          <div class="sys-row">
-            <span class="sys-row__label">内存</span>
-            <div class="sys-row__bar"><div class="sys-row__fill sys-row__fill--ram"></div></div>
-            <span class="sys-row__val sys-row__val--ram">45%</span>
-          </div>
-          <div class="sys-spark">
-            <svg viewBox="0 0 200 36" preserveAspectRatio="none">
-              <defs>
-                <linearGradient id="sparkGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stop-color="var(--do-chart-cpu)" stop-opacity="0.3"></stop>
-                  <stop offset="100%" stop-color="var(--do-chart-cpu)" stop-opacity="0"></stop>
-                </linearGradient>
-              </defs>
-              <polyline points="0,22 20,20 40,24 60,17 80,21 100,16 120,19 140,14 160,18 180,12 200,15 200,36 0,36"
-                        fill="url(#sparkGrad)"></polyline>
-              <polyline points="0,22 20,20 40,24 60,17 80,21 100,16 120,19 140,14 160,18 180,12 200,15"
-                        fill="none" stroke="var(--do-chart-cpu)" stroke-width="1.5" stroke-linejoin="round"></polyline>
-            </svg>
-          </div>
-          <div class="sys-net">
-            <span class="dl">
-              <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M12 5v14"></path><path d="m19 12-7 7-7-7"></path>
-              </svg>
-              1.2MB/s
-            </span>
-            <span class="ul">
-              <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M12 19V5"></path><path d="m5 12 7-7 7 7"></path>
-              </svg>
-              256KB/s
-            </span>
-          </div>
-        </div>
-
-        <!-- Focus Stats Widget (1 cell) -->
-        <div class="widget widget--1 span-1" id="focus-stats-widget">
-          <div class="w-icon" style="color: var(--do-tomato);">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M12 8c-3.6 0-6.5 2.9-6.5 6.5S8.4 21 12 21s6.5-2.9 6.5-6.5S15.6 8 12 8z"></path>
-              <path d="M12 8c-.8-1.7-2.4-2.7-4.3-2.8.4 1.9 1.7 3.3 3.4 3.8"></path>
-              <path d="M12 8c.8-1.7 2.4-2.7 4.3-2.8-.4 1.9-1.7 3.3-3.4 3.8"></path>
-            </svg>
-          </div>
-          <span class="w-value" style="color: var(--do-tomato);">4 · 2h20m</span>
-          <span class="w-label">今日专注</span>
-        </div>
-
-        <!-- Habits Widget (1 cell) -->
-        <div class="widget widget--1 span-1" id="habits-widget">
-          <div class="w-icon" style="color: var(--do-green);">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
-              <polyline points="22 4 12 14.01 9 11.01"></polyline>
-            </svg>
-          </div>
-          <span class="w-value" style="color: var(--do-green);">3 / 5</span>
-          <span class="w-label">习惯打卡</span>
-        </div>
-
-        <!-- Row 2: tasks(4) + ai(1) + notes(1) -->
-
-        <!-- Tasks Widget (4 cells) -->
-        <div class="widget widget--multi span-4" id="tasks-widget">
+        <!-- Tasks Widget (hero 4x2) -->
+        <div class="widget widget--multi span-4 row-2" id="tasks-widget">
           <div class="task-header">
             <h3>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -1063,32 +1019,34 @@ body {
           </div>
         </div>
 
-        <!-- AI Widget (1 cell) -->
-        <div class="widget widget--1 span-1" id="ai-widget">
-          <div class="w-icon" style="color: var(--do-purple);">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M12 3l1.9 5.8a3 3 0 0 0 2.3 2.3L22 13l-5.8 1.9a3 3 0 0 0-2.3 2.3L12 23l-1.9-5.8a3 3 0 0 0-2.3-2.3L2 13l5.8-1.9a3 3 0 0 0 2.3-2.3L12 3z"></path>
-            </svg>
-          </div>
-          <span class="w-label">AI</span>
-          <span class="w-badge">2</span>
-        </div>
-
-        <!-- Notes Widget (1 cell) -->
-        <div class="widget widget--1 span-1" id="notes-widget">
-          <div class="w-icon" style="color: var(--do-amber);">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <!-- Notes Widget (2 cells) -->
+        <div class="widget widget--multi span-2" id="notes-widget">
+          <div class="widget__title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--do-amber);">
               <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
               <polyline points="14 2 14 8 20 8"></polyline>
               <line x1="8" y1="13" x2="16" y2="13"></line>
               <line x1="8" y1="17" x2="13" y2="17"></line>
             </svg>
+            <span>笔记</span>
           </div>
-          <span class="w-label">笔记</span>
-          <span class="w-badge">3</span>
+          <div class="note-list">
+            <div class="note-item">
+              <span class="note-item__title">周会要点整理</span>
+              <span class="note-item__time">10:24</span>
+            </div>
+            <div class="note-item">
+              <span class="note-item__title">产品灵感 · 桌面组件</span>
+              <span class="note-item__time">昨天</span>
+            </div>
+            <div class="note-item">
+              <span class="note-item__title">读书笔记 · 深度工作</span>
+              <span class="note-item__time">周一</span>
+            </div>
+          </div>
         </div>
 
-        <!-- Row 3: music(2) + scheduler(2) + quickaccess(2) -->
+        <!-- Row 2: music(2) -->
 
         <!-- Music Player Widget (2 cells) -->
         <div class="widget widget--multi span-2" id="music-widget">
@@ -1134,6 +1092,8 @@ body {
             </div>
           </div>
         </div>
+
+        <!-- Row 3: scheduler(2) + quickaccess(2) + file-center(2) -->
 
         <!-- Scheduler Widget (2 cells) -->
         <div class="widget widget--multi span-2" id="scheduler-widget">
@@ -1209,6 +1169,54 @@ body {
           </div>
         </div>
 
+        <!-- File Center Widget (2 cells) -->
+        <div class="widget widget--multi span-2" id="file-center-widget">
+          <div class="widget__title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--do-blue);">
+              <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2z"></path>
+            </svg>
+            <span>文件中心</span>
+          </div>
+          <div class="file-list">
+            <div class="file-item">
+              <span class="file-item__icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                  <polyline points="14 2 14 8 20 8"></polyline>
+                </svg>
+              </span>
+              <div class="file-item__meta">
+                <span class="file-item__name">季度报告.docx</span>
+                <span class="file-item__sub">2.4 MB · 今天 14:20</span>
+              </div>
+            </div>
+            <div class="file-item">
+              <span class="file-item__icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2z"></path>
+                </svg>
+              </span>
+              <div class="file-item__meta">
+                <span class="file-item__name">设计资源</span>
+                <span class="file-item__sub">文件夹 · 12 项</span>
+              </div>
+            </div>
+            <div class="file-item">
+              <span class="file-item__icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="3" y="3" width="18" height="18" rx="2"></rect>
+                  <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                  <polyline points="21 15 16 10 5 21"></polyline>
+                </svg>
+              </span>
+              <div class="file-item__meta">
+                <span class="file-item__name">screen-mockup.png</span>
+                <span class="file-item__sub">1.1 MB · 昨天</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
       </div><!-- /widget-grid -->
 
       <!-- ============ Section 3: Bottom Taskbar ============ -->
@@ -1244,6 +1252,24 @@ body {
           </div>
           <div class="taskbar-sep"></div>
           <div class="taskbar-metric taskbar-metric--time">23:45</div>
+          <div class="taskbar-sep"></div>
+          <div class="taskbar-fund" id="taskbar-fund" title="基金行情：上证指数与当日盈亏">
+            <svg class="taskbar-fund__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="3 17 9 11 13 15 21 7"></polyline>
+              <polyline points="15 7 21 7 21 13"></polyline>
+            </svg>
+            <div class="taskbar-fund__rows">
+              <div class="taskbar-fund__row">
+                <span class="taskbar-fund__label">上证</span>
+                <span class="taskbar-fund__value">3,124.56</span>
+                <span class="taskbar-fund__chg taskbar-fund__chg--up">+0.82%</span>
+              </div>
+              <div class="taskbar-fund__row">
+                <span class="taskbar-fund__label">今日盈利</span>
+                <span class="taskbar-fund__pnl taskbar-fund__pnl--up">+¥386.42</span>
+              </div>
+            </div>
+          </div>
         </div>
 
         <div class="taskbar__right">
@@ -1329,6 +1355,7 @@ body {
           <label class="settings-check"><input type="checkbox" checked> CPU使用率</label>
           <label class="settings-check"><input type="checkbox" checked> 内存使用率</label>
           <label class="settings-check"><input type="checkbox"> 天气</label>
+          <label class="settings-check"><input type="checkbox" checked> 基金行情</label>
         </div>
       </div>
 
