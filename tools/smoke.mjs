@@ -197,6 +197,9 @@ try {
   // ═══════════ 主窗口：文件中心搜索 + 搜索结果右键菜单 ═══════════
   await cdp.send("Page.navigate", { url: `${BASE}/index.html` });
   await waitFor(`document.readyState === "complete"`, "index.html 加载完成");
+  // 一屏工作台：文件中心在「今日概览」模块里，得先点卡片打开全屏浮层
+  await waitFor(`!!document.querySelector('#widget-grid .widget[data-module="dashboard"]')`, "工作台卡片渲染完成");
+  await evaluate(`(() => { const c = document.querySelector('#widget-grid .widget[data-module="dashboard"]'); c && c.click(); return true; })()`);
   await waitFor(`!!document.querySelector("#d-file-search")`, "文件中心渲染出搜索框");
   check(
     "主窗口启动无 JS 异常、无资源加载失败",
@@ -214,7 +217,7 @@ try {
   await waitFor(`document.querySelectorAll("#d-file-results .ev-item").length === 3`, "搜索结果渲染 3 行");
 
   const rows = await evaluate(`Array.from(document.querySelectorAll("#d-file-results .ev-item")).map(r => r.dataset.path)`);
-  eq("结果行携带全盘绝对路径", rows[0], "C:\\Users\\qiuxr\\Documents\\采购\\Q1 汇总表.xlsx");
+  eq("结果行携带全盘绝对路径", rows[0], "C:\\Users\\USER\\Documents\\采购\\Q1 汇总表.xlsx");
   eq("结果行数", rows.length, 3);
   const pathOnly = rows.find((p) => p.includes("\\采购\\"));
   check(
@@ -249,13 +252,13 @@ try {
   await evaluate(`document.querySelector('.file-menu button[data-act="delete"]').click(); true;`);
   await waitFor(`!!document.querySelector(".task-modal-overlay .cm-message")`, "删除确认框出现");
   const dialogText = await evaluate(`document.querySelector(".task-modal-overlay .cm-message").textContent`);
-  check("确认框展示完整路径", dialogText.includes("C:\\Users\\qiuxr\\Documents\\采购\\Q1 汇总表.xlsx"), dialogText.replace(/\n/g, " / "));
+  check("确认框展示完整路径", dialogText.includes("C:\\Users\\USER\\Documents\\采购\\Q1 汇总表.xlsx"), dialogText.replace(/\n/g, " / "));
 
   // 确认删除 → 必须调用**绝对路径作用域**的 delete_path，且 target 为原样全路径
   await evaluate(`window.__smoke.reset(); document.querySelector(".task-modal-overlay .cm-ok").click(); true;`);
   await waitFor(`window.__smoke.callsOf("delete_path").length === 1`, "调用 delete_path");
   const del = await evaluate(`window.__smoke.callsOf("delete_path")[0]`);
-  eq("delete_path 收到完整路径", del.args.target, "C:\\Users\\qiuxr\\Documents\\采购\\Q1 汇总表.xlsx");
+  eq("delete_path 收到完整路径", del.args.target, "C:\\Users\\USER\\Documents\\采购\\Q1 汇总表.xlsx");
   eq("未误用桌面作用域命令 delete_file", (await evaluate(`window.__smoke.callsOf("delete_file").length`)), 0);
 
   // ═══════════ 提醒窗口 ═══════════
@@ -335,14 +338,14 @@ try {
   eq("离开占位态", shownLyric.idle, "0");
   eq("播放态标记已置位", shownLyric.playing, "true");
 
-  // t0 校准：事件带 t0=85、行区间 [83.4, 88.9]，到达瞬间进度应直接对齐到
-  // (85-83.4)/5.5 ≈ 29%，而不是从 0 开始爬 —— 否则每次换行染色都晚一拍。
+  // 2026-11：逐字染色已移除，改成**整句一次性点亮**。
+  // `--p` 只剩 0 / 1 两个值：当前句 = 1（整句品牌色），非当前句 / 占位 = 0。
   const pAligned = await evaluate(`parseFloat(document.getElementById("fill").style.getPropertyValue("--p") || "0")`);
-  check("t0 校准使染色立即对齐到推送时刻", pAligned >= 0.25 && pAligned <= 0.35, `--p = ${pAligned}（期望≈0.29）`);
+  eq("当前句整句点亮（--p 恒为 1）", pAligned, 1);
 
   // 版式：底层与染色层必须像素级重合。
   // 用实测矩形而非截图 —— 绝对定位元素在 flex 容器里纵向位置不可靠，
-  // 一旦错位，染色会与文字本体分离（视觉上是「两层字」），这条断言专门守它。
+  // 一旦错位，高亮会与文字本体分离（视觉上是「两层字」），这条断言专门守它。
   const align = await evaluate(`
     (() => {
       const t = document.getElementById("text").getBoundingClientRect();
@@ -355,22 +358,21 @@ try {
   check("底层与染色层垂直重合", align.dy <= 1, `Δy = ${align.dy}`);
   check("底层与染色层等宽", align.dw <= 1, `Δw = ${align.dw}`);
 
-  // 卡拉OK 染色进度：rAF 插值应继续推进 --p（真浏览器里 rAF 真实运行）
+  // 整句点亮后**没有进度推进**这回事：等一段时间 `--p` 必须纹丝不动。
+  // （原来这里断言「rAF 插值推进」，逐字染色删掉后那条行为已不存在。）
   await sleep(400);
   const p1 = await evaluate(`parseFloat(document.getElementById("fill").style.getPropertyValue("--p") || "0")`);
-  check("rAF 插值推进染色进度", p1 > pAligned, `${pAligned} → ${p1}`);
+  eq("整句点亮后进度不再推进", p1, 1);
 
-  // 暂停 → 按 t0 **精确定位**后冻结（不归零：归零会让进度条跳回行首，像重播这一句）。
-  // 暂停态随 lyric://line 的 playing 字段下发（主窗口在 pause 事件里 force 推一次并带 t0），
-  // 故暂停时进度先对齐到暂停那一刻、再静止 —— 比「保持上一个插值值」更准。
-  // t0=86.5、行区间 [83.4, 88.9] → (86.5-83.4)/5.5 ≈ 0.56
+  // 暂停态：整句依然亮着（句子已经在屏幕上，和播放/暂停无关）。
+  // ⛔ 原来这里断言「按 t0 精确定位到 ≈0.56」—— t0 现在只用于行切换判定，不参与渲染。
   await evaluate(`window.__smoke.fire("lyric://line", { idx: 3, text: "夜色渐浓 灯火也温柔", lineStart: 83.4, lineEnd: 88.9, t0: 86.5, playing: false });`);
   await sleep(60);
   const pPause = await evaluate(`parseFloat(document.getElementById("fill").style.getPropertyValue("--p") || "0")`);
-  check("暂停按 t0 精确定位（≈0.56）", pPause > 0.50 && pPause < 0.62, `--p = ${pPause}`);
+  eq("暂停时整句仍然点亮", pPause, 1);
   await sleep(200);
   const pPause2 = await evaluate(`parseFloat(document.getElementById("fill").style.getPropertyValue("--p") || "0")`);
-  eq("暂停期间进度不再推进", pPause2, pPause);
+  eq("暂停期间状态不变", pPause2, pPause);
 
   // 无歌词占位态：idle=true 时应显示「歌名 — 歌手」，绝不出现空窗
   await evaluate(`window.__smoke.fire("lyric://line", { idx: -1, text: "", title: "夜航", artist: "某某", idle: true, playing: true });`);
@@ -379,6 +381,8 @@ try {
   `);
   eq("无歌词时退化为「歌名 — 歌手」", idleMeta.text, "夜航 — 某某");
   eq("占位态标记为 idle", idleMeta.idle, "1");
+  // 占位态（歌名 — 歌手）不该点亮：它不是在「唱」的歌词
+  eq("占位态不点亮", await evaluate(`parseFloat(document.getElementById("fill").style.getPropertyValue("--p") || "0")`), 0);
 
   // 锁定/穿透切换：这是 P1 的核心行为。穿透是否真的生效只能真机看，
   // 但「切换时是否真的下发了 set_ignore_cursor_events」可以自动断言。
@@ -436,8 +440,8 @@ try {
   problems.length = 0;
   netNoise.length = 0;
   await cdp.send("Page.navigate", { url: `${BASE}/index.html` });
-  await waitFor(`document.readyState === "complete" && !!document.querySelector(".nav-item")`, "主窗口加载完成");
-  await evaluate(`(() => { const n = [...document.querySelectorAll(".nav-item")].find(x => /在线音乐/.test(x.textContent)); n && n.click(); return true; })()`);
+  await waitFor(`document.readyState === "complete" && !!document.querySelector("#widget-grid .widget")`, "主窗口加载完成");
+  await evaluate(`(() => { const n = document.querySelector('#widget-grid .widget[data-module="music"]'); n && n.click(); return true; })()`);
   await waitFor(`!!document.getElementById("mc-lyric")`, "音乐页渲染出桌面歌词按钮");
 
   await evaluate(`window.__smoke.reset(); document.getElementById("mc-lyric").click(); true;`);
@@ -485,14 +489,14 @@ try {
   await evaluate(`(() => { window.__smoke.setLoadState(${JSON.stringify(LYRIC_FIXTURE)}); return true; })()`);
   // 重新加载页面：initPlayback 从 fixture 恢复队列并真实取流+取词（这条路径不依赖视图渲染）
   await cdp.send("Page.navigate", { url: `${BASE}/index.html` });
-  await waitFor(`document.readyState === "complete" && !!document.querySelector(".nav-item")`, "带音源 fixture 重新加载");
+  await waitFor(`document.readyState === "complete" && !!document.querySelector("#widget-grid .widget")`, "带音源 fixture 重新加载");
   await sleep(600);   // 等 initPlayback 的异步取流/取词落地
 
   // 关键：歌词窗口未打开时，一次 IPC 都不该发（闸门关闭 = 零开销）
   eq("未开启歌词窗口时不推送（闸门关闭）", await evaluate(`window.__smoke.callsOf("lyric_sync").length`), 0);
 
   // 开启歌词窗口 → 应立即推送首屏，且带真实歌名（证明 initPlayback 路径上的数据是活的）
-  await evaluate(`(() => { const n = [...document.querySelectorAll(".nav-item")].find(x => /在线音乐/.test(x.textContent)); n && n.click(); return true; })()`);
+  await evaluate(`(() => { const n = document.querySelector('#widget-grid .widget[data-module="music"]'); n && n.click(); return true; })()`);
   await waitFor(`!!document.getElementById("mc-lyric")`, "音乐页渲染");
   await evaluate(`window.__smoke.reset(); document.getElementById("mc-lyric").click(); true;`);
   await sleep(300);
@@ -560,9 +564,10 @@ try {
   await sleep(80);
 
 
-  // ── 逐字裁切：切到歌词窗口页，验证「按字推进」而非整行线性扫描 ──
-  // 判据：同样 t=1s，线性扫描只到 10%（1/10），按字推进应到 25%（第一个字刚好唱完）。
-  // 这是「不准确到字」的回归防线。
+  // ── 整句点亮（2026-11 取代逐字裁切）──
+  // 用户要求「不要按字了」：现在无论有没有逐字时间轴，当前句都**整句**点亮，
+  // `--p` 恒为 1，不再有「推进到 25% / 10%」这种中间态。
+  // 三条断言守的是「不管喂什么数据，结果都是整句亮」。
   await cdp.send("Page.navigate", { url: `${BASE}/lyric.html` });
   await waitFor(`document.readyState === "complete" && !!document.getElementById("bar")`, "歌词页加载");
   await waitFor(`window.__smoke.callsOf("lyric_ready").length >= 1`, "歌词页握手");
@@ -571,21 +576,21 @@ try {
   await evaluate(`window.__smoke.fire("lyric://line", ${JSON.stringify(WORDS_LINE)}); true;`);
   await sleep(120);
   const pWord = await evaluate(`parseFloat(document.getElementById("fill").style.getPropertyValue("--p") || "0")`);
-  check("逐字裁切：t=1s 时进度≈25%（第一字唱完），而非线性扫描的 10%", pWord > 0.15 && pWord < 0.40,
-    `--p = ${pWord}（线性扫描会是 0.10）`);
+  eq("带逐字时间轴时也是整句点亮（--p=1，不做逐字裁切）", pWord, 1);
 
-  // 无逐字数据时必须回退线性扫描（不能因为拿不到逐字就完全不染色）
+  // 无逐字数据：同样整句点亮（不再区分「线性扫描回退」）
   await evaluate(`window.__smoke.fire("lyric://line", { idx: 0, text: "夜色渐浓", lineStart: 0, lineEnd: 10, t0: 1, playing: false }); true;`);
   await sleep(120);
   const pLinear = await evaluate(`parseFloat(document.getElementById("fill").style.getPropertyValue("--p") || "0")`);
-  check("无逐字数据时回退整行线性扫描", pLinear > 0.05 && pLinear < 0.15, `--p = ${pLinear}（期望≈0.10）`);
+  eq("无逐字数据时同样整句点亮", pLinear, 1);
 
-  // 逐字片段与行文本不匹配时也必须回退（防宽度映射错位导致染色跑到字缝里）
+  // 逐字片段与行文本不匹配：以前要回退线性扫描防错位；现在根本不看 words，
+  // 因此结果与上两条一致 —— 这条守的是「words 已彻底不参与渲染」。
   await evaluate(`window.__smoke.fire("lyric://line", { idx: 0, text: "完全不同的文本", lineStart: 0, lineEnd: 10, t0: 1, playing: false,
     words: [{ t: 0, d: 1, text: "夜" }, { t: 1, d: 1, text: "色" }] }); true;`);
   await sleep(120);
   const pMismatch = await evaluate(`parseFloat(document.getElementById("fill").style.getPropertyValue("--p") || "0")`);
-  check("逐字与行文本不匹配时回退线性扫描", pMismatch > 0.05 && pMismatch < 0.15, `--p = ${pMismatch}`);
+  eq("words 与文本不匹配也不影响（已不参与渲染）", pMismatch, 1);
 
   // ── P3/P4：工具条按钮与锁定联动 ──
   // 形态/样式曾是右键菜单，已改为工具条上的可见按钮：
@@ -880,8 +885,8 @@ try {
 
   // ── 回到主窗口：验证关闭闸门与按钮态复位 ──
   await cdp.send("Page.navigate", { url: `${BASE}/index.html` });
-  await waitFor(`document.readyState === "complete" && !!document.querySelector(".nav-item")`, "回到主窗口");
-  await evaluate(`(() => { const n = [...document.querySelectorAll(".nav-item")].find(x => /在线音乐/.test(x.textContent)); n && n.click(); return true; })()`);
+  await waitFor(`document.readyState === "complete" && !!document.querySelector("#widget-grid .widget")`, "回到主窗口");
+  await evaluate(`(() => { const n = document.querySelector('#widget-grid .widget[data-module="music"]'); n && n.click(); return true; })()`);
   await waitFor(`!!document.getElementById("mc-lyric")`, "音乐页重新渲染");
   // 重新开启再关闭，验证闸门开关
   await evaluate(`document.getElementById("mc-lyric").click(); true;`);
@@ -900,7 +905,7 @@ try {
   // ── 系统设置：不应再有「桌面歌词」区段 ──
   // 配置入口已全部迁到歌词条工具条（形态/样式/字号/偏移/配色/开关），设置页只留其他系统项。
   // 反向断言防回归：将来谁往设置页加回歌词控件，这里会立刻暴露两套入口并存的分叉。
-  await evaluate(`(() => { const n = [...document.querySelectorAll(".nav-item")].find(x => /系统设置/.test(x.textContent)); n && n.click(); return true; })()`);
+  await evaluate(`(() => { const b = document.getElementById('tb-settings'); b && b.click(); return true; })()`);
   await waitFor(`!!document.querySelector(".sec-title")`, "设置页渲染完成");
   eq("系统设置不含「桌面歌词」文案", await evaluate(`document.body.innerHTML.includes("桌面歌词")`), false);
   const lyIdsLeft = await evaluate(`["ly-enabled", "ly-hover", "ly-autolock", "ly-size", "ly-pos-reset", "ly-form", "ly-style", "ly-offset", "ly-color-text", "ly-color-fill"].filter((id) => document.getElementById(id)).join(",")`);
@@ -927,3 +932,4 @@ try {
 const pass = results.filter((r) => r.pass).length;
 console.log(`\n断言 ${pass}/${results.length} 通过${failed ? "，执行中断" : ""}`);
 cleanup(!failed && problems.length === 0 && netNoise.length === 0 ? 0 : 1);
+

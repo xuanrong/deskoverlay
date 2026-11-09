@@ -3,7 +3,7 @@
 // 自定义标签存于 state.ideaTags，统一用青色系。
 import { state, saveState } from "../state.js";
 import { showDialog, fitTextarea } from "./common.js";
-import { ICON_CLOSE } from "../icons.js";
+import { ICON_CLOSE, ICON_EDIT } from "../icons.js";
 import { esc, uid, ymd, hhmm } from "../utils.js";
 
 // 随手记输入区最大自适应高度（超出后内部滚动）
@@ -196,7 +196,7 @@ export function renderIdeabox(view) {
         </div>
         <div class="idea-text">${esc(it.text)}</div>
         <div class="idea-acts">
-          <button class="idea-edit" data-id="${esc(it.id)}" title="编辑">✎</button>
+          <button class="idea-edit" data-id="${esc(it.id)}" title="编辑">${ICON_EDIT}</button>
           <button class="idea-del" data-id="${esc(it.id)}" title="删除">${ICON_CLOSE}</button>
         </div>
       </div>`;
@@ -289,7 +289,7 @@ export function renderIdeabox(view) {
   }
 
   addBtn.addEventListener("click", add);
-  // 回车 = 换行（默认行为）；Ctrl/Cmd+回车 = 记录（与工作记录录入一致）
+  // 回车 = 换行（默认行为）；Ctrl/Cmd+回车 = 记录（多行输入框的通用习惯）
   inputEl.addEventListener("keydown", (e) => {
     if (e.isComposing || e.key !== "Enter") return;
     if (e.ctrlKey || e.metaKey) {

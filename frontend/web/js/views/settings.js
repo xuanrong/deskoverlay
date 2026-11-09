@@ -1,12 +1,13 @@
-// 系统设置视图：偏好 / 外观主题 / 插件 / 隐私锁定 / 备份恢复 / 关于。持久化到 state.settings / state.theme / state.lock / state.plugins。
+// 系统设置视图：通用 / 外观 / 隐私 / 护眼 / 备份恢复 / 关于，左侧导航切换分区。
+// 持久化到 state.settings / state.theme / state.lock / state.eyeCare。
 import { state, saveState, loadState } from "../state.js";
 import { invoke } from "../bus.js";
 import { showDialog } from "./common.js";
 import { esc } from "../utils.js";
-import { getPlugins, addPlugin, removePlugin } from "../plugins.js";
 import { pushLockEnabled } from "../lock.js";
 import { Theme, ACCENT_PRESETS, BUILTIN_SKINS, computeAccent } from "../theme.js";
 import { toast } from "../toast.js";
+import { ICON_GEAR, ICON_PALETTE, ICON_LOCK, ICON_EYE, ICON_ARCHIVE, ICON_INFO, ICON_TICK } from "../icons.js";
 import { setEyeCare, restoreNativeColor, getEyeCareStatus, onEyeCareChange } from "../eyeCare.js";
 
 // hex(#rrggbb) → [h, s, l]（s/l 0-100），供自定义主题色取色器使用
@@ -53,6 +54,9 @@ function isEcPresetActive(p) {
 export function renderSettings(view) {
   view.header.style.display = "none";
   const body = view.body;
+  // 当前分区要活在 renderBody 之外 —— 切皮肤 / 改主题色都会触发重渲染，
+  // 状态若放在里面就会被重置回「通用」，用户会看到页面自己跳走。
+  let currentPane = "general";
   renderBody();
 
   function renderBody() {
@@ -120,301 +124,350 @@ export function renderSettings(view) {
       return `<div class="set-desc">使用内置桌面渐变背景</div>`;
     }
 
-    const plugins = getPlugins();
+    // 当前分区：重渲染（切皮肤/改主题等）后要保持停在原地，不能跳回第一个。
+    const activePane = currentPane;
+    // 图标一律用 SVG（icons.js），不用 emoji —— emoji 会随系统字体渲染成彩色字形，
+    // 深浅主题下颜色失控，也和全局 1.6 描边的线性图标风格不一致。
+    const panes = [
+      { id: "general", name: "通用", icon: ICON_GEAR },
+      { id: "appearance", name: "外观", icon: ICON_PALETTE },
+      { id: "privacy", name: "隐私", icon: ICON_LOCK },
+      { id: "eyecare", name: "护眼", icon: ICON_EYE },
+      { id: "backup", name: "备份", icon: ICON_ARCHIVE },
+      { id: "about", name: "关于", icon: ICON_INFO },
+    ];
+
     body.innerHTML = `
-      <div class="set-panel">
-        <div class="sec-title">通用</div>
-        <div class="set-row">
-          <div class="set-info">
-            <div class="set-name">记住上次所在模块</div>
-            <div class="set-desc">每次启动时回到上次浏览的模块；关闭则始终从「今日概览」开始</div>
-          </div>
-          <label class="set-toggle"><input type="checkbox" id="set-remember" ${state.settings?.rememberModule ? "checked" : ""} /><span></span></label>
-        </div>
-        <div class="set-row">
-          <div class="set-info">
-            <div class="set-name">开机自动启动</div>
-            <div class="set-desc">随 Windows 登录静默启动；可在任务管理器 → 启动应用中管理</div>
-          </div>
-          <label class="set-toggle"><input type="checkbox" id="set-autostart" /><span></span></label>
-        </div>
-      </div>
-
-      <div class="set-panel">
-        <div class="sec-title">外观</div>
-        <div class="set-row">
-          <div class="set-info">
-            <div class="set-name">主题方案</div>
-            <div class="set-desc">深色 / 浅色玻璃；「跟随系统」随 Windows 深浅色自动切换</div>
-          </div>
-          <div class="seg-group" id="th-scheme">
-            <button data-v="dark" class="${t.scheme === "dark" ? "active" : ""}">深色</button>
-            <button data-v="light" class="${t.scheme === "light" ? "active" : ""}">浅色</button>
-            <button data-v="auto" class="${t.scheme === "auto" ? "active" : ""}">跟随系统</button>
-          </div>
-        </div>
-
-        <div class="set-row" style="flex-direction:column;align-items:stretch">
-          <div class="set-info"><div class="set-name">皮肤</div><div class="set-desc">一键应用整套视觉（方案 + 主题色 + 背景 + 玻璃质感）</div></div>
-          <div class="th-skins" id="th-skins">
-            ${BUILTIN_SKINS.map((s) => `
-              <div class="th-skin${t.skinId === s.id ? " active" : ""}" data-id="${s.id}" title="${esc(s.name)}">
-                <div class="ts-preview" style="background:${skinPreviewBg(s)}">
-                  <span class="ts-dot" style="background:${skinPreviewAccent(s)}"></span>
-                </div>
-                <div class="ts-name"><span>${esc(s.name)}</span><span class="ts-check">✓</span></div>
-              </div>`).join("")}
-          </div>
-        </div>
-
-        <div class="set-row" style="flex-direction:column;align-items:stretch">
-          <div class="set-info"><div class="set-name">主题色</div><div class="set-desc">主强调色（激活 / 链接 / 按钮），实时预览</div></div>
-          <div class="th-swatches" id="th-swatches">
-            ${ACCENT_PRESETS.map((p) => {
-              const active = t.accent.mode === "preset" && t.accent.presetId === p.id;
-              return `<div class="th-swatch${active ? " active" : ""}" data-id="${p.id}" title="${p.name}" style="background:hsl(${p.hsl[0]},${p.hsl[1]}%,${p.hsl[2]}%)"></div>`;
-            }).join("")}
-            <input type="color" class="th-swatch-custom" id="th-accent-custom" title="自定义" value="${currentAccentHex()}" />
-          </div>
-          <div class="th-preview">
-            <button class="tp-btn" tabindex="-1">按钮</button>
-            <span class="tp-link" tabindex="-1">链接文字</span>
-            <span class="tp-chip" tabindex="-1">高亮标签</span>
-          </div>
-        </div>
-
-        <div class="set-row" style="flex-direction:column;align-items:stretch">
-          <div class="set-info"><div class="set-name">背景</div><div class="set-desc">工作台画布背景：图片 / 纯色 / 渐变（自带暗化遮罩保证可读性）</div></div>
-          <div class="seg-group" id="th-bg-type">
-            <button data-v="none" class="${t.background.type === "none" ? "active" : ""}">默认</button>
-            <button data-v="image" class="${t.background.type === "image" ? "active" : ""}">图片</button>
-            <button data-v="color" class="${t.background.type === "color" ? "active" : ""}">纯色</button>
-            <button data-v="gradient" class="${t.background.type === "gradient" ? "active" : ""}">渐变</button>
-          </div>
-          <div id="th-bg-extra" style="margin-top:8px">
-            ${bgExtraHtml()}
-          </div>
-        </div>
-
-        <div class="set-row" style="flex-direction:column;align-items:stretch">
-          <div class="set-info"><div class="set-name">玻璃质感</div><div class="set-desc">面板透明度与模糊强度（0% = 关闭模糊，更省 GPU；拖动实时预览，松手保存）</div></div>
-          <div class="set-row" style="padding:4px 0">
-            <div class="th-range"><span style="font-size:var(--text-xs);color:var(--text-dim);min-width:64px">面板透明度</span>
-              <input type="range" id="th-alpha" min="40" max="95" step="1" value="${Math.round(t.glass.panelAlpha * 100)}" />
-              <span class="th-range-val" id="th-alpha-val">${Math.round(t.glass.panelAlpha * 100)}%</span>
-            </div>
-          </div>
-          <div class="set-row" style="padding:4px 0">
-            <div class="th-range"><span style="font-size:var(--text-xs);color:var(--text-dim);min-width:64px">模糊强度</span>
-              <input type="range" id="th-blur" min="0" max="150" step="5" value="${Math.round(t.glass.blurMult * 100)}" />
-              <span class="th-range-val" id="th-blur-val">${Math.round(t.glass.blurMult * 100)}%</span>
-            </div>
-          </div>
-        </div>
-
-        <div class="set-row">
-          <div class="set-info">
-            <div class="set-name">恢复默认外观</div>
-            <div class="set-desc">重置为「午夜玻璃」默认深色主题</div>
-          </div>
-          <button class="btn-ghost" id="th-reset">重置</button>
-        </div>
-      </div>
-
-        </div>
-      </div>
-
-      <div class="set-panel">
-        <div class="sec-title">插件</div>
-        <div class="set-desc" style="padding:4px 0">通过 .zip 插件包扩展工作台模块（内含前端与后端源码/预编译 wasm），插件不内置于应用。</div>
-        ${
-          plugins.length
-            ? plugins.map((p) => `
-                <div class="set-row">
-                  <div class="set-info">
-                    <div class="set-name">${esc(p.title || p.id || "未命名")}${p.loaded ? "" : " <span style='color:var(--danger);font-size:11px'>（加载失败）</span>"}</div>
-                    <div class="set-desc" style="word-break:break-all">${esc(p.path)}</div>
-                  </div>
-                  <div class="set-input">
-                    <button class="btn-ghost plugin-rm" data-path="${esc(p.path)}">移除</button>
-                  </div>
-                </div>`).join("")
-            : `<div class="dash-empty">暂无插件</div>`
-        }
-        <div class="set-row">
-          <div class="set-info"><div class="set-name">添加插件</div><div class="set-desc">选择 .zip 插件包（含前端 + backend 源码/预编译 wasm，自动注册/加载并运行）</div></div>
-          <button class="btn-primary" id="set-plugin-add">选择插件包(zip)</button>
-        </div>
-      </div>
-
-      <div class="set-panel">
-        <div class="sec-title">隐私</div>
-        <div class="set-row">
-          <div class="set-info">
-            <div class="set-name">离开后自动锁定</div>
-            <div class="set-desc">离开电脑一段时间后弹出全屏遮罩，防止他人偷看</div>
-          </div>
-          <label class="set-toggle"><input type="checkbox" id="set-lock" ${state.lock?.enabled ? "checked" : ""} /><span></span></label>
-        </div>
-        <div class="set-row">
-          <div class="set-info">
-            <div class="set-name">自动锁定等待时间</div>
-            <div class="set-desc">多少分钟后触发锁定（1–120 分钟）</div>
-          </div>
-          <div class="set-input">
-            <input type="number" id="set-lock-min" min="1" max="120" step="1" value="${state.lock?.minutes ?? 5}" />
-            <span class="set-unit">分钟</span>
-          </div>
-        </div>
-        <div class="set-row">
-          <div class="set-info">
-            <div class="set-name">检测媒体播放</div>
-            <div class="set-desc">测试当前是否有视频/音乐在播放（与“播放时不锁屏”同一判定逻辑）</div>
-          </div>
-          <button class="btn-ghost" id="set-media-test">测试</button>
-        </div>
-        <div class="set-row">
-          <div class="set-info">
-            <div class="set-name">锁屏弹窗测试</div>
-            <div class="set-desc">立即弹出全屏锁屏窗口预览效果，点击中央太阳即可解锁返回</div>
-          </div>
-          <button class="btn-ghost" id="set-lock-test">预览</button>
-        </div>
-      </div>
-
-      <div class="set-panel">
-        <div class="sec-title">护眼（全局）</div>
-        <div class="set-row">
-          <div class="set-info">
-            <div class="set-name">全局护眼模式</div>
-            <div class="set-desc">调节显卡 Gamma 输出，对整机所有应用生效（含全屏视频、游戏）；关闭后精确还原原色</div>
-          </div>
-          <label class="set-toggle"><input type="checkbox" id="ec-enable" ${state.eyeCare?.enabled ? "checked" : ""} /><span></span></label>
-        </div>
-
-        <div class="set-row" style="flex-direction:column;align-items:stretch">
-          <div class="set-info"><div class="set-name">预设</div><div class="set-desc">一键套用色温档位，仍可继续微调</div></div>
-          <div class="th-skins" id="ec-presets">
-            ${EC_PRESETS.map((p) => `
-              <div class="th-skin${isEcPresetActive(p) ? " active" : ""}" data-id="${p.id}" title="${esc(p.desc)}">
-                <div class="ts-preview" style="background:${ecPresetPreview(p)}">
-                  <span class="ts-dot" style="background:${ecPresetAccent(p)}"></span>
-                </div>
-                <div class="ts-name"><span>${esc(p.name)}</span><span class="ts-check">✓</span></div>
-              </div>`).join("")}
-          </div>
-        </div>
-
-        <div class="set-row" style="flex-direction:column;align-items:stretch">
-          <div class="set-info"><div class="set-name">模式</div><div class="set-desc">固定色温，或按时间段自动在日/夜色温间切换</div></div>
-          <div class="seg-group" id="ec-mode">
-            <button data-v="manual" class="${state.eyeCare?.mode !== "schedule" ? "active" : ""}">固定色温</button>
-            <button data-v="schedule" class="${state.eyeCare?.mode === "schedule" ? "active" : ""}">按时段</button>
-          </div>
-        </div>
-
-        ${state.eyeCare?.mode === "schedule" ? `
-        <div class="set-row" style="flex-direction:column;align-items:stretch">
-          <div class="set-info"><div class="set-name">时段设置</div><div class="set-desc">夜间时段内使用夜间色温；切换点前 ${state.eyeCare?.transitionMin ?? 30} 分钟内平滑过渡，不会到点突变</div></div>
-          <div class="ec-sched">
-            <div class="ec-sched-row">
-              <span class="ec-sched-label">夜间时段</span>
-              <input type="time" id="ec-from" value="${esc(state.eyeCare?.from ?? "22:00")}" />
-              <span class="ec-sched-sep">→</span>
-              <input type="time" id="ec-to" value="${esc(state.eyeCare?.to ?? "07:00")}" />
-            </div>
-            <div class="ec-sched-row">
-              <span class="ec-sched-label">白天色温</span>
-              <input type="range" id="ec-day-k" min="2000" max="6500" step="100" value="${state.eyeCare?.dayKelvin ?? 5500}" />
-              <span class="th-range-val" id="ec-day-k-val">${state.eyeCare?.dayKelvin ?? 5500}K</span>
-            </div>
-            <div class="ec-sched-row">
-              <span class="ec-sched-label">夜间色温</span>
-              <input type="range" id="ec-night-k" min="2000" max="6500" step="100" value="${state.eyeCare?.nightKelvin ?? 3400}" />
-              <span class="th-range-val" id="ec-night-k-val">${state.eyeCare?.nightKelvin ?? 3400}K</span>
-            </div>
-            <div class="ec-sched-row">
-              <span class="ec-sched-label">过渡时长</span>
-              <input type="range" id="ec-trans" min="0" max="120" step="5" value="${state.eyeCare?.transitionMin ?? 30}" />
-              <span class="th-range-val" id="ec-trans-val">${state.eyeCare?.transitionMin ?? 30}分</span>
-            </div>
-          </div>
-        </div>` : ""}
-
-        ${state.eyeCare?.mode === "schedule" ? "" : `
-        <div class="set-row" style="flex-direction:column;align-items:stretch">
-          <div class="set-info"><div class="set-name">色温</div><div class="set-desc">数值越低越暖（蓝光越少）；建议日间 5500K、夜间 3400K 左右</div></div>
-          <div class="th-range">
-            <input type="range" id="ec-kelvin" min="2000" max="6500" step="100" value="${state.eyeCare?.kelvin ?? 4500}" />
-            <span class="th-range-val" id="ec-kelvin-val">${state.eyeCare?.kelvin ?? 4500}K</span>
-          </div>
-        </div>`}
-
-        <div class="set-row" style="flex-direction:column;align-items:stretch">
-          <div class="set-info"><div class="set-name">亮度</div><div class="set-desc">压低显卡输出亮度（显示器背光不变，故更护眼也更省电）</div></div>
-          <div class="th-range">
-            <input type="range" id="ec-bright" min="50" max="100" step="1" value="${state.eyeCare?.brightness ?? 90}" />
-            <span class="th-range-val" id="ec-bright-val">${state.eyeCare?.brightness ?? 90}%</span>
-          </div>
-        </div>
-
-        <div class="set-row" style="flex-direction:column;align-items:stretch">
-          <div class="set-info"><div class="set-name">对比度</div><div class="set-desc">收敛明暗反差，缓解长时间阅读的调节负担</div></div>
-          <div class="th-range">
-            <input type="range" id="ec-contrast" min="80" max="100" step="1" value="${state.eyeCare?.contrast ?? 95}" />
-            <span class="th-range-val" id="ec-contrast-val">${state.eyeCare?.contrast ?? 95}%</span>
-          </div>
-        </div>
-
-        <div class="set-row">
-          <div class="set-info">
-            <div class="set-name">恢复原色</div>
-            <div class="set-desc">立即还原显示器原始色彩并关闭护眼（修图、调色等需要准确色彩时使用）</div>
-          </div>
-          <button class="btn-ghost" id="ec-restore">恢复原色</button>
-        </div>
-
-        <div class="set-row" id="ec-status-row" hidden>
-          <div class="set-info">
-            <div class="set-name" id="ec-status-name">状态</div>
-            <div class="set-desc" id="ec-status-desc"></div>
-          </div>
-        </div>
-      </div>
-
-      <div class="set-panel">
-        <div class="sec-title">备份与恢复</div>
-        <div class="set-row">
-          <div class="set-info">
-            <div class="set-name">导出备份</div>
-            <div class="set-desc">打包所有用户数据：笔记、工作记录、灵感碎片、任务、设置、定时任务的运行历史与热力图、已安装插件。不含可重建的缓存（全盘索引、壁纸副本）。</div>
-          </div>
-          <button class="btn-primary" id="set-backup">导出备份</button>
-        </div>
-        <div class="set-row">
-          <div class="set-info">
-            <div class="set-name">恢复备份</div>
-            <div class="set-desc">从 zip 备份文件恢复数据，当前数据将被覆盖（恢复前会自动备份当前数据，可回退）</div>
-          </div>
-          <button class="btn-ghost" id="set-restore">选择备份文件</button>
-        </div>
-      </div>
-
-      <div class="set-panel">
-        <div class="sec-title">关于</div>
-        <div class="set-row">
-          <div class="set-info"><div class="set-name">DeskOverlay</div><div class="set-desc">Windows 桌面工作台 · 数据本地持久化</div></div>
-          <div class="set-value">v0.3.0</div>
+      <div class="set-layout">
+        <nav class="set-nav" id="set-nav">
+          ${panes.map((p) => `
+            <button class="set-nav__item${p.id === activePane ? " active" : ""}" data-pane="${p.id}">
+              <span class="set-nav__icon">${p.icon}</span>
+              <span class="set-nav__name">${p.name}</span>
+            </button>`).join("")}
+        </nav>
+        <div class="set-content" id="set-content">
+          ${renderPane(activePane)}
         </div>
       </div>`;
 
-    body.querySelector("#set-remember").addEventListener("change", (e) => {
-      if (!state.settings) state.settings = {};
-      state.settings.rememberModule = e.target.checked;
-      saveState();
+    // 左侧导航：切分区只重画右侧内容区，不重建整个面板 ——
+    // 否则每点一次都要重新绑定所有控件事件，滑杆会闪。
+    body.querySelectorAll(".set-nav__item").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const id = btn.dataset.pane;
+        if (!id || id === currentPane) return;
+        currentPane = id;
+        body.querySelectorAll(".set-nav__item").forEach((b) => {
+          b.classList.toggle("active", b.dataset.pane === id);
+        });
+        const content = body.querySelector("#set-content");
+        if (content) content.innerHTML = renderPane(id);
+        bindPaneEvents(id);
+      });
     });
+
+    bindPaneEvents(activePane);
+    // ---- 各分区内容 ----
+    // 拆成函数而不是一整段模板：左侧导航只渲染当前分区，
+    // 既避免一次性铺 6 屏内容，也让「切分区」与「重渲染」走同一条路径。
+    function renderPane(id) {
+      switch (id) {
+        case "general": return paneGeneral();
+        case "appearance": return paneAppearance();
+        case "privacy": return panePrivacy();
+        case "eyecare": return paneEyeCare();
+        case "backup": return paneBackup();
+        case "about": return paneAbout();
+        default: return paneGeneral();
+      }
+    }
+
+    function paneGeneral() {
+      return `
+        <div class="set-panel">
+          <div class="sec-title">通用</div>
+          <div class="set-row">
+            <div class="set-info">
+              <div class="set-name">开机自动启动</div>
+              <div class="set-desc">随 Windows 登录静默启动；可在任务管理器 → 启动应用中管理</div>
+            </div>
+            <label class="set-toggle"><input type="checkbox" id="set-autostart" /><span></span></label>
+          </div>
+        </div>`;
+    }
+
+    function paneAppearance() {
+      return `
+        <div class="set-panel">
+          <div class="sec-title">主题</div>
+          <div class="set-row">
+            <div class="set-info">
+              <div class="set-name">主题方案</div>
+              <div class="set-desc">深色 / 浅色玻璃；「跟随系统」随 Windows 深浅色自动切换</div>
+            </div>
+            <div class="seg-group" id="th-scheme">
+              <button data-v="dark" class="${t.scheme === "dark" ? "active" : ""}">深色</button>
+              <button data-v="light" class="${t.scheme === "light" ? "active" : ""}">浅色</button>
+              <button data-v="auto" class="${t.scheme === "auto" ? "active" : ""}">跟随系统</button>
+            </div>
+          </div>
+
+          <div class="set-row" style="flex-direction:column;align-items:stretch">
+            <div class="set-info"><div class="set-name">皮肤</div><div class="set-desc">一键应用整套视觉（方案 + 主题色 + 背景 + 玻璃质感）</div></div>
+            <div class="th-skins" id="th-skins">
+              ${BUILTIN_SKINS.map((s) => `
+                <div class="th-skin${t.skinId === s.id ? " active" : ""}" data-id="${s.id}" title="${esc(s.name)}">
+                  <div class="ts-preview" style="background:${skinPreviewBg(s)}">
+                    <span class="ts-dot" style="background:${skinPreviewAccent(s)}"></span>
+                  </div>
+                  <div class="ts-name"><span>${esc(s.name)}</span><span class="ts-check">${ICON_TICK}</span></div>
+                </div>`).join("")}
+            </div>
+          </div>
+
+          <div class="set-row" style="flex-direction:column;align-items:stretch">
+            <div class="set-info"><div class="set-name">主题色</div><div class="set-desc">主强调色（激活 / 链接 / 按钮），实时预览</div></div>
+            <div class="th-swatches" id="th-swatches">
+              ${ACCENT_PRESETS.map((p) => {
+                const active = t.accent.mode === "preset" && t.accent.presetId === p.id;
+                return `<div class="th-swatch${active ? " active" : ""}" data-id="${p.id}" title="${p.name}" style="background:hsl(${p.hsl[0]},${p.hsl[1]}%,${p.hsl[2]}%)"></div>`;
+              }).join("")}
+              <input type="color" class="th-swatch-custom" id="th-accent-custom" title="自定义" value="${currentAccentHex()}" />
+            </div>
+            <div class="th-preview">
+              <button class="tp-btn" tabindex="-1">按钮</button>
+              <span class="tp-link" tabindex="-1">链接文字</span>
+              <span class="tp-chip" tabindex="-1">高亮标签</span>
+            </div>
+          </div>
+
+          <div class="set-row" style="flex-direction:column;align-items:stretch">
+            <div class="set-info"><div class="set-name">背景</div><div class="set-desc">工作台画布背景：图片 / 纯色 / 渐变（自带暗化遮罩保证可读性）</div></div>
+            <div class="seg-group" id="th-bg-type">
+              <button data-v="none" class="${t.background.type === "none" ? "active" : ""}">默认</button>
+              <button data-v="image" class="${t.background.type === "image" ? "active" : ""}">图片</button>
+              <button data-v="color" class="${t.background.type === "color" ? "active" : ""}">纯色</button>
+              <button data-v="gradient" class="${t.background.type === "gradient" ? "active" : ""}">渐变</button>
+            </div>
+            <div id="th-bg-extra" style="margin-top:8px">
+              ${bgExtraHtml()}
+            </div>
+          </div>
+        </div>
+
+        <div class="set-panel">
+          <div class="sec-title">质感</div>
+          <div class="set-row" style="flex-direction:column;align-items:stretch">
+            <div class="set-info"><div class="set-name">玻璃质感</div><div class="set-desc">面板透明度与模糊强度（0% = 关闭模糊，更省 GPU；拖动实时预览，松手保存）</div></div>
+            <div class="set-row" style="padding:4px 0">
+              <div class="th-range"><span style="font-size:var(--text-xs);color:var(--text-dim);min-width:64px">面板透明度</span>
+                <input type="range" id="th-alpha" min="40" max="95" step="1" value="${Math.round(t.glass.panelAlpha * 100)}" />
+                <span class="th-range-val" id="th-alpha-val">${Math.round(t.glass.panelAlpha * 100)}%</span>
+              </div>
+            </div>
+            <div class="set-row" style="padding:4px 0">
+              <div class="th-range"><span style="font-size:var(--text-xs);color:var(--text-dim);min-width:64px">模糊强度</span>
+                <input type="range" id="th-blur" min="0" max="150" step="5" value="${Math.round(t.glass.blurMult * 100)}" />
+                <span class="th-range-val" id="th-blur-val">${Math.round(t.glass.blurMult * 100)}%</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="set-row">
+            <div class="set-info">
+              <div class="set-name">恢复默认外观</div>
+              <div class="set-desc">重置为「午夜玻璃」默认深色主题</div>
+            </div>
+            <button class="btn-ghost" id="th-reset">重置</button>
+          </div>
+        </div>`;
+    }
+
+    function panePrivacy() {
+      return `
+        <div class="set-panel">
+          <div class="sec-title">锁定</div>
+          <div class="set-row">
+            <div class="set-info">
+              <div class="set-name">离开后自动锁定</div>
+              <div class="set-desc">离开电脑一段时间后弹出全屏遮罩，防止他人偷看</div>
+            </div>
+            <label class="set-toggle"><input type="checkbox" id="set-lock" ${state.lock?.enabled ? "checked" : ""} /><span></span></label>
+          </div>
+          <div class="set-row">
+            <div class="set-info">
+              <div class="set-name">自动锁定等待时间</div>
+              <div class="set-desc">多少分钟后触发锁定（1–120 分钟）</div>
+            </div>
+            <div class="set-input">
+              <input type="number" id="set-lock-min" min="1" max="120" step="1" value="${state.lock?.minutes ?? 5}" />
+              <span class="set-unit">分钟</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="set-panel">
+          <div class="sec-title">测试</div>
+          <div class="set-row">
+            <div class="set-info">
+              <div class="set-name">检测媒体播放</div>
+              <div class="set-desc">测试当前是否有视频/音乐在播放（与“播放时不锁屏”同一判定逻辑）</div>
+            </div>
+            <button class="btn-ghost" id="set-media-test">测试</button>
+          </div>
+          <div class="set-row">
+            <div class="set-info">
+              <div class="set-name">锁屏弹窗测试</div>
+              <div class="set-desc">立即弹出全屏锁屏窗口预览效果，点击中央太阳即可解锁返回</div>
+            </div>
+            <button class="btn-ghost" id="set-lock-test">预览</button>
+          </div>
+        </div>`;
+    }
+
+    function paneEyeCare() {
+      return `
+        <div class="set-panel">
+          <div class="sec-title">全局护眼</div>
+          <div class="set-row">
+            <div class="set-info">
+              <div class="set-name">全局护眼模式</div>
+              <div class="set-desc">调节显卡 Gamma 输出，对整机所有应用生效（含全屏视频、游戏）；关闭后精确还原原色</div>
+            </div>
+            <label class="set-toggle"><input type="checkbox" id="ec-enable" ${state.eyeCare?.enabled ? "checked" : ""} /><span></span></label>
+          </div>
+
+          <div class="set-row" style="flex-direction:column;align-items:stretch">
+            <div class="set-info"><div class="set-name">预设</div><div class="set-desc">一键套用色温档位，仍可继续微调</div></div>
+            <div class="th-skins" id="ec-presets">
+              ${EC_PRESETS.map((p) => `
+                <div class="th-skin${isEcPresetActive(p) ? " active" : ""}" data-id="${p.id}" title="${esc(p.desc)}">
+                  <div class="ts-preview" style="background:${ecPresetPreview(p)}">
+                    <span class="ts-dot" style="background:${ecPresetAccent(p)}"></span>
+                  </div>
+                  <div class="ts-name"><span>${esc(p.name)}</span><span class="ts-check">${ICON_TICK}</span></div>
+                </div>`).join("")}
+            </div>
+          </div>
+
+          <div class="set-row" style="flex-direction:column;align-items:stretch">
+            <div class="set-info"><div class="set-name">模式</div><div class="set-desc">固定色温，或按时间段自动在日/夜色温间切换</div></div>
+            <div class="seg-group" id="ec-mode">
+              <button data-v="manual" class="${state.eyeCare?.mode !== "schedule" ? "active" : ""}">固定色温</button>
+              <button data-v="schedule" class="${state.eyeCare?.mode === "schedule" ? "active" : ""}">按时段</button>
+            </div>
+          </div>
+
+          ${state.eyeCare?.mode === "schedule" ? `
+          <div class="set-row" style="flex-direction:column;align-items:stretch">
+            <div class="set-info"><div class="set-name">时段设置</div><div class="set-desc">夜间时段内使用夜间色温；切换点前 ${state.eyeCare?.transitionMin ?? 30} 分钟内平滑过渡，不会到点突变</div></div>
+            <div class="ec-sched">
+              <div class="ec-sched-row">
+                <span class="ec-sched-label">夜间时段</span>
+                <input type="time" id="ec-from" value="${esc(state.eyeCare?.from ?? "22:00")}" />
+                <span class="ec-sched-sep">→</span>
+                <input type="time" id="ec-to" value="${esc(state.eyeCare?.to ?? "07:00")}" />
+              </div>
+              <div class="ec-sched-row">
+                <span class="ec-sched-label">白天色温</span>
+                <input type="range" id="ec-day-k" min="2000" max="6500" step="100" value="${state.eyeCare?.dayKelvin ?? 5500}" />
+                <span class="th-range-val" id="ec-day-k-val">${state.eyeCare?.dayKelvin ?? 5500}K</span>
+              </div>
+              <div class="ec-sched-row">
+                <span class="ec-sched-label">夜间色温</span>
+                <input type="range" id="ec-night-k" min="2000" max="6500" step="100" value="${state.eyeCare?.nightKelvin ?? 3400}" />
+                <span class="th-range-val" id="ec-night-k-val">${state.eyeCare?.nightKelvin ?? 3400}K</span>
+              </div>
+              <div class="ec-sched-row">
+                <span class="ec-sched-label">过渡时长</span>
+                <input type="range" id="ec-trans" min="0" max="120" step="5" value="${state.eyeCare?.transitionMin ?? 30}" />
+                <span class="th-range-val" id="ec-trans-val">${state.eyeCare?.transitionMin ?? 30}分</span>
+              </div>
+            </div>
+          </div>` : ""}
+
+          ${state.eyeCare?.mode === "schedule" ? "" : `
+          <div class="set-row" style="flex-direction:column;align-items:stretch">
+            <div class="set-info"><div class="set-name">色温</div><div class="set-desc">数值越低越暖（蓝光越少）；建议日间 5500K、夜间 3400K 左右</div></div>
+            <div class="th-range">
+              <input type="range" id="ec-kelvin" min="2000" max="6500" step="100" value="${state.eyeCare?.kelvin ?? 4500}" />
+              <span class="th-range-val" id="ec-kelvin-val">${state.eyeCare?.kelvin ?? 4500}K</span>
+            </div>
+          </div>`}
+
+          <div class="set-row" style="flex-direction:column;align-items:stretch">
+            <div class="set-info"><div class="set-name">亮度</div><div class="set-desc">压低显卡输出亮度（显示器背光不变，故更护眼也更省电）</div></div>
+            <div class="th-range">
+              <input type="range" id="ec-bright" min="50" max="100" step="1" value="${state.eyeCare?.brightness ?? 90}" />
+              <span class="th-range-val" id="ec-bright-val">${state.eyeCare?.brightness ?? 90}%</span>
+            </div>
+          </div>
+
+          <div class="set-row" style="flex-direction:column;align-items:stretch">
+            <div class="set-info"><div class="set-name">对比度</div><div class="set-desc">收敛明暗反差，缓解长时间阅读的调节负担</div></div>
+            <div class="th-range">
+              <input type="range" id="ec-contrast" min="80" max="100" step="1" value="${state.eyeCare?.contrast ?? 95}" />
+              <span class="th-range-val" id="ec-contrast-val">${state.eyeCare?.contrast ?? 95}%</span>
+            </div>
+          </div>
+
+          <div class="set-row">
+            <div class="set-info">
+              <div class="set-name">恢复原色</div>
+              <div class="set-desc">立即还原显示器原始色彩并关闭护眼（修图、调色等需要准确色彩时使用）</div>
+            </div>
+            <button class="btn-ghost" id="ec-restore">恢复原色</button>
+          </div>
+
+          <div class="set-row" id="ec-status-row" hidden>
+            <div class="set-info">
+              <div class="set-name" id="ec-status-name">状态</div>
+              <div class="set-desc" id="ec-status-desc"></div>
+            </div>
+          </div>
+        </div>`;
+    }
+
+    function paneBackup() {
+      return `
+        <div class="set-panel">
+          <div class="sec-title">备份与恢复</div>
+          <div class="set-row">
+            <div class="set-info">
+              <div class="set-name">导出备份</div>
+              <div class="set-desc">打包所有用户数据：笔记、灵感碎片、任务、设置、定时任务的运行历史与热力图。不含可重建的缓存（全盘索引、壁纸副本）。</div>
+            </div>
+            <button class="btn-primary" id="set-backup">导出备份</button>
+          </div>
+          <div class="set-row">
+            <div class="set-info">
+              <div class="set-name">恢复备份</div>
+              <div class="set-desc">从 zip 备份文件恢复数据，当前数据将被覆盖（恢复前会自动备份当前数据，可回退）</div>
+            </div>
+            <button class="btn-ghost" id="set-restore">选择备份文件</button>
+          </div>
+        </div>`;
+    }
+
+    function paneAbout() {
+      return `
+        <div class="set-panel">
+          <div class="sec-title">关于</div>
+          <div class="set-row">
+            <div class="set-info"><div class="set-name">DeskOverlay</div><div class="set-desc">Windows 桌面工作台 · 数据本地持久化</div></div>
+            <div class="set-value">v0.3.0</div>
+          </div>
+        </div>`;
+    }
+
+
     // 开机自启：开关状态以注册表实态为准（autostart_status），不信任本地记忆，
     // 避免用户在任务管理器禁用启动项后 UI 与系统漂移。
+    // 分区内的控件事件：切分区和重渲染都要重新绑，所以收成一个函数。
+    // 每个绑定都自带 if (el) 判空 —— 当前分区里没有的控件直接跳过。
+    function bindPaneEvents(paneId) {
+      void paneId;
     const autoChk = body.querySelector("#set-autostart");
     if (autoChk) {
       invoke("autostart_status").then((s) => {
@@ -441,30 +494,25 @@ export function renderSettings(view) {
         }
       });
     }
-    body.querySelector("#set-lock").addEventListener("change", (e) => {
-      if (!state.lock) state.lock = {};
-      state.lock.enabled = e.target.checked;
-      saveState();
-      // 同步后端监控开关：关闭时降频轮询，开启时恢复每秒空闲推送
-      pushLockEnabled();
-    });
-    body.querySelector("#set-lock-min").addEventListener("change", (e) => {
-      if (!state.lock) state.lock = {};
-      state.lock.minutes = Math.max(1, Math.min(120, Math.round(+e.target.value) || 5));
-      e.target.value = state.lock.minutes;
-      saveState();
-    });
-
-    body.querySelector("#set-plugin-add").addEventListener("click", async () => {
-      let path = null;
-      try {
-        const picked = await invoke("plugin:dialog|open", {          options: { multiple: false, title: "选择插件包", filters: [{ name: "插件包", extensions: ["zip"] }] },
-        }).catch(() => null);
-        path = typeof picked === "string" && picked ? picked : null;
-      } catch (_) { path = null; }
-      if (!path) return;
-      await importPluginZip(path);
-    });
+    const lockChk = body.querySelector("#set-lock");
+    if (lockChk) {
+      lockChk.addEventListener("change", (e) => {
+        if (!state.lock) state.lock = {};
+        state.lock.enabled = e.target.checked;
+        saveState();
+        // 同步后端监控开关：关闭时降频轮询，开启时恢复每秒空闲推送
+        pushLockEnabled();
+      });
+    }
+    const lockMin = body.querySelector("#set-lock-min");
+    if (lockMin) {
+      lockMin.addEventListener("change", (e) => {
+        if (!state.lock) state.lock = {};
+        state.lock.minutes = Math.max(1, Math.min(120, Math.round(+e.target.value) || 5));
+        e.target.value = state.lock.minutes;
+        saveState();
+      });
+    }
 
     const mediaBtn = body.querySelector("#set-media-test");
     if (mediaBtn) {
@@ -478,7 +526,7 @@ export function renderSettings(view) {
           } else {
             showDialog({
               title: "检测结果",
-              message: playing ? "✅ 检测到当前有视频/音乐在播放（不会锁屏）" : "未检测到正在播放的媒体（空闲时才会触发锁定）",
+              message: playing ? "检测到当前有视频/音乐在播放（不会锁屏）" : "未检测到正在播放的媒体（空闲时才会触发锁定）",
             });
           }
         } finally {
@@ -574,7 +622,7 @@ export function renderSettings(view) {
           await loadState();
           const reloadNote = Array.isArray(reloaded)
             ? `\n\n调度器已重载：运行历史 ${reloaded[0]} 条、热力图 ${reloaded[1]} 个任务。`
-            : "\n\n⚠ 调度器历史重载失败，重启应用后才会生效。";
+            : "\n\n注意：调度器历史重载失败，重启应用后才会生效。";
           await showDialog({
             title: "恢复完成",
             message: `数据已恢复，即将刷新页面以应用更改。${reloadNote}${note || ""}`,
@@ -698,13 +746,6 @@ export function renderSettings(view) {
       paintStatus({ config: state.eyeCare, status: getEyeCareStatus() });
     }
 
-    body.querySelectorAll(".plugin-rm").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        removePlugin(btn.dataset.path);
-        renderBody();
-      });
-    });
-
     // -------------------- 外观分区事件 --------------------
     body.querySelectorAll("#th-scheme button").forEach((btn) => {
       btn.addEventListener("click", async () => {
@@ -713,7 +754,9 @@ export function renderSettings(view) {
       });
     });
 
-    body.querySelectorAll(".th-skin").forEach((card) => {
+    // ⚠️ 必须限定 #th-skins 作用域：护眼分区的预设卡也用 .th-skin 类，
+    // 不限定的话点护眼预设会跑去 applySkin，把整套主题换成皮肤配置。
+    body.querySelectorAll("#th-skins .th-skin").forEach((card) => {
       card.addEventListener("click", async () => {
         await Theme.applySkin(card.dataset.id);
         renderBody();
@@ -819,41 +862,6 @@ export function renderSettings(view) {
         renderBody();
       });
     }
-
-    // 导入并自动运行 zip 插件包（解压 → 注册前端 → 自动编译并运行后端）
-    async function importPluginZip(zipPath) {
-      let man;
-      try {
-        man = await invoke("install_plugin_package", { zipPath });
-      } catch (e) {
-        showDialog({ title: "导入失败", message: String(e && e.message || e), okText: "知道了", showCancel: false });
-        return;
-      }
-      const lines = [`已导入：${(man && (man.title || man.id)) || "插件"}`];
-      if (man && man.frontend) {
-        try { await addPlugin(man.frontend); lines.push("前端模块已注册 → 侧边栏可见"); }
-        catch (e) { lines.push("前端注册失败：" + (e && e.message || e)); }
-      }
-      // 后端：优先用 zip 自带 .wasm；否则用本机 cargo 自动编译后执行一次
-      let wasm = man && man.backend_wasm ? man.backend_wasm : null;
-      if (!wasm && man && man.backend_dir) {
-        try {
-          wasm = await invoke("build_wasm_backend", { backendDir: man.backend_dir });
-          lines.push("（后端由本机 cargo 自动编译）");
-        } catch (e) {
-          lines.push("后端编译失败：" + (e && e.message || e));
-        }
-      }
-      if (wasm) {
-        try {
-          const out = await invoke("run_wasm_backend", { path: wasm, input: "hello" });
-          lines.push(`后端执行结果：${out}`);
-        } catch (e) {
-          lines.push("后端执行失败：" + (e && e.message || e));
-        }
-      }
-      showDialog({ title: "导入结果", message: lines.join("\n"), okText: "知道了", showCancel: false });
-      renderBody();
     }
   }
 }

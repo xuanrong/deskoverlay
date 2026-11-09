@@ -31,3 +31,23 @@ Thumbs.db
 
 # 工具生成的临时图片
 /image*-*.png
+
+# ⛔ 凭据配置（真实账号 / 密码 / 内网地址），绝不能提交
+#    示例文件 ems.config.example.json 是占位符，那个要入库。
+ems.json
+**/ems.json
+*.local.json
+.env
+.env.*
+!.env.example
+# Agent 内部工程笔记（真实主机/账号/pageId/实测数字，绝不能提交）
+# README.md 是对外的脱敏版本，那个要入库。
+# ⛔ 同一份敏感内容的任何副本 / 备份 / 存档 / 临时文件，一并忽略。
+# 曾经只忽略 /AGENTS.md，结果手工备份出的 AGENTS.md.bak 和拆分出的
+# AGENTS-archive.md 先后裸奔在 git status 里。
+# 用通配而不是逐个列举 —— 逐个补漏就是会漏。
+/AGENTS*.md
+/AGENTS*.bak
+/AGENTS*.orig
+/AGENTS*.old
+*.tmp.md

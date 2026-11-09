@@ -6,7 +6,7 @@
   "build": {
     "frontendDist": "../frontend/web",
     "devUrl": "http://localhost:1420",
-    "beforeDevCommand": "node ../frontend/serve.js",
+    "beforeDevCommand": { "script": "node serve.js", "cwd": "../frontend" },
     "beforeBuildCommand": ""
   },
   "app": {
@@ -22,7 +22,8 @@
         "resizable": false,
         "shadow": false,
         "visible": false,
-        "alwaysOnTop": false
+        "alwaysOnTop": false,
+        "dragDropEnabled": false
       }
     ],
     "security": {

@@ -133,18 +133,20 @@
     /* 未播放 / 无歌词时的占位：弱化显示 */
     .ly-line[data-idle="1"] .ly-text { color: var(--text-secondary); font-weight: 400; }
 
-    /* 上层：品牌色副本，用 clip-path 横向裁切表示进度。
-       用 clip-path 而非 scaleX —— 后者会把文字横向拉伸变形。
-       两层各自带描边：clip-path 会连同 text-shadow 一起裁切，
-       染色部分若不带描边，在复杂壁纸上会不如底层清晰。 */
-    /* 上层：染色副本，颜色可由设置页自定义（默认跟随主题品牌色），
-       用 clip-path 横向裁切表示进度。
-       用 clip-path 而非 scaleX —— 后者会把文字横向拉伸变形。
-       两层各自带描边：clip-path 会连同 text-shadow 一起裁切，
-       染色部分若不带描边，在复杂壁纸上会不如底层清晰。 */
+    /* 上层：整句高亮色副本。
+       ⛔ **不再做「从左往右擦除」**（2026-11 用户要求「不要按字了」）。
+          原来是卡拉OK 逐字染色：`.ly-fill` 是文字的品牌色副本，
+          用 `clip-path: inset(0 calc((1 - var(--p)) * 100%) 0 0)` 按进度横向擦。
+          现在改成**整句一次性点亮** —— `--p` 只剩 0 / 1 两个值：
+          未播到 = 0（完全裁掉，看到的是底层的白色文字），
+          当前句 = 1（完全不裁，看到的是整句品牌色）。
+       ⛔ 保留 `clip-path` 而不是直接 `display:none` 切换：
+          底层的 `.ly-text` 与上层的 `.ly-fill` 是 grid 叠放，
+          两者**始终存在且同尺寸**，用 clip-path 开关可以避免
+          「换句时文字闪一下再变色」的重排。 */
     .ly-fill {
       color: var(--ly-color-fill, var(--bg-brand));
-      /* --p: 0..1，由 JS 按 rAF 插值写入 */
+      /* --p: 0 = 未点亮，1 = 整句点亮。只由 JS 写这两个值，不再有中间态。 */
       clip-path: inset(0 calc((1 - var(--p, 0)) * 100%) 0 0);
       text-shadow:
         -1px -1px 2px rgba(0,0,0,.85), 1px -1px 2px rgba(0,0,0,.85),
@@ -152,6 +154,11 @@
       pointer-events: none;
     }
     #bar[data-style="capsule"] .ly-fill { text-shadow: none; }
+    /* 当前句整句点亮：切换是瞬时的，但加一个极短的过渡让颜色「亮起来」
+       而不是硬切 —— 90ms 足够短，不会看起来像逐字动画。
+       ⛔ 过渡只作用在 clip-path 上，不能加在 color 上：
+          否则未唱 / 已唱的色差会跟着淡入，句子刚出现的瞬间颜色是错的。 */
+    .ly-fill { transition: clip-path 90ms linear; }
 
     /* 工具条：在歌词**上方**，占固定 34px（与 Rust 的 LYRIC_TOOLS_H 严格一致 ——
        两边不一致会让窗口多出一块透明区，穿透行为不可预期）。

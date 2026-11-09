@@ -2,7 +2,7 @@
 // 全局播放器（音乐页 / 在线音乐页共享）：音频由 musicAudio 单例承载，UI 由各视图自行渲染。
 import { Bus, invoke } from "../bus.js";
 import { state, saveState } from "../state.js";
-import { ICON_MUSIC, ICON_SHUFFLE, ICON_REPEAT, ICON_HEART, ICON_PREV, ICON_NEXT, ICON_PLAY, ICON_PAUSE, ICON_LIST, ICON_MORE, ICON_VOLUME, ICON_VOLUME_MUTE, ICON_LOCATE, ICON_CLOSE, ICON_BACK, ICON_ALBUM, ICON_LYRICS, ICON_DOWNLOAD, ICON_TRASH, ICON_CLOUD } from "../icons.js";
+import { ICON_MUSIC, ICON_SHUFFLE, ICON_REPEAT, ICON_HEART, ICON_PREV, ICON_NEXT, ICON_PLAY, ICON_PAUSE, ICON_LIST, ICON_MORE, ICON_VOLUME, ICON_VOLUME_MUTE, ICON_LOCATE, ICON_CLOSE, ICON_BACK, ICON_ALBUM, ICON_LYRICS, ICON_DOWNLOAD, ICON_TRASH, ICON_CLOUD, ICON_UPLOAD, ICON_REFRESH } from "../icons.js";
 import { normalizeSongs } from "./common.js";
 import { toast } from "../toast.js";
 import { createSelect } from "../selectbox.js";
@@ -302,6 +302,33 @@ musicAudio.addEventListener("timeupdate", () => pushLyric(false));
 musicAudio.addEventListener("play", () => pushLyric(true));
 musicAudio.addEventListener("pause", () => pushLyric(true));
 
+// —— 播放进度广播：给工作台音乐卡（js/workspace.js）用 ——
+// 为什么要广播：state.playback.currentTime 只在 play/pause/切歌时落盘，播放期间是**静止的旧值**；
+// 而 onTime 监听只绑定在音乐页的闭包里，主页卡片根本收不到 timeupdate。
+// 所以这里做一层模块级节流广播：每 ~250ms 一次（和 timeupdate 的触发频率对齐），
+// 主页卡片收到后只改 transform，不重排。
+let lastTickAt = 0;
+function emitProgress(force) {
+  const now = Date.now();
+  if (!force && now - lastTickAt < 250) return;
+  lastTickAt = now;
+  const dur = isFinite(musicAudio.duration) && musicAudio.duration > 0 ? musicAudio.duration : 0;
+  Bus.emit("music-progress", {
+    currentTime: musicAudio.currentTime || 0,
+    duration: dur,
+    playing: !musicAudio.paused && !!musicAudio.src,
+    song: currentSong,
+    // 歌词一并广播：卡片不该知道 currentLyric 的内部结构，也不该自己去算行号。
+    // 行号只在 timeupdate 时算一次（这里），卡片拿到就直接渲染。
+    lyric: musicLyricAt(musicAudio.currentTime || 0),
+  });
+}
+musicAudio.addEventListener("timeupdate", () => emitProgress(false));
+musicAudio.addEventListener("play", () => emitProgress(true));
+musicAudio.addEventListener("pause", () => emitProgress(true));
+musicAudio.addEventListener("seeked", () => emitProgress(true));
+musicAudio.addEventListener("loadedmetadata", () => emitProgress(true));
+
 function renderLyric() {
   if (!lyricEl) return;
   lyricEl.innerHTML = currentLyric.length
@@ -328,6 +355,9 @@ function savePlayback() {
     } : null,
     playing: !!musicAudio.src && !musicAudio.paused,
     currentTime: musicAudio.currentTime || 0,
+    // 总时长也落盘：工作台音乐卡要画进度条，没有 duration 就只能显示 "--:--"。
+    // 音频未加载完时 duration 为 NaN/Infinity，统一归零。
+    duration: isFinite(musicAudio.duration) && musicAudio.duration > 0 ? musicAudio.duration : 0,
     volume: state.playback.volume ?? musicAudio.volume ?? 0.8,
     muted: !!state.playback.muted,
     preMuteVolume: state.playback.preMuteVolume ?? 0.8,
@@ -337,30 +367,55 @@ function savePlayback() {
 // 仅在播放、暂停、切歌（loadMeta）时写盘，避免播放期间每 10s 全量重写状态文件
 musicAudio.addEventListener("play", savePlayback);
 musicAudio.addEventListener("pause", savePlayback);
+// 元数据到达时补写一次：duration 只有加载完成才知道，而工作台音乐卡靠它画进度条。
+// 不在这里补写的话，切歌后要等首次 play/pause 才落盘，卡片会一直显示 "--:--"。
+musicAudio.addEventListener("loadedmetadata", savePlayback);
 
-// 耳机断开/没电自动暂停：监听音频输出设备变化，有输出设备被移除且正在播放时立即暂停，
-// 防止系统自动切到扬声器外放。（devicechange 在 WebView2/Chromium 下对输出设备生效）
-let lastOutputIds = null;
-async function snapshotOutputIds() {
-  try {
-    if (!navigator.mediaDevices?.enumerateDevices) return null;
-    const devs = await navigator.mediaDevices.enumerateDevices();
-    // 无麦克风权限时 deviceId 可能为空串，因此同时保留数量用于对比
-    return devs.filter((d) => d.kind === "audiooutput").map((d) => d.deviceId || `anon:${d.label || "?"}`).sort();
-  } catch { return null; }
-}
-snapshotOutputIds().then((ids) => { lastOutputIds = ids; });
-if (navigator.mediaDevices?.addEventListener) {
+// 耳机断开自动暂停 —— 防止系统把音频切到扬声器外放。
+//
+// ⚠️ 历史教训：这里原本用 navigator.mediaDevices 的 devicechange + enumerateDevices
+// 对比设备列表，但那套逻辑是**死代码**。实测（未授权麦克风时）：
+//   enumerateDevices() → audiooutput 只有 1 个占位项 { id:"", label:"" }
+//   snapshotOutputIds() → 永远是 ["anon:?"]
+//   before === after    → removed 恒为 false，pause() 永远不触发
+// 耳机拔掉后 Chrome 仍只报「有 1 个输出设备」，数量也不变，两条兜底判定全部失效。
+//
+// 现在改为消费 Rust peripheral provider 的真实数据（Core Audio 的
+// PKEY_AudioEndpoint_FormFactor）。它读的是 Windows 音频端点本身，
+// 耳机拔掉 = 该端点从 DEVICE_STATE_ACTIVE 消失 = hasHeadphone 由 true 变 false。
+//
+// 只在「曾经有耳机 → 现在没了」时暂停：
+// 启动时就没有耳机（用扬声器听）不该被拦，用户可能就是外放着听。
+let lastHadHeadphone = null;
+Bus.on("provider-emit", ({ config_hash, output }) => {
+  if (config_hash !== "peripheral") return;
+  const outs = Array.isArray(output?.audio) ? output.audio.filter((a) => a && a.flow === "out") : [];
+  const has = outs.some((a) => a.kind === "headphone" || a.kind === "headset");
+  // 首帧只记录基线，不触发暂停
+  if (lastHadHeadphone === null) { lastHadHeadphone = has; return; }
+  const unplugged = lastHadHeadphone && !has;
+  lastHadHeadphone = has;
+  if (unplugged && !musicAudio.paused) {
+    musicAudio.pause(); // pause 事件自动同步 UI 与播放状态，并广播 music-progress
+  }
+});
+
+// 兜底：dev 态（浏览器预览）没有 Rust 后端，peripheral provider 不会推送。
+// 此时退回 Web 端 devicechange，但明确标注它只在不授权麦克风的浏览器里有意义 ——
+// 真实 Tauri 态下上面的 provider 才是主路径。
+if (!window.__TAURI__ && navigator.mediaDevices?.addEventListener) {
+  let lastOutputCount = null;
   navigator.mediaDevices.addEventListener("devicechange", async () => {
-    const now = await snapshotOutputIds();
-    if (!now || !lastOutputIds) { lastOutputIds = now; return; }
-    // 设备被移除（按 id 对比 + 数量减少兜底，兼容无权限时 deviceId 为空的实现）
-    const removed =
-      lastOutputIds.some((id) => id && !id.startsWith("anon:") && !now.includes(id)) ||
-      now.length < lastOutputIds.length;
-    if (removed && !musicAudio.paused) musicAudio.pause(); // pause 事件自动同步 UI 与播放状态
-    lastOutputIds = now;
+    try {
+      const devs = await navigator.mediaDevices.enumerateDevices();
+      const n = devs.filter((d) => d.kind === "audiooutput").length;
+      if (lastOutputCount !== null && n < lastOutputCount && !musicAudio.paused) musicAudio.pause();
+      lastOutputCount = n;
+    } catch (_) { /* 无权限时拿不到，静默跳过 */ }
   });
+  navigator.mediaDevices.enumerateDevices()
+    .then((d) => { lastOutputCount = d.filter((x) => x.kind === "audiooutput").length; })
+    .catch(() => {});
 }
 
 // 直接播放一首（不动队列；各视图负责自己的 UI 渲染）
@@ -739,7 +794,7 @@ function showDownloads() {
               <div class="src-info">
                 <span class="src-name">${esc(f.filename.replace(/\.[^.]+$/, ""))}</span>
               </div>
-              <button class="mr-dl" data-up="${esc(f.filename)}" title="上传到云盘 /音乐">⬆ 云盘</button>
+              <button class="mr-dl" data-up="${esc(f.filename)}" title="上传到云盘 /音乐">${ICON_UPLOAD} 云盘</button>
               <button class="src-del" data-del="${esc(f.filename)}" title="删除">${ICON_TRASH}</button>
             </div>`).join("")
         : `<div class="src-empty">还没有下载的歌曲<br /><span>下载完成后会出现在这里，可离线播放</span></div>`;
@@ -789,7 +844,7 @@ function showDownloads() {
             ? `<div class="dl-row-foot"><span class="dl-err">${esc(t.error || "上传失败")}</span></div>`
             : `<div class="dl-row-foot"><span class="dl-ok">已完成${t.note ? " · " + esc(t.note) : ""}</span></div>`;
           return `<div class="dl-item dl-card${t.status === "failed" ? " dl-failed" : ""}">
-            <div class="dl-row-head"><span class="src-name">☁ ${esc(t.name.replace(/\.[^.]+$/, ""))}</span><span class="dl-artist">云盘</span></div>
+            <div class="dl-row-head"><span class="src-name">${ICON_CLOUD} ${esc(t.name.replace(/\.[^.]+$/, ""))}</span><span class="dl-artist">云盘</span></div>
             ${foot}
           </div>`;
         }).join("")
@@ -1572,6 +1627,68 @@ function showMusicSources(onDone) {
   renderList();
 }
 
+// 播放状态只读探针：给检查脚本与故障诊断用。
+// 只暴露值、不暴露 musicAudio 单例本身 —— 外部拿不到对象就没法误操作
+// （比如绕过 musicControl 直接改 src 造成状态不同步）。
+export function musicProbe() {
+  return {
+    hasSrc: !!musicAudio.src,
+    paused: musicAudio.paused,
+    currentTime: musicAudio.currentTime,
+    duration: isFinite(musicAudio.duration) ? musicAudio.duration : 0,
+    readyState: musicAudio.readyState,
+    title: currentSong?.title || "",
+    headphoneBaseline: lastHadHeadphone,
+  };
+}
+
+// 测试专用：注入音源并播放（不写 state、不入队列）。
+// 仅供 headphone-pause-check.mjs 这类自动化脚本使用，业务代码不要调。
+export function __testLoadAndPlay(url) {
+  musicAudio.src = url;
+  return musicAudio.play().then(() => true).catch(() => false);
+}
+
+// 工作台卡片用的外部控制口：只暴露最小动作，不暴露 musicAudio 单例本身。
+// 卡片（js/workspace.js）拿它做上一首 / 播放暂停 / 下一首，避免出现「卡片有按钮但没人接」的空壳。
+export function musicControl(action) {
+  switch (action) {
+    case "toggle":
+      if (!musicAudio.src) return false;
+      if (musicAudio.paused) musicAudio.play().catch(() => {});
+      else musicAudio.pause();
+      return true;
+    case "next":
+      if (!playQueue.length) return false;
+      playNext();
+      return true;
+    case "prev":
+      if (!playQueue.length) return false;
+      playPrev();
+      return true;
+    default:
+      return false;
+  }
+}
+
+// 工作台音乐卡要显示「当前唱到哪句」，读的是和音乐页同一份 currentLyric。
+// 返回 { idx, line, prev, next, total }：idx = -1 表示还没唱到第一句。
+export function musicLyricAt(t) {
+  if (!currentLyric.length) return { idx: -1, line: "", prev: "", next: "", total: 0 };
+  let idx = -1;
+  for (let i = 0; i < currentLyric.length; i++) {
+    if (t >= currentLyric[i].time) idx = i;
+    else break;
+  }
+  return {
+    idx,
+    line: idx >= 0 ? currentLyric[idx].text : "",
+    prev: idx > 0 ? currentLyric[idx - 1].text : "",
+    next: idx + 1 < currentLyric.length ? currentLyric[idx + 1].text : "",
+    total: currentLyric.length,
+  };
+}
+
 // 启动恢复：从持久化的 playback 重建队列、恢复当前歌曲与播放位置/状态
 export function initPlayback() {
   const pb = state.playback;
@@ -2034,7 +2151,7 @@ async function renderAdDriveTab(resultsEl, panelEl, modeTabsEl) {
   panelEl.style.display = "";
   panelEl.innerHTML = `
     <input id="ad-input" type="text" placeholder="搜索云盘歌曲…" autocomplete="off" spellcheck="false" />
-    <button class="mc-btn mc-pill" id="ad-refresh" title="刷新目录">↻</button>
+    <button class="mc-btn mc-pill" id="ad-refresh" title="刷新目录">${ICON_REFRESH}</button>
     <button class="mc-btn mc-pill" id="ad-unbind" title="解绑阿里云盘">解绑</button>`;
   const input = panelEl.querySelector("#ad-input");
   panelEl.querySelector("#ad-refresh").addEventListener("click", async () => { adMusicFolderId = null; loadAdFolder(resultsEl, await adResolveMusicFolder()); });

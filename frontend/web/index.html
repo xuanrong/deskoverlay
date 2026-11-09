@@ -13,19 +13,8 @@
   <!-- 主题背景层：自定义背景（图片/纯色/渐变）由 theme.js 渲染于此 -->
   <div id="theme-backdrop" aria-hidden="true"><div class="tb-media"></div><div class="tb-dim"></div></div>
 
-  <!-- 应用主体：侧边导航 + 主区域 -->
+  <!-- 应用主体：顶部时钟条 + 一屏卡片网格 + 底部任务栏（无侧边导航） -->
   <div id="app">
-    <aside id="nav">
-      <div class="nav-brand">
-        <span class="nav-brand-icon"><svg viewBox="0 0 24 24" width="20" height="20"><path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z" fill="#58a6ff"/></svg></span>
-        <span class="nav-brand-text">DeskOverlay</span>
-      </div>
-      <nav id="nav-list" aria-label="模块导航"></nav>
-      <div class="nav-foot">
-        <button class="nav-btn nav-toggle" id="nav-toggle" title="折叠导航"><svg viewBox="0 0 24 24"><path d="M14 5l-7 7 7 7"/><path d="M20 5l-7 7 7 7"/></svg><span>收起</span></button>
-        <button class="nav-btn nav-quit" id="nav-quit" title="退出应用"><svg viewBox="0 0 24 24"><path d="M12 3v9"/><path d="M6.3 6.3a8 8 0 1 0 11.4 0"/></svg><span>退出</span></button>
-      </div>
-    </aside>
     <main id="main" aria-label="模块内容">
       <div class="main-clock" id="main-clock">
         <div class="mc-left">
@@ -37,35 +26,160 @@
         </div>
         <div class="mc-reminders" id="mc-reminders"></div>
       </div>
-      <div id="view-container"></div>
+
+      <!-- 一屏卡片网格：所有模块平铺于此，点卡片打开全屏浮层 -->
+      <div id="widget-grid" class="widget-grid" role="list" aria-label="工作台卡片">
+        <!-- 编辑态参考线：6 个 i 用和卡片完全相同的 grid 模板排布，
+             所以竖线永远落在真实列边界上。注意不能用平铺背景图，
+             背景按等距重复，但列之间有 12px gap，到第 6 列累计偏 60px，
+             竖线会切在卡片中间。 -->
+        <div class="widget-grid__guides" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+      </div>
+
+      <!-- 编辑态横幅：只在 .widget-grid.edit-mode 时显示（CSS 控制），平时 display:none 不占位。
+           必须有：原来进入编辑态只弹一条 1.2 秒就消失的 toast，用户没注意到，
+              就以为「点编辑模式没反应」。 -->
+      <div class="edit-banner" aria-live="polite">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v18"/><path d="M3 12h18"/><path d="M8 7l4-4 4 4"/><path d="M8 17l4 4 4-4"/><path d="M7 8l-4 4 4 4"/><path d="M17 8l4 4-4 4"/></svg>
+        <span>拖动卡片换位 · 拖右下角改大小 · 再点一次「编辑模式」保存</span>
+      </div>
+
+      <!-- 底部任务栏：设置 / 指标 / 时间 / 基金行情 / 编辑模式 / 退出 -->
+      <footer class="taskbar" id="taskbar">
+        <div class="taskbar__left">
+          <button class="taskbar-btn" id="tb-settings" title="设置">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="3"></circle>
+              <path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1"></path>
+            </svg>
+            <span>设置</span>
+          </button>
+        </div>
+        <div class="taskbar__center">
+          <div class="taskbar-metric taskbar-metric--cpu" id="tb-cpu" data-ready="0" title="CPU 使用率">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="6" y="6" width="12" height="12" rx="2"></rect>
+              <rect x="10" y="10" width="4" height="4"></rect>
+              <path d="M9 6V3M15 6V3M9 21v-3M15 21v-3M6 9H3M6 15H3M21 9h-3M21 15h-3"></path>
+            </svg>
+            <span class="tm-label">CPU</span><span class="tm-val"><span class="tm-num" id="tb-cpu-val">--</span><span class="tm-pct">%</span></span>
+          </div>
+          <div class="taskbar-metric taskbar-metric--ram" id="tb-ram" data-ready="0" title="内存使用率">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M4 8h16v8H4z"></path>
+              <path d="M7 16v3M12 16v3M17 16v3"></path>
+            </svg>
+            <span class="tm-label">内存</span><span class="tm-val"><span class="tm-num" id="tb-ram-val">--</span><span class="tm-pct">%</span></span>
+          </div>
+          <div class="taskbar-metric taskbar-metric--disk" id="tb-disk" data-ready="0" title="磁盘占用">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <ellipse cx="12" cy="6" rx="7" ry="3"></ellipse>
+              <path d="M5 6v12c0 1.7 3.1 3 7 3s7-1.3 7-3V6"></path>
+              <path d="M5 12c0 1.7 3.1 3 7 3s7-1.3 7-3"></path>
+            </svg>
+            <span class="tm-label">磁盘</span><span class="tm-val"><span class="tm-num" id="tb-disk-val">--</span><span class="tm-pct">%</span></span>
+          </div>
+          <span class="taskbar-sep"></span>
+          <div class="taskbar-fund" id="tb-fund" title="点击打开基金管家">
+            <svg class="taskbar-fund__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 17l5-5 4 4 8-8"></path>
+              <path d="M15 8h6v6"></path>
+            </svg>
+            <div class="taskbar-fund__rows">
+              <div class="taskbar-fund__row">
+                <span class="taskbar-fund__label">上证</span>
+                <span class="taskbar-fund__value" id="tb-fund-idx">--</span>
+                <span class="taskbar-fund__chg" id="tb-fund-chg">--</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="taskbar__right">
+          <!-- 外设状态胶囊：常驻只显示图标（有没有连），点一下展开详情浮层。
+               data-ready=0 时图标为占位灰态，收到 peripheral provider 首帧后转实心。
+               2026-11 从 taskbar__center 移到右侧区「编辑模式」左边 ——
+               它是常驻状态指示器，和 CPU/内存/磁盘那组「中间指标」语义不同，
+               贴着右侧操作区更像系统托盘。浮层定位走 getBoundingClientRect，
+               移动位置不影响（见 workspace.js positionPeriphPop）。 -->
+          <button class="periph-pill" id="tb-periph" data-ready="0" title="外设状态（点击展开）" aria-haspopup="true" aria-expanded="false">
+            <span class="pi" data-kind="headphone" data-on="0">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 18v-6a9 9 0 0 1 18 0v6"></path>
+                <path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"></path>
+              </svg>
+            </span>
+            <span class="pi" data-kind="mouse" data-on="0">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="6" y="3" width="12" height="18" rx="6"></rect>
+                <path d="M12 3v7"></path>
+              </svg>
+            </span>
+            <span class="pi" data-kind="keyboard" data-on="0">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="2" y="6" width="20" height="12" rx="2"></rect>
+                <path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M8 14h8"></path>
+              </svg>
+            </span>
+          </button>
+          <button class="taskbar-btn" id="tb-edit" title="编辑模式（拖动卡片调整布局）">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 20h9"></path>
+              <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"></path>
+            </svg>
+            <span>编辑模式</span>
+          </button>
+          <button class="taskbar-btn taskbar-btn--exit" id="tb-quit" title="退出应用">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 3v9"></path>
+              <path d="M6.3 6.3a8 8 0 1 0 11.4 0"></path>
+            </svg>
+            <span>退出</span>
+          </button>
+        </div>
+      </footer>
     </main>
   </div>
 
-  <!-- 快速指令条 (Spotlight 风格) -->
-  <div id="command-bar" class="command-bar" hidden>
-    <div class="cb-input-row">
-      <svg class="cb-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-        <path fill="currentColor" d="M15.5 14h-.79l-.28-.27a6.5 6.5 0 1 0-.7.7l.27.28v.79l5 4.99L20.49 19zm-6 0A4.5 4.5 0 1 1 14 9.5 4.5 4.5 0 0 1 9.5 14"/>
-      </svg>
-      <input id="cb-input" type="text" placeholder="输入指令或搜索…" autocomplete="off" spellcheck="false" />
-      <kbd class="cb-esc">Esc</kbd>
+  <!-- 模块全屏浮层：点卡片后在此渲染原有完整视图 -->
+  <div id="module-overlay" class="module-overlay" hidden>
+    <div class="mo-panel">
+      <header class="mo-head">
+        <span class="mo-icon" id="mo-icon"></span>
+        <span class="mo-title" id="mo-title"></span>
+        <span class="mo-sub" id="mo-sub"></span>
+        <button class="mo-close" id="mo-close" title="关闭（Esc）">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M18 6 6 18M6 6l12 12"></path>
+          </svg>
+        </button>
+      </header>
+      <div class="mo-body" id="mo-body"></div>
     </div>
-    <ul id="cb-results" class="cb-results"></ul>
   </div>
 
   <!-- 帮助层 -->
   <div id="help-overlay" class="help-overlay" hidden>
     <div class="help-card">
       <h2>DeskOverlay 工作台</h2>
-      <p class="help-sub">侧边导航切换模块 · 全屏固定布局</p>
+      <p class="help-sub">一屏卡片工作台 · 点卡片打开模块</p>
       <ul class="help-list">
-        <li><kbd>Ctrl</kbd>/<kbd>Cmd</kbd> + <kbd>Space</kbd> — 唤起快速指令条</li>
-        <li>点左侧导航栏图标切换模块</li>
-        <li><kbd>Esc</kbd> — 关闭指令条 / 帮助层；左下角「退出」按钮可退出应用</li>
+        <li>点任意卡片打开对应模块，<kbd>Esc</kbd> 或右上角关闭按钮退出</li>
+        <li>右下角「退出」按钮可退出应用</li>
       </ul>
       <p class="help-foot">数据本地持久化 · 刷新后自动恢复</p>
       <button id="help-close" class="btn-primary">知道了</button>
     </div>
+  </div>
+
+  <!-- 外设详情浮层：挂在 body 末尾而非 taskbar 内，
+       因为 taskbar 有 overflow 裁剪，浮层向上弹出会被切掉。
+       定位由 JS 按胶囊的 getBoundingClientRect 计算（贴胶囊右缘、向上展开）。 -->
+  <div id="periph-pop" class="periph-pop" hidden>
+    <div class="periph-pop__head">
+      <span class="periph-pop__title">外设状态</span>
+      <span class="periph-pop__hint" id="periph-pop-hint">--</span>
+    </div>
+    <div class="periph-pop__list" id="periph-pop-list"></div>
   </div>
 
   <!-- marked.js：Markdown 解析（笔记列表模块阅读态渲染），本地副本避免外网依赖 -->

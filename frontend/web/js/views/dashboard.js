@@ -1,10 +1,9 @@
-// 今日概览视图：待办事项（左）+ 文件中心/最近操作（右）。
+// 今日概览视图：待办事项（左）+ 文件中心（右）。
 import { Bus, invoke } from "../bus.js";
 import { Tasks } from "../tasks.js";
-import { state, saveState, pushRecentOp, onRecentOp } from "../state.js";
+import { state, saveState } from "../state.js";
 import { STATUS_LABEL, TASK_STATUSES, PRIORITY_LABEL } from "../config.js";
-import { ICON_EXTERNAL, ICON_SEARCH, ICON_EDIT, ICON_TRASH, ICON_CHECK, ICON_BELL, ICON_FOLDER, ICON_PAPERCLIP, ICON_REFRESH } from "../icons.js";
-import { ICON_TOMATO } from "../pomodoro.js";
+import { ICON_SEARCH, ICON_FOLDER, ICON_PAPERCLIP, ICON_REFRESH } from "../icons.js";
 import { FILE_CATEGORIES, FILE_ICONS } from "../filetypes.js";
 import { showDialog } from "./common.js";
 import { esc } from "../utils.js";
@@ -37,90 +36,6 @@ function evRow(h) {
     <span class="ev-path">${esc(dir)}</span>
   </div>`;
 }
-
-// 最近操作类型 → 图标（线性 SVG）+ 标签
-const OP_META = {
-  file_open:   { icon: ICON_EXTERNAL, type: "文件" },
-  file_reveal: { icon: ICON_SEARCH, type: "文件" },
-  file_rename: { icon: ICON_EDIT, type: "文件" },
-  file_delete: { icon: ICON_TRASH, type: "系统" },
-  task_create: { icon: ICON_CHECK, type: "任务" },
-  task_update: { icon: ICON_EDIT, type: "任务" },
-  task_delete: { icon: ICON_TRASH, type: "任务" },
-  reminder:    { icon: ICON_BELL, type: "提醒" },
-  pomodoro:    { icon: ICON_TOMATO, type: "专注" },
-};
-
-// 相对时间：刚刚 / X 分钟前 / X 小时前 / 今天 HH:MM / 昨天 HH:MM / MM-DD
-function relTime(ts) {
-  const d = (Date.now() - ts) / 1000;
-  if (d < 60) return "刚刚";
-  if (d < 3600) return `${Math.floor(d / 60)} 分钟前`;
-  if (d < 86400) return `${Math.floor(d / 3600)} 小时前`;
-  const day = new Date(ts);
-  const now = new Date();
-  const hh = day.getHours().toString().padStart(2, "0");
-  const mm = day.getMinutes().toString().padStart(2, "0");
-  if (day.toDateString() === now.toDateString()) return `今天 ${hh}:${mm}`;
-  const yest = new Date(now);
-  yest.setDate(yest.getDate() - 1);
-  if (day.toDateString() === yest.toDateString()) return `昨天 ${hh}:${mm}`;
-  return `${day.getMonth() + 1}-${day.getDate()}`;
-}
-
-const OP_VERB = {
-  file_open: "打开", file_reveal: "定位", file_rename: "重命名", file_delete: "删除",
-  task_create: "创建", task_update: "修改", task_delete: "删除",
-};
-function recentOpRow(op) {
-  // kind 优先（文件/任务类）；其余按 type 命中（sedentary→提醒，pomodoro→专注）；未知类型兜底圆点
-  const m = OP_META[op.kind]
-    || (op.type === "sedentary" ? OP_META.reminder : OP_META[op.type])
-    || { icon: "•", type: "" };
-  const verb = OP_VERB[op.kind] || op.action || "操作";
-  const name = op.name || op.text || "";
-  const typeCls = m.type === "任务" ? " task" : m.type === "系统" ? " system" : m.type === "提醒" ? " reminder" : m.type === "专注" ? " pomodoro" : "";
-  return `
-    <div class="recent-op">
-      <span class="ro-icon">${m.icon}</span>
-      <span class="ro-text">${esc(verb)}了 <b>${esc(name)}</b></span>
-      <span class="ro-time">${relTime(op.ts)}</span>
-      <span class="ro-type${typeCls}">${esc(m.type)}</span>
-    </div>`;
-}
-
-function renderRecentOps() {
-  const ops = (state.recentOps || []).slice(0, 5);
-  if (!ops.length) return `<div class="dash-empty recent-empty">暂无操作记录</div>`;
-  return ops.map(recentOpRow).join("");
-}
-
-function showRecentOpsDialog() {
-  const ops = state.recentOps || [];
-  const ov = document.createElement("div");
-  ov.className = "task-modal-overlay";
-  ov.innerHTML = `
-    <div class="task-modal recent-modal">
-      <h3>全部操作记录 <span class="dash-count">${ops.length}</span></h3>
-      <div class="recent-modal-list">
-        ${ops.length ? ops.map(recentOpRow).join("") : `<div class="dash-empty recent-empty">暂无操作记录</div>`}
-      </div>
-      <div class="tm-actions">
-        <button class="btn-primary cm-ok">关闭</button>
-      </div>
-    </div>`;
-  document.body.appendChild(ov);
-  const close = () => ov.remove();
-  ov.querySelector(".cm-ok").addEventListener("click", close);
-  ov.addEventListener("click", (e) => { if (e.target === ov) close(); });
-  ov.addEventListener("keydown", (e) => { if (e.key === "Escape") close(); });
-}
-
-// 操作记录变化时刷新"最近操作"列表（若列表已渲染）
-onRecentOp(() => {
-  const list = document.getElementById("d-recent-ops-list");
-  if (list) list.innerHTML = renderRecentOps();
-});
 
 // 待办状态 SVG 图标（虚线圆 / 蓝色半圆 / 橙色实心圆 / 绿色对勾圆）
 const STATUS_ICONS = {
@@ -281,8 +196,13 @@ function renderTasksMini(el, view) {
 }
 
 // 待办弹窗（新建/编辑复用）：内容 / 状态 / 优先级(P0-P4) / 开始/截止日期 / 标签
+//
+// ⚠ **导出给 workspace.js 复用**：首页「待办事项」卡的标题栏有「新增」按钮，
+//    它要开的正是这个弹窗。不要为了卡片另写一个简化版表单 —— 两套表单迟早不一致
+//    （字段少一个、校验规则不同），用户也会发现「从卡片加」和「从浮层加」效果不一样。
+//    onDone 由调用方传自己的重画函数：卡片传 renderTasksCard，浮层传它自己的 render。
 let taskModalEl = null;
-function showTaskModal(mode = "new", task = null, onDone) {
+export function showTaskModal(mode = "new", task = null, onDone) {
   hideTaskModal();
   const isEdit = mode === "edit";
   taskModalEl = document.createElement("div");
@@ -414,11 +334,7 @@ async function renderFilesBlock(el, view) {
     </div>
     <div class="file-tabs" id="d-file-tabs"></div>
     <div class="file-tab-content" id="d-file-content"></div>
-    <div class="file-search-results" id="d-file-results" hidden></div>
-    <div class="recent-ops">
-      <div class="sec-title"><span>最近操作</span><a class="recent-ops-all">全部记录 →</a></div>
-      <div class="recent-ops-list" id="d-recent-ops-list">${renderRecentOps()}</div>
-    </div>`;
+    <div class="file-search-results" id="d-file-results" hidden></div>`;
 
     const tabsEl = el.querySelector("#d-file-tabs");
     const contentEl = el.querySelector("#d-file-content");
@@ -432,7 +348,6 @@ async function renderFilesBlock(el, view) {
       layoutBtn.innerHTML = layout === "grid" ? LAYOUT_LIST_ICON : LAYOUT_GRID_ICON;
       renderContent();
     });
-    el.querySelector(".recent-ops-all").addEventListener("click", showRecentOpsDialog);
 
     // —— 全盘搜索（自建索引，后端 file_index）——
     const searchEl = el.querySelector("#d-file-search");
@@ -501,7 +416,6 @@ async function renderFilesBlock(el, view) {
       if (!row) return;
       try {
         await invoke("open_path", { target: row.dataset.path });
-        pushRecentOp({ kind: "file_open", name: row.dataset.path.split(/[\\/]/).pop() });
       } catch (err) {
         showDialog({ title: "打开失败", message: String(err), okText: "知道了", showCancel: false });
       }
@@ -684,22 +598,18 @@ function showFileMenu(x, y, name, onChange) {
     try {
       if (act === "open") {
         await invoke("open_file", { name });
-        pushRecentOp({ kind: "file_open", name });
       } else if (act === "reveal") {
         await invoke("reveal_file", { name });
-        pushRecentOp({ kind: "file_reveal", name });
       } else if (act === "rename") {
         const newName = await showDialog({ title: "重命名", input: true, inputValue: name, okText: "确定" });
         if (newName && newName !== name) {
           await invoke("rename_file", { name, newName });
-          pushRecentOp({ kind: "file_rename", name, text: `${name} → ${newName}` });
           onChange();
         }
       } else if (act === "delete") {
         const ok = await showDialog({ title: "删除文件", message: `确认删除「${name}」？\n（移到回收站，可恢复）`, okText: "删除", danger: true });
         if (!ok) return;
         await invoke("delete_file", { name });
-        pushRecentOp({ kind: "file_delete", name });
         onChange();
       }
     } catch (err) {
@@ -724,17 +634,14 @@ function showPathMenu(x, y, path, onChange) {
     try {
       if (act === "open") {
         await invoke("open_path", { target: path });
-        pushRecentOp({ kind: "file_open", name });
       } else if (act === "reveal") {
         await invoke("reveal_path", { target: path });
-        pushRecentOp({ kind: "file_reveal", name });
       } else if (act === "copy") {
         await copyText(path);
       } else if (act === "rename") {
         const newName = await showDialog({ title: "重命名", input: true, inputValue: name, okText: "确定" });
         if (newName && newName !== name) {
           await invoke("rename_path", { target: path, newName });
-          pushRecentOp({ kind: "file_rename", name, text: `${name} → ${newName}` });
           onChange();
         }
       } else if (act === "delete") {
@@ -747,7 +654,6 @@ function showPathMenu(x, y, path, onChange) {
         });
         if (!ok) return;
         await invoke("delete_path", { target: path });
-        pushRecentOp({ kind: "file_delete", name });
         onChange();
       }
     } catch (err) {

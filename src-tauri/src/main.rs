@@ -15,16 +15,16 @@ mod checkin;
 mod aliyundrive;
 mod desktop_inject;
 mod downloader;
+mod ems;
 mod eyecare;
 mod file_index;
 mod http;
-mod plugin_pkg;
+mod peripheral;
 mod scheduler;
 mod scheduler_export;
 mod sedentary;
 mod sys_bridge;
 mod usn_index;
-mod wasm_plugin;
 
 use std::fs;
 use std::io::Write;
@@ -40,29 +40,6 @@ use windows::Win32::System::Threading::CreateMutexW;
 use windows::Win32::UI::WindowsAndMessaging::{
     GetSystemMetrics, SetWindowPos, SM_CXSCREEN, SM_CYSCREEN, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
 };
-
-/// 通用 Wasm 插件命令：读取外部 .wasm 后端文件并在宿主内沙箱执行（返回插件结果串）。
-#[tauri::command]
-fn run_wasm_backend(path: String, input: String) -> Result<String, String> {
-    let p = path.trim();
-    if p.is_empty() {
-        return Err("路径不能为空".to_string());
-    }
-    let bytes = std::fs::read(p).map_err(|e| format!("读取 wasm 失败：{e}"))?;
-    wasm_plugin::run_backend(&bytes, &input)
-}
-
-/// 安装外部插件包(zip)：解压到 app_data/plugins/<id>，返回 manifest 与各文件绝对路径。
-#[tauri::command]
-fn install_plugin_package(app: tauri::AppHandle, zip_path: String) -> Result<serde_json::Value, String> {
-    plugin_pkg::install(&app, zip_path.trim())
-}
-
-/// 编译插件包的后端源码为 .wasm（调用本机 cargo），返回 .wasm 绝对路径。
-#[tauri::command]
-fn build_wasm_backend(backend_dir: String) -> Result<String, String> {
-    plugin_pkg::build_backend(backend_dir.trim())
-}
 
 /// 退出应用。
 /// 先销毁所有 WebView 窗口，避免 Chromium 在进程退出注销
@@ -447,6 +424,16 @@ fn monitor_work_area(app: &tauri::AppHandle, idx: Option<i64>) -> Option<(i32, i
         wa.size.width as i32,
         wa.size.height as i32,
     ))
+}
+
+/// 原生任务栏遮挡量（逻辑像素）—— 前端据此给底部任务栏留出安全区。
+///
+/// 桌面注入让工作台窗口撑满整块虚拟屏，Windows 任务栏浮在 WorkerW 之上，
+/// 会压住窗口最底下一条。前端读这个值后把内容底部上移，避免被原生任务栏挡住。
+#[tauri::command]
+fn taskbar_inset(window: tauri::WebviewWindow) -> desktop_inject::TaskbarInset {
+    let scale = window.scale_factor().unwrap_or(1.0);
+    desktop_inject::taskbar_inset(scale)
 }
 
 /// 计算歌词窗口应放置的物理坐标。
@@ -1353,8 +1340,11 @@ fn delete_note_image(app: tauri::AppHandle, name: String) -> Result<(), String> 
 
 /// 读取持久化状态。
 /// state.json 存业务数据；音乐相关（音源插件脚本 musicSources / 收藏 favorites / 播放状态 playback）
-/// 统一独立存 music.json；workLogs（工作记录）独立存 worklogs.json；notes（笔记列表）独立存 notes.json。
+/// 统一独立存 music.json；notes（笔记列表）独立存 notes.json。
 /// state.json 中残留的这几个字段会保留返回，下次保存自动分流。
+///
+/// 注：workLogs（工作记录）已随工作记录面板整体移除，不再读写 worklogs.json。
+/// 旧版本遗留的 worklogs.json 文件保持原样（不主动删除，避免误删用户历史数据）。
 #[tauri::command]
 fn load_state(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
@@ -1389,18 +1379,29 @@ fn load_state(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
             }
         }
     }
-    // 工作记录独立文件（存在则覆盖合并）
-    let logs_file = dir.join("worklogs.json");
-    if logs_file.exists() {
-        if let Ok(lv) = read_json(&logs_file) {
-            state["workLogs"] = lv;
-        }
-    }
+    // 工作记录已移除：不再读 worklogs.json（旧文件保留在磁盘上，但不再进入 state）
     // 笔记列表独立文件（存在则覆盖合并）
     let notes_file = dir.join("notes.json");
     if notes_file.exists() {
         if let Ok(nv) = read_json(&notes_file) {
             state["notes"] = nv;
+        }
+    }
+    // 基金管家独立文件（存在则覆盖合并）。
+    // 目的：基金缓存（行情/历史净值/排行）会随 30 秒轮询频繁变化，整份 state.json
+    // 重写时那 120KB 缓存会跟着一起写盘。拆出来后基金数据自己一个文件，
+    // state.json 只剩真正需要随主状态走的东西。
+    //
+    // ⚠ **state.json 里若仍带 fund 字段，则以 state.json 为准**（不要反过来）。
+    //   两种情况会命中：
+    //   ① 升级前的老存档（fund 还内联在 state.json 里）—— 首次保存时自动分流；
+    //   ② **恢复升级前的旧备份**（zip 里没有 fund.json）—— 若让当前 fund.json
+    //      优先，备份里的持仓和流水会被悄悄覆盖掉，用户以为「恢复成功但数据没回来」。
+    //   正常运行时 save_state 总会把 fund 剥走，state.json 不会有这个字段。
+    let fund_file = dir.join("fund.json");
+    if state.get("fund").is_none() && fund_file.exists() {
+        if let Ok(fv) = read_json(&fund_file) {
+            state["fund"] = fv;
         }
     }
     // 迁移：state.notes 为 string 时自动包装为数组
@@ -1420,20 +1421,27 @@ fn load_state(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
     Ok(state)
 }
 
-/// 写入持久化状态：音乐字段分流到 music.json、workLogs 分流到 worklogs.json、notes 分流到 notes.json，其余写 state.json。
+/// 写入持久化状态：音乐字段分流到 music.json、notes 分流到 notes.json，其余写 state.json。
+///
+/// 注：workLogs 已随工作记录面板整体移除，不再写 worklogs.json。
+/// 若旧存档的 state 里仍带 workLogs 字段，这里会把它从 state.json 里剥掉（不再持久化）。
 #[tauri::command]
 fn save_state(app: tauri::AppHandle, state: serde_json::Value) -> Result<(), String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
 
     let mut state = state;
-    let (music_file_val, logs, notes_val) = if let Some(obj) = state.as_object_mut() {
+    let (music_file_val, notes_val, fund_val) = if let Some(obj) = state.as_object_mut() {
         let music = serde_json::json!({
             "musicSources": obj.remove("musicSources").unwrap_or(serde_json::json!([])),
             "favorites": obj.remove("favorites").unwrap_or(serde_json::json!([])),
             "playback": obj.remove("playback").unwrap_or(serde_json::json!({})),
         });
-        (Some(music), obj.remove("workLogs"), obj.remove("notes"))
+        // workLogs 直接丢弃（旧字段清理），不落盘
+        obj.remove("workLogs");
+        // 基金管家整体分流到 fund.json（见 load_state 的说明）
+        let fund = obj.remove("fund").unwrap_or_else(|| serde_json::json!({}));
+        (Some(music), obj.remove("notes"), Some(fund))
     } else {
         (None, None, None)
     };
@@ -1450,17 +1458,19 @@ fn save_state(app: tauri::AppHandle, state: serde_json::Value) -> Result<(), Str
         fs::write(&music_file, mdata).map_err(|e| e.to_string())?;
     }
 
-    // 工作记录（持续增长的用户数据独立文件，便于单独备份/导出）
-    let logs_file = dir.join("worklogs.json");
-    let ldata = serde_json::to_string_pretty(&logs.unwrap_or_else(|| serde_json::json!([])))
-        .map_err(|e| e.to_string())?;
-    fs::write(&logs_file, ldata).map_err(|e| e.to_string())?;
-
     // 笔记列表（持续增长的用户数据独立文件，便于单独备份；单篇导出走 export_text_file）
     let notes_file = dir.join("notes.json");
     let ndata = serde_json::to_string_pretty(&notes_val.unwrap_or_else(|| serde_json::json!([])))
         .map_err(|e| e.to_string())?;
-    fs::write(&notes_file, ndata).map_err(|e| e.to_string())
+    fs::write(&notes_file, ndata).map_err(|e| e.to_string())?;
+
+    // 基金管家（缓存随行情轮询高频变化，独立文件避免反复重写 state.json）
+    if let Some(fund) = fund_val {
+        let fund_file = dir.join("fund.json");
+        let fdata = serde_json::to_string_pretty(&fund).map_err(|e| e.to_string())?;
+        fs::write(&fund_file, fdata).map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 
 /// 读取主题配置快照（轻量只读）：锁屏/提醒窗口启动时拉取，避免整份 state 进内存。
@@ -1604,23 +1614,25 @@ fn convert_file_src(p: &std::path::Path) -> String {
 
 // ─── 备份与恢复 ───
 // 备份范围 = 「用户数据」：
-//   ✅ state.json、music.json、worklogs.json、notes.json、scheduler-store.json、plugins/
+//   ✅ state.json、music.json、notes.json、scheduler-store.json
 //   ❌ fileindex.txt（可重建）、wallpaper_cache/、music/、aliyundrive/（授权会过期）、
 //      eyecare_baseline.json（护眼 gamma 基准，丢了重新学习即可）
 const BACKUP_FILES: &[&str] = &[
     "state.json",
     "music.json",
-    "worklogs.json",
     "notes.json",
+    // 基金管家（持仓/流水/定投/校准样本 + 行情缓存）—— 整体独立文件，见 load_state
+    "fund.json",
     // 运行历史 + 按天热力图 + next_due。⚠ 恢复后前端必须再调 scheduler_reload_store，
     // 否则会被调度器的内存副本静默写回。
     "scheduler-store.json",
 ];
-// 需要递归打包的目录。plugins/ 不能省：已安装插件靠目录扫描发现，不在 state 里。
-const BACKUP_DIRS: &[&str] = &["plugins"];
+// 需要递归打包的目录（当前没有：插件机制已移除）。
+// 保留这个机制是因为白名单的越界防护有独立价值，将来加数据目录时直接往里填即可。
+const BACKUP_DIRS: &[&str] = &[];
 
 /// 备份条目白名单：只认已知的数据文件，或已知目录内的条目。
-/// ⚠ 不能只做前缀匹配：`plugins/../../evil.js` 也满足「以 `plugins/` 开头」，
+/// ⚠ 不能只做前缀匹配：`dir/../../evil.js` 也满足「以 `dir/` 开头」，
 /// 本函数必须自己挡住越界形态，不依赖解压侧的 `enclosed_name()` 兜底。
 fn is_allowed_backup_entry(name: &str) -> bool {
     if name.is_empty()
@@ -1694,7 +1706,7 @@ fn backup_data(app: tauri::AppHandle, zip_path: String) -> Result<(), String> {
 /// 不依赖 AppHandle，便于单测 —— 这里是 zip 解压的安全敏感面：
 ///   ① `enclosed_name()` 挡掉「写到 app_data_dir 之外」；
 ///   ② 白名单只放行已知数据文件与已知目录下的条目。
-/// 两层都不能省：只靠白名单挡不住白名单内目录里的越界（例如 `plugins/../../x`）。
+/// 两层都不能省：只靠白名单挡不住白名单内目录里的越界（例如 `dir/../../x`）。
 fn extract_backup_zip(dir: &std::path::Path, zip_path: &std::path::Path) -> Result<Vec<String>, String> {
     let zip_file = fs::File::open(zip_path).map_err(|e| e.to_string())?;
     let mut archive = zip::ZipArchive::new(zip_file).map_err(|e| e.to_string())?;
@@ -1737,13 +1749,45 @@ fn restore_data(app: tauri::AppHandle, zip_path: String) -> Result<String, Strin
     let safety = dir.join(format!("pre-restore-{stamp}.zip"));
     let safety_note = match write_backup_zip(&dir, &safety) {
         Ok(()) => format!("\n\n恢复前的数据已自动备份到：\n{}", safety.display()),
-        Err(e) => format!("\n\n⚠ 恢复前的自动备份失败（{e}）—— 本次恢复不可撤销。"),
+        Err(e) => format!("\n\n注意：恢复前的自动备份失败（{e}）—— 本次恢复不可撤销。"),
     };
 
     // ② 解压覆盖
     extract_backup_zip(&dir, std::path::Path::new(&zip_path))?;
 
+    // ③ 旧备份兼容（见 drop_stale_fund_after_restore 的说明）
+    drop_stale_fund_after_restore(&dir, std::path::Path::new(&zip_path));
+
     Ok(safety_note)
+}
+
+/// 恢复旧备份后，清掉磁盘上**恢复前**残留的 fund.json。
+///
+/// 背景：基金数据在 2026-11 从 state.json 拆进 fund.json。升级前打的备份包里
+/// 只有 state.json（fund 内联在里面），没有 fund.json。恢复这种旧包时：
+///
+/// - 解压只覆盖 zip 里有的文件，**不会删**磁盘上现有的 fund.json；
+/// - 于是「备份里恢复出来的 state.fund」和「恢复前那份 fund.json」同时存在；
+/// - 谁生效取决于 load_state 的读取顺序，用户会看到「恢复成功但持仓还是旧的」。
+///
+/// 处理：zip 里**没有** fund.json 时，把磁盘上那份删掉，让 state.json 里恢复出来的
+/// fund 成为唯一来源（前端下次保存会自动分流成新的 fund.json）。
+/// ⚠ 只在 zip 确实没有 fund.json 时才删 —— 否则会把刚解压出来的新数据删掉。
+fn drop_stale_fund_after_restore(dir: &std::path::Path, zip_path: &std::path::Path) {
+    let fund_file = dir.join("fund.json");
+    if !fund_file.exists() {
+        return;
+    }
+    let Ok(file) = fs::File::open(zip_path) else { return };
+    let Ok(mut ar) = zip::ZipArchive::new(file) else { return };
+    let zip_has_fund = (0..ar.len()).any(|i| {
+        ar.by_index(i)
+            .map(|f| f.name() == "fund.json")
+            .unwrap_or(false)
+    });
+    if !zip_has_fund {
+        let _ = fs::remove_file(&fund_file);
+    }
 }
 
 /// 桌面文件项。
@@ -2076,6 +2120,12 @@ fn main() {
             // 全局空闲监控（供隐私锁屏判断）
             sys_bridge::start_lock_idle_monitor(app.handle().clone());
 
+            // 外设状态 Provider（耳机/扬声器/麦克风 + 鼠标/键盘 → provider-emit "peripheral"）
+            peripheral::start_peripheral_provider(app.handle().clone());
+
+            // EMS 工作量 Provider：定时抓「未完成需求 / 未验证需求」→ provider-emit "ems-stats"
+            ems::start_ems_provider(app.handle().clone());
+
             // 久坐提醒：启动后端键鼠活动监控线程（配置经 set_sedentary_config 下发）
             sedentary::start_sedentary_monitor(
                 app.handle().clone(),
@@ -2113,7 +2163,7 @@ fn main() {
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![quit_app, autostart::autostart_status, autostart::set_autostart, downloader::download_start, downloader::download_cancel, downloader::downloaded_list, downloader::downloaded_delete, downloader::local_track_assets, aliyundrive::ad_auth_bind, aliyundrive::ad_auth_status, aliyundrive::ad_unbind, aliyundrive::ad_list, aliyundrive::ad_search, aliyundrive::ad_play_url, aliyundrive::ad_upload_start, aliyundrive::ad_upload_cancel, aliyundrive::ad_upload_list, aliyundrive::ad_track_meta, aliyundrive::ad_direct_url, show_reminder, hide_reminder, reminder_ready, show_lyric, hide_lyric, lyric_ready, lyric_sync, lyric_set_locked, lyric_move, lyric_pos_commit, lyric_commit_display, lyric_menu_toggle, lyric_menu_ready, read_text_file, export_text_file, save_note_image, read_note_image, delete_note_image, run_wasm_backend, install_plugin_package, build_wasm_backend, http::http_get, http::http_get_bytes, http::http_post, http::http_post_stream, http::http_stream_cancel, fetch_favicon, load_state, save_state, backup_data, restore_data, get_theme, broadcast_theme, read_bg_data_url, prepare_wallpaper, list_desktop_files, image_thumbnail, open_file, open_path, pick_folder, pick_file, reveal_file, delete_file, rename_file, reveal_path, delete_path, rename_path, show_lock, hide_lock, file_index::index_status, file_index::search_files, file_index::rebuild_index, sys_bridge::start_system_sampling, sys_bridge::stop_system_sampling, sys_bridge::check_media_playing, sys_bridge::set_lock_monitor_enabled, sedentary::set_sedentary_config, eyecare::set_eyecare_config, eyecare::restore_native_color, eyecare::eyecare_status, checkin::collect_checkin_state, scheduler::scheduler_runs, scheduler::scheduler_heat, scheduler::scheduler_run_now, scheduler::scheduler_cancel, scheduler::scheduler_clear_runs, scheduler::scheduler_reload_store, scheduler::scheduler_status, scheduler::scheduler_check_cron, scheduler_export::scheduler_export_preview, scheduler_export::scheduler_export_task, scheduler_export::scheduler_unexport_task, scheduler_export::scheduler_export_status, scheduler_export::scheduler_read_os_log, scheduler_export::scheduler_clear_os_log])
+        .invoke_handler(tauri::generate_handler![quit_app, autostart::autostart_status, autostart::set_autostart, downloader::download_start, downloader::download_cancel, downloader::downloaded_list, downloader::downloaded_delete, downloader::local_track_assets, aliyundrive::ad_auth_bind, aliyundrive::ad_auth_status, aliyundrive::ad_unbind, aliyundrive::ad_list, aliyundrive::ad_search, aliyundrive::ad_play_url, aliyundrive::ad_upload_start, aliyundrive::ad_upload_cancel, aliyundrive::ad_upload_list, aliyundrive::ad_track_meta, aliyundrive::ad_direct_url, show_reminder, hide_reminder, reminder_ready, show_lyric, hide_lyric, lyric_ready, lyric_sync, lyric_set_locked, lyric_move, lyric_pos_commit, lyric_commit_display, lyric_menu_toggle, lyric_menu_ready, read_text_file, export_text_file, save_note_image, read_note_image, delete_note_image, http::http_get, http::http_get_bytes, http::http_post, http::http_post_stream, http::http_stream_cancel, fetch_favicon, load_state, save_state, backup_data, restore_data, get_theme, broadcast_theme, read_bg_data_url, prepare_wallpaper, list_desktop_files, image_thumbnail, open_file, open_path, pick_folder, pick_file, reveal_file, delete_file, rename_file, reveal_path, delete_path, rename_path, show_lock, hide_lock, taskbar_inset, file_index::index_status, file_index::search_files, file_index::rebuild_index, sys_bridge::start_system_sampling, sys_bridge::stop_system_sampling, sys_bridge::check_media_playing, sys_bridge::set_lock_monitor_enabled, peripheral::start_peripheral_sampling, peripheral::stop_peripheral_sampling, sedentary::set_sedentary_config, eyecare::set_eyecare_config, eyecare::restore_native_color, eyecare::eyecare_status, checkin::collect_checkin_state, scheduler::scheduler_runs, scheduler::scheduler_heat, scheduler::scheduler_run_now, scheduler::scheduler_cancel, scheduler::scheduler_clear_runs, scheduler::scheduler_reload_store, scheduler::scheduler_status, scheduler::scheduler_check_cron, scheduler_export::scheduler_export_preview, scheduler_export::scheduler_export_task, scheduler_export::scheduler_unexport_task, scheduler_export::scheduler_export_status, scheduler_export::scheduler_read_os_log, scheduler_export::scheduler_clear_os_log, ems::ems_refresh_now])
         .run(tauri::generate_context!())
         .expect("DeskOverlay 运行失败");
 }
@@ -2131,10 +2181,31 @@ mod backup_tests {
         assert!(is_allowed_backup_entry("scheduler-store.json"));
     }
 
+    /// 基金数据必须独立成 fund.json —— 三个文件各守一条不变量。
+    ///
+    /// 起因：基金缓存（行情/历史净值/排行）随 30 秒轮询变化，占了 state.json 的
+    /// 84.6%（实测 120KB / 142KB），每次行情刷新都会把整份主状态重写一遍。
+    /// 拆出去后 fund 不能再出现在 state.json 里，否则等于没拆。
+    #[test]
+    fn fund_is_split_into_its_own_file() {
+        // ① 必须进备份白名单，否则备份会静默漏掉用户的持仓和流水
+        assert!(BACKUP_FILES.contains(&"fund.json"), "fund.json 必须在备份白名单里");
+        // ② 白名单机制本身要认它
+        assert!(is_allowed_backup_entry("fund.json"));
+        // ③ 不能残留旧的整份内联写法
+        assert!(!BACKUP_FILES.contains(&"fund"), "fund 不是独立文件，不该进白名单");
+    }
+
+    /// 目录型条目（`BACKUP_DIRS` 内的文件）必须被接受。
+    /// 用测试自带的临时目录名，不依赖真实配置里有哪些目录。
     #[test]
     fn whitelist_accepts_entries_inside_backup_dirs() {
-        assert!(is_allowed_backup_entry("plugins/weread/manifest.json"));
-        assert!(is_allowed_backup_entry("plugins/a/b/c/frontend.js"));
+        for d in BACKUP_DIRS.iter().copied() {
+            assert!(
+                is_allowed_backup_entry(&format!("{d}/a/b/c/file.bin")),
+                "应接受 {d}/ 下的条目"
+            );
+        }
     }
 
     /// 白名单必须挡住的四类：未知文件、越界路径、目录前缀混淆、未列入的目录。
@@ -2145,13 +2216,13 @@ mod backup_tests {
             "fileindex.txt",          // 可重建的缓存，不该进备份
             "eyecare_baseline.json",  // 同上
             "../state.json",          // 越界
-            "plugins/../../evil.js",  // 越界（满足「以 plugins/ 开头」，白名单必须自己挡住）
-            "plugins/a/../../../x",   // 越界
+            "extras/../../evil.js",   // 越界（满足「以 extras/ 开头」，白名单必须自己挡住）
+            "extras/a/../../../x",    // 越界
             "/etc/passwd",            // 绝对路径
-            "plugins\\..\\..\\evil.js", // 反斜杠形态的越界
-            "pluginsevil/x.js",       // 前缀混淆：必须以 `plugins/` 开头
-            "pluginsX/y.js",          // 同上
-            "plugins",                // 目录名本身不是条目
+            "extras\\..\\..\\evil.js", // 反斜杠形态的越界
+            "extrasevil/x.js",        // 前缀混淆：必须以 `extras/` 开头
+            "extrasX/y.js",           // 同上
+            "extras",                 // 目录名本身不是条目
             "wallpaper_cache/a.bin",  // 未列入的目录
             "music/x.mp3",            // 同上
         ] {
@@ -2167,16 +2238,15 @@ mod backup_tests {
     }
 
     #[test]
-    fn backup_zip_includes_nested_dir_and_skips_missing_or_unlisted() {
+    fn backup_zip_includes_known_files_and_skips_missing_or_unlisted() {
         let src = tmp_dir("src");
-        fs::create_dir_all(src.join("plugins/weread")).unwrap();
         fs::write(src.join("state.json"), b"{\"currentModule\":\"dashboard\"}").unwrap();
         fs::write(src.join("scheduler-store.json"), b"{\"runs\":[]}").unwrap();
-        fs::write(src.join("plugins/weread/manifest.json"), b"{\"id\":\"weread\"}").unwrap();
-        fs::write(src.join("plugins/weread/frontend.js"), b"// js").unwrap();
         // 白名单里但不存在 ⇒ 应被静默跳过（不能让备份整体失败）
         // 不在白名单里且存在 ⇒ 应被忽略
         fs::write(src.join("fileindex.txt"), b"junk").unwrap();
+        fs::create_dir_all(src.join("wallpaper_cache")).unwrap();
+        fs::write(src.join("wallpaper_cache/a.bin"), b"junk").unwrap();
 
         let zip = std::env::temp_dir().join(format!("deskoverlay_bk_{}.zip", std::process::id()));
         let _ = fs::remove_file(&zip);
@@ -2189,9 +2259,11 @@ mod backup_tests {
 
         assert!(names.contains(&"state.json".to_string()), "{names:?}");
         assert!(names.contains(&"scheduler-store.json".to_string()), "{names:?}");
-        assert!(names.contains(&"plugins/weread/manifest.json".to_string()), "{names:?}");
-        assert!(names.contains(&"plugins/weread/frontend.js".to_string()), "{names:?}");
         assert!(!names.iter().any(|n| n == "fileindex.txt"), "白名单外不该进包：{names:?}");
+        assert!(
+            !names.iter().any(|n| n.starts_with("wallpaper_cache/")),
+            "白名单外的目录不该进包：{names:?}"
+        );
         assert!(!names.iter().any(|n| n == "music.json"), "不存在的文件不该进包：{names:?}");
 
         let mut s = String::new();
@@ -2212,7 +2284,6 @@ mod backup_tests {
             let o = zip::write::SimpleFileOptions::default();
             for (n, body) in [
                 ("state.json", "{\"ok\":true}"),
-                ("plugins/weread/manifest.json", "{\"id\":\"weread\"}"),
                 ("../evil.txt", "pwned"),
                 ("fileindex.txt", "junk"),
                 ("wallpaper_cache/x.bin", "junk"),
@@ -2228,16 +2299,73 @@ mod backup_tests {
         written.sort();
         assert_eq!(
             written,
-            vec!["plugins/weread/manifest.json".to_string(), "state.json".to_string()],
-            "只该还原白名单内的两个条目"
+            vec!["state.json".to_string()],
+            "只该还原白名单内的 state.json"
         );
 
         assert!(dest.join("state.json").exists());
-        assert!(dest.join("plugins/weread/manifest.json").exists());
         assert!(!dest.join("fileindex.txt").exists(), "白名单外条目不该落盘");
         assert!(!dest.join("wallpaper_cache").exists(), "未列入目录不该落盘");
         // 越界条目的落点会是 dest 的上一级（临时目录）——必须不存在
         assert!(!std::env::temp_dir().join("evil.txt").exists(), "越界条目写到目标目录之外了！");
+
+        let _ = fs::remove_dir_all(&dest);
+        let _ = fs::remove_file(&zip);
+    }
+
+    /// 恢复**旧备份**（zip 里没有 fund.json）时，必须清掉恢复前残留的 fund.json。
+    /// 否则用户会看到「恢复成功但持仓还是恢复前的」。
+    #[test]
+    fn restore_old_backup_drops_stale_fund_file() {
+        let dest = tmp_dir("fund_old");
+        // 磁盘上有恢复前的基金数据
+        fs::write(dest.join("fund.json"), r#"{"holdings":[{"code":"OLD"}]}"#).unwrap();
+
+        // 旧备份：只有 state.json（fund 内联在里面），没有 fund.json
+        let zip = std::env::temp_dir()
+            .join(format!("deskoverlay_bk_oldfund_{}.zip", std::process::id()));
+        let _ = fs::remove_file(&zip);
+        {
+            let mut z = zip::ZipWriter::new(fs::File::create(&zip).unwrap());
+            let o = zip::write::SimpleFileOptions::default();
+            z.start_file("state.json", o).unwrap();
+            z.write_all(br#"{"fund":{"holdings":[{"code":"FROM_BACKUP"}]}}"#).unwrap();
+            z.finish().unwrap();
+        }
+
+        drop_stale_fund_after_restore(&dest, &zip);
+
+        assert!(
+            !dest.join("fund.json").exists(),
+            "旧备份恢复后必须删掉残留的 fund.json，否则会盖掉备份里的数据"
+        );
+
+        let _ = fs::remove_dir_all(&dest);
+        let _ = fs::remove_file(&zip);
+    }
+
+    /// 恢复**新备份**（zip 里带 fund.json）时，绝不能删掉刚解压出来的那份。
+    #[test]
+    fn restore_new_backup_keeps_fresh_fund_file() {
+        let dest = tmp_dir("fund_new");
+        // 恢复前磁盘上的旧数据
+        fs::write(dest.join("fund.json"), r#"{"holdings":[{"code":"STALE"}]}"#).unwrap();
+
+        let zip = std::env::temp_dir()
+            .join(format!("deskoverlay_bk_newfund_{}.zip", std::process::id()));
+        let _ = fs::remove_file(&zip);
+        {
+            let mut z = zip::ZipWriter::new(fs::File::create(&zip).unwrap());
+            let o = zip::write::SimpleFileOptions::default();
+            z.start_file("fund.json", o).unwrap();
+            z.write_all(br#"{"holdings":[{"code":"FRESH"}]}"#).unwrap();
+            z.finish().unwrap();
+        }
+
+        drop_stale_fund_after_restore(&dest, &zip);
+
+        let kept = fs::read_to_string(dest.join("fund.json")).unwrap();
+        assert!(kept.contains("STALE"), "本函数只负责删残留，解压覆盖是上一步的事");
 
         let _ = fs::remove_dir_all(&dest);
         let _ = fs::remove_file(&zip);

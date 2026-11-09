@@ -2,6 +2,19 @@
 resolver = "2"
 members = ["src-tauri"]
 
+# ── 开发期构建配置 ────────────────────────────────────────────────
+# 默认 debug=2 时 target/ 会涨到 30 GB：525 个依赖每个都生成完整调试信息
+# （变量名 / 类型 / 行号映射），而 Tauri + windows-rs 的绑定代码量极大，
+# 调试信息比代码本身大一个数量级。实测同一套依赖 release（strip）只有 1.9 GB。
+[profile.dev]
+# 只保留「文件名 + 行号」，砍掉变量与类型信息。
+# 行号还在，panic backtrace 依然能定位到具体哪一行。
+# 本项目 Rust 侧调试主要靠日志，WebView2 是独立进程，断点调试本来也用不上。
+debug = 1
+# 关掉增量编译。代价只是改 .rs 后重编译慢一点 ——
+# 而日常改的多是 frontend/web 下的 JS/CSS，压根不触发 Rust 重编译。
+incremental = false
+
 # 发布期优化：减小体积、剥离符号
 [profile.release]
 opt-level = "s"

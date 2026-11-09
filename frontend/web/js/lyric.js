@@ -1,15 +1,18 @@
 // 桌面歌词窗口页逻辑（P1 骨架）。
 //
 // 定位：**纯显示层，不做时间推进**。音频实例（musicAudio）与 LRC 解析结果都活在主窗口的
-// JS realm 里，若本页也持有时间轴，两个窗口会各自计时 → 卡拉OK 进度肉眼可见地漂移。
-// 故时间基准由主窗口在**换行时**推一次（lineStart / lineEnd），本页用 rAF 基于锚点自插值；
-// 锚点每次换行重置，误差不累积。播放全程的 IPC 次数 = 歌词行数，而非每秒 10 次。
+// JS realm 里，若本页也持有时间轴，两个窗口会各自计时 → 高亮进度肉眼可见地漂移。
+// 故时间基准由主窗口在**换行时**推一次（lineStart / lineEnd），本页只在收到推送时
+// 更新 DOM，不做任何插值。
+//
+// ⛔ **2026-11：逐字染色已移除**（用户要求「不要按字了」）。
+// 原来是卡拉OK 那套 —— 主窗口推 `words`，本页 canvas 量字宽、rAF 按字插值 `--p`，
+// CSS 用 clip-path 横向擦除。现在改成**整句一次性点亮**：
+// `--p` 只有 0/1，行切换即整句上色，本页零帧开销。
 //
 // 不变量（继承自 reminder.js 的教训）：**窗口可见 ⟺ 有内容**。
 // 透明置顶窗一旦没有内容，视觉上等于不存在，却仍在吞鼠标消息。故本页立即渲染占位行，
 // 绝不留空白。
-//
-// P1 范围：静态占位内容 + 锁定/穿透切换 + 拖动 + 字号；真实歌词数据在 P2 接入。
 const TAURI = (typeof window !== "undefined" && window.__TAURI__) || null;
 
 const invoke = (cmd, args) =>
@@ -55,99 +58,25 @@ let form = "single";         // single | double（决定窗口高度，由 Rust 
 let styleMode = "stroke";    // stroke | capsule | bold
 let align = "center";        // 歌词对齐方式：left | center | right（参考网易云）
 let colorText = "";          // 文字颜色（#RGB/#RRGGBB；空 = 默认近白）
-let colorFill = "";          // 卡拉OK染色色（空 = 跟随主题品牌色）
+let colorFill = "";          // 已唱整句的高亮色（空 = 跟随主题品牌色）
 let offsetVal = 0;           // 歌词时间偏移（秒；正 = 提前，负 = 延后）
-
-// rAF 插值状态
-let rafId = 0;
-let anchorPerf = 0;          // 本行起始时刻的 performance.now() 基准（毫秒）
-let lineStart = 0;
-let lineEnd = 0;
-let elapsedBase = 0;         // 推送时刻音频已走过的秒数（t0 校准用）
 
 const clamp01 = (v) => Math.min(1, Math.max(0, v));
 
-// ───────────────────────── 卡拉OK 染色 ─────────────────────────
-// 两条路径：
-//   A) 有逐字时间轴（words）→ 按**每个字的实际演唱时刻**推进裁切位置（精确到字）
-//   B) 无逐字数据 → 回退整行线性扫描（elapsed / 行时长）
+// ───────────────────────── 整句高亮 ─────────────────────────
+// ⛔ **不再做逐字 / 横向擦除染色**（2026-11 用户要求「不要按字了」）。
 //
-// A 的关键：裁切位置不能按「字数等分」算，因为字符宽度不等宽
-// （中英文混排、标点、空格差异很大）。必须**实测每个字的像素宽度**，
-// 按字符边界定位 —— 否则染色会跑在字与字之间，看起来仍然「不准」。
-let words = null;        // [{ t, d, text, w }] w = 该字在行内的像素宽度（累计）
-let wordCuts = null;     // 每个字的**右边界**累计宽度占比 [0..1]，用于把时间映射成裁切比例
-
-// 用 canvas 量文字宽度（不依赖 DOM 插入，且能复用同一字体度量）
-const measureCanvas = document.createElement("canvas");
-const measureCtx = measureCanvas.getContext("2d");
-
-function measureCharWidths(text, font) {
-  measureCtx.font = font;
-  const total = measureCtx.measureText(text).width;
-  if (!total) return null;
-  const cuts = [];
-  let acc = 0;
-  // 逐字累加宽度 → 得到每个字结束位置的占比
-  for (const ch of text) {
-    acc += measureCtx.measureText(ch).width;
-    cuts.push(acc / total);
-  }
-  return cuts;
-}
-
-// 当前该染色到哪个比例（0..1）。
-// 有 words 时按字插值：找到当前字，在其左右边界之间按该字内的进度插值，
-// 使染色平滑推进而不是逐字跳跃。
-function progressAt(elapsed) {
-  const dur = lineEnd - lineStart;
-  if (words && wordCuts && wordCuts.length === words.length) {
-    // 定位当前字
-    let i = -1;
-    for (let k = 0; k < words.length; k++) {
-      if (elapsed >= words[k].t) i = k;
-      else break;
-    }
-    if (i < 0) return 0;                                   // 尚未开始唱
-    const left = i === 0 ? 0 : wordCuts[i - 1];
-    const right = wordCuts[i];
-    const w = words[i];
-    // 该字自身的持续时长（缺失时用「下一个字的起点 - 本字起点」，再不行给 0.25s 兜底）
-    let wd = w.d;
-    if (!wd) wd = (i + 1 < words.length ? words[i + 1].t : dur) - w.t;
-    if (!(wd > 0)) wd = 0.25;
-    const p = clamp01((elapsed - w.t) / wd);
-    return left + (right - left) * p;
-  }
-  return dur > 0 ? clamp01(elapsed / dur) : 0;
-}
-
-// 只在该行有效期内跑 rAF，行结束即停 —— 无歌词 / 暂停时不占用任何帧。
+// 原来这里是卡拉OK 那套：主窗口推 `words`（每个字的演唱时刻），本页用 canvas
+// 实测每个字的像素宽度得到 `wordCuts`，再用 rAF 按字插值算出 `--p`（0..1），
+// 由 CSS 的 `clip-path` 横向裁切染色副本。
 //
-// 时间模型（t0 校准）：主窗口在 timeupdate（约 4Hz）里检测行切换，故事件到达时
-// 音频已经在这行走了最多 ~250ms。若以「收到事件的时刻」为锚点，染色会整体晚一拍。
-// 主窗口因此随事件带上 `t0`（推送瞬间的音频时间），本页据此把进度**立即对齐**：
-//   elapsed = t0 之后经过的秒数 + (t0 - lineStart)
-function tick() {
-  rafId = 0;
-  const dur = lineEnd - lineStart;
-  if (dur <= 0) return;
-  const elapsed = elapsedBase + (performance.now() - anchorPerf) / 1000;
-  const p = progressAt(elapsed);
-  fillEl.style.setProperty("--p", p.toFixed(4));
-  if (p < 1 && playing) rafId = requestAnimationFrame(tick);
-}
-
-function startFill() {
-  if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
-  anchorPerf = performance.now();
-  tick();
-}
-
-function stopFill() {
-  if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
-  fillEl.style.setProperty("--p", "0");
-}
+// 现在只有两个状态：**当前句整句亮 / 其他句不亮**。
+//   - `--p` 只写 "1"（当前句）或 "0"（不是当前句），没有中间值；
+//   - 不再需要 words / wordCuts / canvas 量宽 / rAF；
+//   - 行切换由主窗口推送驱动，本页纯被动，**零帧开销**。
+//
+// 为什么连 rAF 一起删：它存在的唯一理由就是推进 `--p`。
+// 整句点亮后没有「推进」这回事，留着它只是每秒 60 次空转。
 
 // ───────────────────────── 内容渲染 ─────────────────────────
 function renderLine(p) {
@@ -160,64 +89,28 @@ function renderLine(p) {
     textEl.textContent = meta || DEFAULT_TEXT;
     fillEl.textContent = "";
     lineEl.dataset.idle = "1";
+    // 占位态（歌名 — 歌手）不点亮，保持弱化白字
+    fillEl.style.setProperty("--p", "0");
   } else {
     textEl.textContent = text;
     fillEl.textContent = text;
     lineEl.dataset.idle = "0";
+    // ⛔ 整句直接点亮：`--p` 只有 1 这一个值，没有「唱到哪」的概念。
+    //   这一行只要出现在屏幕上就代表「正在唱的这句」，所以一进来就整句上色。
+    fillEl.style.setProperty("--p", "1");
   }
-  // 第二行（下一句，仅双行形态可见）：无逐字染色 —— 未播到的句子不应预先染色。
+  // 第二行（下一句，仅双行形态可见）：无高亮 —— 未播到的句子不应预先染色。
   // 末行没有 next 时留空，避免残留上一首的句子。
   const nextText = (p && p.next) || "";
   text2El.textContent = nextText;
   line2El.dataset.idle = nextText ? "0" : "1";
   playing = !!(p && p.playing);
   bar.dataset.playing = playing ? "true" : "false";
-
-  lineStart = Number(p?.lineStart) || 0;
-  lineEnd = Number(p?.lineEnd) || 0;
-  // t0 校准：clamp 到 [0, dur]，防主窗口时钟与行边界不一致时算出负进度
-  const t0 = Number(p?.t0) || 0;
-  elapsedBase = Math.max(0, Math.min(lineEnd - lineStart, t0 - lineStart));
-
-  // 逐字时间轴：仅在文本与逐字片段完全对应时启用（否则宽度映射会错位）
-  words = null;
-  wordCuts = null;
-  if (!idle && Array.isArray(p?.words) && p.words.length) {
-    const joined = p.words.map((w) => w.text).join("");
-    if (joined === text) {
-      words = p.words;
-      refreshWordCuts();   // 用实际渲染样式量取字符宽度（见函数内注释）
-    }
-  }
-
-  if (idle || lineEnd <= lineStart) {
-    stopFill();
-  } else if (playing) {
-    startFill();
-  } else {
-    // 暂停态：按 t0 定到静态位置后冻结（不启动 rAF，避免暂停时仍占用帧）
-    if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
-    fillEl.style.setProperty("--p", progressAt(elapsedBase).toFixed(4));
-  }
 }
 
 function setFontSize(px) {
   fontSize = Math.min(FONT_MAX, Math.max(FONT_MIN, px));
   document.documentElement.style.setProperty("--ly-size", fontSize + "px");
-  // 字号变了 → 字符宽度占比随之改变，缓存的 wordCuts 失效。
-  // 不重算的话，染色会按旧宽度的边界裁切，与文字本体错位。
-  refreshWordCuts();
-}
-
-// 重算当前行的字符宽度表（字号 / 字体变化后调用）。
-// 用当前实际渲染样式量取，保证与文字本体的度量完全一致。
-function refreshWordCuts() {
-  if (!words || !textEl.textContent) return;
-  const cs = getComputedStyle(textEl);
-  const font = `${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
-  const cuts = measureCharWidths(textEl.textContent, font);
-  wordCuts = cuts && cuts.length === words.length ? cuts : null;
-  if (!wordCuts) words = null;   // 度量失败则回退整行线性扫描，宁可粗也不能错位
 }
 
 // 字号增减：本地即时应用 + 交 Rust 广播持久化。
@@ -484,7 +377,6 @@ Promise.all([
   });
 
 // 孤儿兜底：页面加载后始终未收到任何内容推送时，占位行已经渲染，
-// 故不存在「可见但空白」的空窗；此处只在页面被卸载时清理 rAF，避免泄漏。
-window.addEventListener("beforeunload", () => {
-  if (rafId) cancelAnimationFrame(rafId);
-});
+// 故不存在「可见但空白」的空窗。
+// ⛔ 原来这里要 cancelAnimationFrame 清理 rAF；整句点亮后本页**不再有 rAF**，
+//    该清理一并删除（留着会引用已不存在的 rafId 变量，直接 ReferenceError）。

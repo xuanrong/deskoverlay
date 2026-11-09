@@ -172,11 +172,34 @@ async function wbApi(url, session, httpPost, wait) {
   throw lastErr;
 }
 
+// 资源包的「本周期可用余额」。
+//
+// ⛔ 不能无脑 sum(CapacityRemain)。实测（2026-11）get-user-resource 返回 47 个资源包，
+//    分两类，同名字段含义完全不同：
+//      CapacityType=1（一次性赠送包，46 个）  CapacityRemain 就是本包剩余
+//      CapacityType=4（周期性月包，1 个）     CapacityRemain 是**总量**，
+//                                            本周期真正能用的是 CycleCapacityRemain
+//    踩过：一个 500 的月度包本周期已用尽（CycleCapacityRemain=0），
+//    但 CapacityRemain 仍是 500，被算进余额 → 显示 2188，实际只有 1688.29。
+//
+// ⚠ 必须优先用 *Precise 字段：整数 CapacityRemain 会把 99.29 截成 99，差 0.29。
+function wbPackageRemain(a) {
+  const num = (v) => (v == null || v === "" ? null : Number(v));
+  // 周期性资源包（CapacityType=4，或带 ResourceCycleId）取「本周期剩余」
+  const isCycle = Number(a.CapacityType) === 4 || Number(a.ResourceCycleId) > 0;
+  if (isCycle) {
+    return num(a.CycleCapacityRemainPrecise) ?? num(a.CycleCapacityRemain) ?? 0;
+  }
+  return num(a.CapacityRemainPrecise) ?? num(a.CapacityRemain) ?? 0;
+}
+
 async function wbBalance(session, httpPost, wait) {
   try {
     const resp = await wbApi(WB_BASE + "/get-user-resource", session, httpPost, wait);
     const accs = (((resp.data || {}).Response || {}).Data || {}).Accounts || [];
-    return accs.reduce((s, a) => s + (Number(a.CapacityRemain) || 0), 0);
+    const sum = accs.reduce((s, a) => s + wbPackageRemain(a), 0);
+    // 保留 2 位小数（99.29 这类零头是真实的，别四舍五入掉）
+    return Math.round(sum * 100) / 100;
   } catch (e) {
     return null; // 余额查询失败不阻断签到结果
   }

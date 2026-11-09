@@ -51,7 +51,6 @@ export const state = {
   currentModule: "dashboard",
   tasks: [],
   notes: [], // 笔记列表：{ id, title, content, pinned, createdAt, updatedAt }（按 updatedAt 降序）
-  recentOps: [], // 最近操作记录：{ ts, type, action, name, ... }
   reminders: [], // 提醒配置：{ id, label, icon, type, time/intervalMin, enabled, ... }
   sedentary: { enabled: false, intervalMin: 45 }, // 久坐提醒：开关 + 连续使用间隔（分钟）
   water: { enabled: false, intervalMin: 90 }, // 喝水提醒：开关 + 间隔（分钟）
@@ -69,7 +68,22 @@ export const state = {
     minutes: 0, // 今日累计专注分钟
     totalDone: 0, // 历史累计专注轮数
   }, // 番茄钟（顶部时钟区小组件）
-  workLogs: [], // 工作记录：{ id, date:"YYYY-MM-DD", time:"HH:MM", text, type, tags }
+  // 工作记录（workLogs）已整体移除。旧存档里的该字段在 normalize 时被丢弃。
+  // EMS 工作量统计：由后台线程抓取后写入，供首页卡片与统计面板展示。
+  //   四个数字均可为 null（= 尚未抓到），null 与 0 语义不同，不可互相替代。
+  //   *Rows 是同一轮抓回来的明细（弹窗展开时显示），null 表示该指标还没接过数据源。
+  emsStats: {
+    reqOpen: null,            // 未完成需求
+    reqOpenRows: null,        // 未完成需求明细：[{ id, reqId, title, status, product, deadline, assignee }]
+    reqUnverified: null,      // 未验证需求
+    reqUnverifiedRows: null,  // 未验证需求明细：[{ id, title, statusName, product, priority, ... }]
+    bugOpen: null,            // 未完成 Bug
+    bugOpenRows: null,        // 未完成 Bug 明细（接口待接入）
+    bugUnverified: null,      // 未验证 Bug
+    bugUnverifiedRows: null,  // 未验证 Bug 明细（接口待接入）
+    updatedAt: 0,             // 抓取时间戳（0 = 从未抓过）
+    error: "",                // 上次抓取的错误信息（非空时卡片显示「抓取失败」）
+  },
   ideabox: [], // 灵感碎片：{ id, text, tag, ts }（按添加顺序排列）
   ideaTags: [], // 灵感碎片自定义标签（内置标签之外的扩展）
   mineBest: {}, // 扫雷最佳用时（秒）：{ easy, medium, hard }
@@ -78,7 +92,6 @@ export const state = {
   playback: { queue: [], index: -1, song: null, playing: false, currentTime: 0 }, // 音乐播放状态（重启恢复）
   navState: {}, // 各模块导航浏览状态：{ [moduleId]: { scrollTop, tab, ... } }（切换/重启后恢复）
   settings: { rememberModule: true }, // 应用设置：rememberModule=启动时回到上次模块
-  plugins: [], // 外部插件配置：{ id, title, path, enabled }（通过「设置 → 插件」导入）
   fund: {
     // 基金管家：自选 / 持仓 / 交易流水 / 行情缓存 / 设置
     watchlist: [], // { id, code, name, addedAt }
@@ -94,13 +107,11 @@ export const state = {
     },
   },
   ai: {
-    // AI 资讯：新闻源 + 缓存 / 模型目录用户覆盖 / 签到（WorkBuddy+Trae，token 不存）
-    // sources 留 null：首次进入模块由 ensureAi 填默认源（用户清空后保持空，不回填）
-    news: { sources: null, items: [], lastFetch: 0 },
-    // models.custom = 用户覆盖/新增；lastGitItems = git 自动拉取的免费额度目录缓存（24h）
-    models: { custom: [], lastGitItems: [], lastGitFetch: 0 },
+    // 原「AI 资讯」模块已移除：news（资讯源与缓存）、models（模型与免费额度）一并删除。
+    // 只剩签到 —— 首页那张「签到积分」卡还在用，它读 checkin 下的账号余额。
+    // ⚠ 不要再往这里加 news/models，AI 面板已经没有了。
     checkin: {
-      // 签到脚本写的结果文件目录（面板「刷新」读 last_result.json / trae_last_result.json）。
+      // 签到脚本写的结果文件目录（首页签到卡「刷新」读 last_result.json / trae_last_result.json）。
       // 常量在 config.js —— 改路径两边一起改（脚本侧对应 workbuddy-checkin\checkin_paths.py），
       // 只改一边就会出现「脚本写了、面板读不到」的静默故障。
       resultDir: CHECKIN_RESULT_DIR,
@@ -108,6 +119,12 @@ export const state = {
       trae: { accounts: [], lastRun: 0 },
     },
   },
+  // 电子木鱼：点击计数。
+  //   total  累计功德（永不清零）
+  //   today  今日功德（跨天归零，靠 date 判断）
+  //   date   今日功德归属日（YYYY-MM-DD）
+  // 连击数不放这里 —— 它是内存态，隔两秒就断，没有持久化意义。
+  muyu: { total: 0, today: 0, date: "" },
   scheduler: {
     // 定时任务：只来自用户（面板里新建 / 编辑）。源码不预置任何任务，理由见文件开头。
     // （历史：这里曾是 null，当「未初始化」哨兵用，首次进入模块时填入 SCHEDULER_SEED）
@@ -118,6 +135,14 @@ export const state = {
   lock: { enabled: false, minutes: 5 }, // 隐私锁定：离开 enabled 分钟自动锁定全屏
   quickAccess: [], // 快捷访问：{ id, type:"url"|"folder"|"file", title, target, groupId }
   qaGroups: [], // 快捷访问分组：{ id, name }
+  // 外设「忽略名单」：元素是 "VID:PID:MI_xx:COLxx" 形式的设备身份。
+  // 扩展坞 / 无线接收器的 HID 芯片会向系统报告自己是键鼠（Windows 也认），
+  // 自动判假会误杀罗技 Unifying 这类「一个接收器同时是鼠标和键盘」的真设备，
+  // 所以由用户点「忽略」来排除，而不是代码猜。
+  periphIgnore: [],
+  // 外设「计入名单」：覆盖 viaHub 的默认排除。
+  // 用户真把键盘鼠标插在扩展坞上时，viaHub 会误判成假设备，点「计入」加回。
+  periphInclude: [],
   lyric: {
     // 桌面歌词浮层（独立窗口）。P1 仅用到 pos；其余字段在 P2/P4 接入。
     enabled: false, // 是否启用桌面歌词
@@ -171,7 +196,6 @@ export async function loadState() {
     if (typeof n.createdAt !== "number") n.createdAt = Date.now();
     if (typeof n.updatedAt !== "number") n.updatedAt = Date.now();
   });
-  if (!Array.isArray(state.recentOps)) state.recentOps = [];
   // 提醒：只做结构校验，源码不预置任何内容（理由见文件开头）。
   // 为空数组保留（用户可能删光），不是数组才重置。
   if (!Array.isArray(state.reminders)) state.reminders = [];
@@ -220,9 +244,22 @@ export async function loadState() {
   if (pm.date !== todayKey) { pm.date = todayKey; pm.done = 0; pm.minutes = 0; }
   if (!Array.isArray(state.musicSources)) state.musicSources = [];
   if (!Array.isArray(state.favorites)) state.favorites = [];
-  // 工作记录：结构校验
-  if (!Array.isArray(state.workLogs)) state.workLogs = [];
-  state.workLogs = state.workLogs.filter((w) => w && typeof w === "object" && w.id && w.text);
+  // 工作记录已整体移除（含 state.workLogs 与 views/worklog.js）——
+  // 旧 state.json 里残留的 workLogs 字段会被 normalize 时直接丢弃（不做迁移，用户已确认清空）。
+  // EMS 工作量统计：结构校验。四个数字允许 null（未抓到），其余非法值一律归 null，
+  // 避免把 "" / "abc" 之类的脏数据渲染成 NaN。
+  if (!state.emsStats || typeof state.emsStats !== "object" || Array.isArray(state.emsStats)) state.emsStats = {};
+  for (const k of ["reqOpen", "reqUnverified", "bugOpen", "bugUnverified"]) {
+    const n = state.emsStats[k];
+    state.emsStats[k] = (n === null || n === "") ? null : (Number.isFinite(Number(n)) ? Number(n) : null);
+  }
+  // 明细数组：非数组一律归 null（不是 []）。空数组 = 确实查过且没有，
+  // null = 没这个数据源。两者的区别和数字的 0 / null 一样重要。
+  for (const k of ["reqOpenRows", "reqUnverifiedRows", "bugOpenRows", "bugUnverifiedRows"]) {
+    if (!Array.isArray(state.emsStats[k])) state.emsStats[k] = null;
+  }
+  if (!Number.isFinite(Number(state.emsStats.updatedAt))) state.emsStats.updatedAt = 0;
+  if (typeof state.emsStats.error !== "string") state.emsStats.error = "";
   // 灵感碎片：结构校验
   if (!Array.isArray(state.ideabox)) state.ideabox = [];
   state.ideabox = state.ideabox.filter((i) => i && typeof i === "object" && i.id && typeof i.text === "string" && i.text.trim());
@@ -237,9 +274,22 @@ export async function loadState() {
   // 应用设置：结构校验
   if (!state.settings || typeof state.settings !== "object" || Array.isArray(state.settings)) state.settings = {};
   if (typeof state.settings.rememberModule !== "boolean") state.settings.rememberModule = true;
-  // 外部插件：结构校验
-  if (!Array.isArray(state.plugins)) state.plugins = [];
-  state.plugins = state.plugins.filter((p) => p && typeof p === "object" && typeof p.path === "string" && p.path.trim());
+  // 卡片尺寸：{ [cardId]: { span, row } }。非法项直接丢弃（不猜、不修）
+  // ⛔ 上限必须和 workspace.js 的 SPAN_MAX/ROW_MAX 一致（6 / 4），
+  //    否则存进来的超大值会让卡片撑出网格，且拖拽时 clamp 又把它改小 —— 两边打架。
+  if (!state.settings.cardSize || typeof state.settings.cardSize !== "object" || Array.isArray(state.settings.cardSize)) {
+    state.settings.cardSize = {};
+  }
+  for (const id of Object.keys(state.settings.cardSize)) {
+    const v = state.settings.cardSize[id];
+    const span = Math.round(Number(v?.span));
+    const row = Math.round(Number(v?.row));
+    if (!Number.isFinite(span) || !Number.isFinite(row) || span < 1 || row < 1 || span > 6 || row > 4) {
+      delete state.settings.cardSize[id];
+      continue;
+    }
+    state.settings.cardSize[id] = { span, row };
+  }
   // 隐私锁定：结构校验
   if (!state.lock || typeof state.lock !== "object" || Array.isArray(state.lock)) state.lock = {};
   if (typeof state.lock.enabled !== "boolean") state.lock.enabled = false;
@@ -293,19 +343,14 @@ export async function loadState() {
     if (!Array.isArray(fa.history)) fa.history = [];
     fa.history = fa.history.filter((r) => r && typeof r === "object" && typeof r.content === "string" && r.content.trim());
   }
-  // AI 资讯：结构校验（sources 留空/null 由模块 ensureAi 填默认，用户清空后保持空）
+  // 签到（原「AI 资讯」模块的残留，模块已移除，只剩这张卡的登录态要留）
   if (!state.ai || typeof state.ai !== "object" || Array.isArray(state.ai)) state.ai = {};
   {
     const a = state.ai;
-    if (!a.news || typeof a.news !== "object" || Array.isArray(a.news)) a.news = { sources: null, items: [], lastFetch: 0 };
-    if (!Array.isArray(a.news.items)) a.news.items = [];
-    if (typeof a.news.lastFetch !== "number") a.news.lastFetch = 0;
-    if (!a.models || typeof a.models !== "object" || Array.isArray(a.models)) a.models = { custom: [] };
-    if (!Array.isArray(a.models.custom)) a.models.custom = [];
-    if (!Array.isArray(a.models.lastGitItems)) a.models.lastGitItems = [];
-    if (typeof a.models.lastGitFetch !== "number") a.models.lastGitFetch = 0;
-    // 归一化结构版本，与 views/ai.js 的 MODEL_SCHEMA 对应；不一致则丢弃旧缓存重拉
-    if (typeof a.models.lastGitSchema !== "number") a.models.lastGitSchema = 0;
+    // 资讯 / 模型额度：功能已删除，老 state.json 里可能还留着，这里主动清掉
+    // （用户明确要求「一并清理 state.ai 里的旧数据」）。
+    delete a.news;
+    delete a.models;
     if (!a.checkin || typeof a.checkin !== "object" || Array.isArray(a.checkin)) a.checkin = {};
     // 结果目录：缺失 / 空 / 仍是旧路径时升级到 CHECKIN_RESULT_DIR（规则在 config.js）。
     // ⚠ 老 state.json 里存的是旧绝对路径（非空），只改默认值**不会生效** ⇒ 面板会一直读旧目录，
@@ -323,6 +368,29 @@ export async function loadState() {
           return n === "trae cn" || n === "";
         });
       }
+    }
+  }
+  // 追剧记录（watchLog）：功能已移除，老 state.json 里可能还留着，这里主动清掉。
+  // 源码里已经没有任何引用（全仓 findstr 0 命中），纯粹是历史孤儿数据。
+  // 结构与 state.ai.news / state.ai.models 的清理同一模式：不留「等下次保存自然消失」
+  // 的侥幸 —— saveState 是把整个 state 序列化落盘，只要内存里还挂着这个键，
+  // 它就会被一遍遍写回去，永远不会自己消失。
+  if ("watchLog" in state) delete state.watchLog;
+  // 电子木鱼：点击计数。结构坏了就重建，别让一张装饰卡把整个 state 卡住。
+  if (!state.muyu || typeof state.muyu !== "object" || Array.isArray(state.muyu)) {
+    state.muyu = { total: 0, today: 0, date: "" };
+  }
+  {
+    const m = state.muyu;
+    if (typeof m.total !== "number" || !isFinite(m.total) || m.total < 0) m.total = 0;
+    if (typeof m.today !== "number" || !isFinite(m.today) || m.today < 0) m.today = 0;
+    if (typeof m.date !== "string") m.date = "";
+    // 跨天：上次记录的日期不是今天 ⇒ 今日数归零（累计数不动）
+    const today = new Date();
+    const stamp = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+    if (m.date !== stamp) {
+      m.date = stamp;
+      m.today = 0;
     }
   }
   // 定时任务：结构校验 + 首次填充预置任务。
@@ -373,6 +441,12 @@ export async function loadState() {
   state.quickAccess = state.quickAccess.filter(
     (q) => q && typeof q === "object" && typeof q.id === "string" && typeof q.target === "string" && q.target.trim()
   );
+  // 外设忽略名单：只保留 "VID:PID" 形式的非空字符串（老用户无该字段时补默认）
+  if (!Array.isArray(state.periphIgnore)) state.periphIgnore = [];
+  state.periphIgnore = state.periphIgnore.filter((s) => typeof s === "string" && s.includes(":") && s.length > 1);
+  // 外设计入名单：同上
+  if (!Array.isArray(state.periphInclude)) state.periphInclude = [];
+  state.periphInclude = state.periphInclude.filter((s) => typeof s === "string" && s.includes(":") && s.length > 1);
   // 桌面歌词：结构校验 + 枚举回落 + 数值 clamp（老用户无该字段时补默认）
   if (!state.lyric || typeof state.lyric !== "object" || Array.isArray(state.lyric)) {
     state.lyric = { enabled: false, locked: true, form: "single", style: "stroke", align: "center", fontSize: 22, followTheme: true, pos: {} };
@@ -430,17 +504,4 @@ export function saveState() {
   saveTimer = setTimeout(() => {
     Store.save(state).catch((e) => console.warn("[state] 保存失败", e));
   }, 300);
-}
-
-/// 追加一条最近操作记录（最多 20 条），并持久化、通知订阅者刷新。
-const recentOpListeners = new Set();
-export function onRecentOp(fn) {
-  recentOpListeners.add(fn);
-}
-export function pushRecentOp(op) {
-  if (!state.recentOps) state.recentOps = [];
-  state.recentOps.unshift({ ...op, ts: Date.now() });
-  if (state.recentOps.length > 20) state.recentOps.length = 20;
-  saveState();
-  recentOpListeners.forEach((fn) => { try { fn(); } catch (e) {} });
 }

@@ -2,7 +2,7 @@
 // 交互：胶囊点击展开浮层；胶囊内右侧按钮一键 开始/暂停；到期系统提醒。
 // 状态机：focus → (short | long @第4轮) → focus；跳过=切下一阶段但不计完成。
 // 持久化：state.pomodoro（含 endsAt，重启后 running 状态可续跑）。
-import { state, saveState, pushRecentOp } from "./state.js";
+import { state, saveState } from "./state.js";
 import { Heartbeat, invoke } from "./bus.js";
 import { esc, ymd, hhmm } from "./utils.js";
 
@@ -219,7 +219,6 @@ function advance(complete) {
       p.minutes += p.focusMin;
       p.totalDone += 1;
       p.cycleCount += 1;
-      pushRecentOp({ type: "pomodoro", action: "完成专注", name: `番茄钟 · 完成第 ${p.done} 轮` });
     }
     const next = p.cycleCount % 4 === 0 ? "long" : "short";
     p.mode = next;

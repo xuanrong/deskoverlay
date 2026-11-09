@@ -1,28 +1,16 @@
 // 开发者任务模型 — 状态 Coding/Testing/Review/Done + 项目/Deadline。
 // 操作共享 state.js 单例的 tasks 字段，持久化由 saveState 统一处理。
 import { Bus } from "./bus.js";
-import { state, saveState, pushRecentOp } from "./state.js";
-import { ymd, uid } from "./utils.js";
+import { state, saveState } from "./state.js";
+import { uid } from "./utils.js";
 
 function persist() {
   saveState();
   Bus.emit("tasks-changed", state.tasks);
 }
 
-/// 待办完成时追加一条工作记录（类型：工作；日期：今天），随本次持久化一起落盘。
-function addWorkLog(text, tags = []) {
-  if (!text || !text.trim()) return;
-  const date = ymd();
-  state.workLogs = state.workLogs || [];
-  state.workLogs.push({
-    id: uid("wl"),
-    date,
-    type: "工作",
-    text: `完成待办：${text.trim()}`,
-    tags: Array.isArray(tags) ? tags.slice(0, 5) : [],
-  });
-}
-
+// 注：待办完成时曾会顺带写一条「工作记录」（state.workLogs）。
+// 工作记录面板已整体移除，这里不再写 —— 否则会往一个没人读的字段里堆数据。
 export const Tasks = {
   list() { return state.tasks; },
 
@@ -34,7 +22,6 @@ export const Tasks = {
       done: status === "done",
       created: Date.now(),
     });
-    pushRecentOp({ kind: "task_create", text: text.trim() });
     persist();
   },
 
@@ -45,8 +32,6 @@ export const Tasks = {
     const wasDone = t.done;
     Object.assign(t, patch);
     if ("status" in patch) t.done = patch.status === "done";
-    if (!wasDone && t.done) addWorkLog(t.text, t.tags);
-    pushRecentOp({ kind: "task_update", text: t.text });
     persist();
   },
 
@@ -56,7 +41,6 @@ export const Tasks = {
     t.done = !t.done;
     if (t.done && t.status !== "done") t.status = "done";
     if (!t.done && t.status === "done") t.status = "coding";
-    if (t.done) addWorkLog(t.text, t.tags);
     persist();
   },
 
@@ -66,14 +50,12 @@ export const Tasks = {
     const wasDone = t.done;
     t.status = status;
     t.done = status === "done";
-    if (!wasDone && t.done) addWorkLog(t.text, t.tags);
     persist();
   },
 
   remove(id) {
     const t = state.tasks.find((x) => x.id === id);
     state.tasks = state.tasks.filter((x) => x.id !== id);
-    if (t) pushRecentOp({ kind: "task_delete", text: t.text });
     persist();
   },
 

@@ -1024,7 +1024,7 @@ fn run_http(t: &TaskDef) -> (bool, String) {
     }
     let expect = t.expect.trim();
     if !expect.is_empty() && !body.contains(expect) {
-        out.push_str(&format!("\n\n✗ 响应未包含预期关键字「{expect}」"));
+        out.push_str(&format!("\n\n失败：响应未包含预期关键字「{expect}」"));
         return (false, out);
     }
     (true, out)
@@ -1129,7 +1129,7 @@ fn execute(app: &AppHandle, run_id: &str, t: &TaskDef, ctl: &Arc<RunCtl>) -> (St
         let _ = app.emit(
             "scheduler://log",
             json!({ "runId": run_id, "taskId": t.id, "stream": "stderr",
-                    "text": format!("✗ 超过 {} 秒未结束，已终止进程树", t.timeout_sec) }),
+                    "text": format!("失败：超过 {} 秒未结束，已终止进程树", t.timeout_sec) }),
         );
     }
     (status, code, out)

@@ -11,12 +11,9 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = ["protocol-asset"] }
-# 系统原生文件选择对话框：用于「设置 → 插件」选择外部插件文件
+# 系统原生文件选择对话框：备份导出/恢复、选择背景图等
 tauri-plugin-dialog = "2"
-# 嵌入式 WebAssembly 运行时：加载外部插件的 Rust→wasm 后端（无需 dll，宿主内沙箱执行）。
-# 用轻量解释器 wasmi（特性简单、依赖小），对插件轻量后端足够。
-wasmi = { version = "0.31", default-features = false, features = ["std"] }
-# 解压外部「插件包」(zip)：宿主读取 manifest + 前端 + 后端源码
+# 解压备份包(zip)
 zip = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -63,6 +60,21 @@ windows = { version = "0.61", features = [
   "Win32_System_Registry",
   # 单实例互斥量：防「开机自启 + 手动启动」双实例重复嵌入桌面
   "Win32_System_Threading",
+  # 外设状态（peripheral.rs）：
+  #   - GetRawInputDeviceList 在 UI::Input 顶层（父 feature Win32_UI_Input
+  #     已由 Win32_UI_Input_KeyboardAndMouse 传递启用，这里无需重复列出）
+  #   - PKEY_Device_FriendlyName 位于 Devices::FunctionDiscovery
+  "Win32_Devices_FunctionDiscovery",
+  # SetupAPI：枚举鼠标/键盘类设备并读 SPDRP_REMOVAL_POLICY 区分内置与外接
+  "Win32_Devices_DeviceAndDriverInstallation",
+  # HID 描述符：读 UsagePage/Usage 判断鼠标接口是真外设还是厂商自定义集合
+  "Win32_Devices_HumanInterfaceDevice",
+  # 音频端点属性读取：IPropertyStore 在 UI::Shell::PropertiesSystem
+  "Win32_UI_Shell_PropertiesSystem",
+  # PROPVARIANT 的 vt/uintVal 字段受 Win32_System_Variant 门控
+  "Win32_System_Variant",
+  # 外设属性值释放：PropVariantClear / PropVariantToStringAlloc
+  "Win32_System_Com_StructuredStorage",
 ] }
 
 # 定时任务调度（scheduler.rs）：对外统一用 Unix 5 段 cron（分 时 日 月 周），
@@ -70,3 +82,17 @@ windows = { version = "0.61", features = [
 # 本地时区换算依赖 chrono（此前已是传递依赖，这里提升为直接依赖以便显式使用）。
 cron = "0.12"
 chrono = "0.4"
+
+# ── EMS 工作量抓取（ems.rs）的密码学依赖 ──────────────────────────────
+# EMS 前端对每个请求体做「AES-128-CBC(ZeroPadding) + RSA-512(PKCS#1 v1.5) 包裹
+# 会话密钥」，响应再以同一把 AES 密钥解回来。以下三个 crate 用来在 Rust 侧
+# 原样复刻这套协议，避免依赖外部 Node 进程（打包后的桌面端没有 node）。
+#
+# aes：AES-128 分组密码本体（CBC 链式与 ZeroPadding 由 ems.rs 手工实现，
+#      这样 padding 语义完全可控 —— EMS 用的是补 0x00 而非 PKCS#7）。
+aes = "0.8"
+# md-5：登录接口的密码字段要求发送 MD5 摘要（明文绝不上线）。
+md-5 = "0.10"
+# num-bigint：RSA 公钥只有 512 位（64 字节模长），ring 等库最低要求 2048 位，
+# 无法使用；这里直接用大整数做 modpow 完成 PKCS#1 v1.5 加密。
+num-bigint = "0.4"

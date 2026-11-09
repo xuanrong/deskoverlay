@@ -56,14 +56,16 @@ const COLOR_SCHEMES = [
   { name: "低调灰", text: "#E6E8EB", fill: "#8A919E" },
 ];
 
-// 渲染配色子菜单：行首双色圆点，行尾 ✓ 标当前方案
+// 渲染配色子菜单：行首双色圆点，行尾勾选图标标当前方案
+// 图标一律 SVG，不用 ✓ 字符（字符宽度随字体变，行尾会参差）
+const TICK_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7"/></svg>`;
 function renderSchemes() {
   if (!subColorEl) return;
   subColorEl.innerHTML = COLOR_SCHEMES.map((s, i) => {
     const active = s.text === colorText && s.fill === colorFill;
     const style = (s.text || s.fill) ? `--sw-a:${s.text || "#F5F9FE"};--sw-b:${s.fill || "var(--bg-brand)"};` : "";
     return `<button class="ly-mi ${active ? "selected" : ""}" data-i="${i}" title="${s.name}：未唱 ${s.text || "近白"} / 已唱 ${s.fill || "跟随主题"}">
-      <span class="ly-cdot" style="${style}"></span>${s.name}<span class="ly-mcheck">${active ? "✓" : ""}</span></button>`;
+      <span class="ly-cdot" style="${style}"></span>${s.name}<span class="ly-mcheck">${active ? TICK_SVG : ""}</span></button>`;
   }).join("");
   subColorEl.querySelectorAll(".ly-mi").forEach((b) => b.addEventListener("click", () => {
     const s = COLOR_SCHEMES[Number(b.dataset.i)] || COLOR_SCHEMES[0];
@@ -88,7 +90,7 @@ function syncChecks(subEl, cur) {
   subEl.querySelectorAll(".ly-mi").forEach((b) => {
     const chk = b.querySelector(".ly-mcheck");
     const on = b.dataset.v === cur;
-    if (chk) chk.textContent = on ? "✓" : "";
+    if (chk) chk.innerHTML = on ? TICK_SVG : "";
     b.classList.toggle("selected", on);
   });
 }

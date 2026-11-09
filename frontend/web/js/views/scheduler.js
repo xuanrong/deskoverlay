@@ -17,7 +17,7 @@ import { state, saveState } from "../state.js";
 import { esc, uid } from "../utils.js";
 import { showDialog } from "./common.js";
 import { toast } from "../toast.js";
-import { ICON_TRASH } from "../icons.js";
+import { ICON_TRASH, ICON_DOT_ON, ICON_DOT_OFF } from "../icons.js";
 
 const ID = "scheduler";
 const WEEK_LABEL = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
@@ -198,7 +198,7 @@ export function taskRowHtml(t, ctx) {
             : `<button class="btn-ghost btn-xs" data-act="run">运行</button>`}
           <button class="btn-ghost btn-xs" data-act="logs">日志</button>
           <button class="btn-ghost btn-xs" data-act="edit">编辑</button>
-          <button class="btn-icon" data-act="toggle" title="${t.enabled ? "停用" : "启用"}">${t.enabled ? "●" : "○"}</button>
+          <button class="btn-icon" data-act="toggle" title="${t.enabled ? "停用" : "启用"}">${t.enabled ? ICON_DOT_ON : ICON_DOT_OFF}</button>
           <button class="btn-icon" data-act="del" title="删除">${ICON_TRASH}</button>
         </div>
         ${monthHeatHtml(c.monthHeat, c.exported)}
@@ -477,7 +477,7 @@ export function renderScheduler(view) {
     <div class="sch-wrap">
       <div class="card-head">
         <div class="card-title">定时任务</div>
-        <span class="ai-tools">
+        <span class="sch-tools">
           <button class="btn-ghost" id="sch-cfg">调度设置</button>
           <button class="btn-primary" id="sch-new">新建任务</button>
         </span>

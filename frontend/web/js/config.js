@@ -1,16 +1,26 @@
-// 模块定义 — 侧边导航 + 固定模块布局（无拖拽、无工作模式）。
-// 每个模块对应导航栏一项与主区域一个固定视图。
-// icon 为线性 SVG（stroke currentColor），导航/指令条统一渲染。
-import { ICON_HOME, ICON_ACTIVITY, ICON_MUSIC, ICON_NOTES, ICON_LIST, ICON_IDEA, ICON_GEAR, ICON_EXTERNAL, ICON_FUND, ICON_AI, ICON_CLOCK } from "./icons.js";
+// 模块定义 — 一屏卡片工作台 + 全屏浮层（无侧边导航、无拖拽重排之外的模式）。
+// 每个模块对应一张卡片与一个浮层视图。
+// icon 为线性 SVG（stroke currentColor），卡片/指令条统一渲染。
+//
+// ⚠️ 注意：system（系统健康）**不在**这张表里 —— 它的浮层已整体移除，
+// CPU / 内存 / 磁盘改为底部任务栏常驻读数（见 workspace.js 的 bindTaskbarSystem）。
+// 因此不要把它加回来：一加回来，卡片补卡逻辑与指令条都会立刻多出这条入口。
+import { ICON_HOME, ICON_MUSIC, ICON_NOTES, ICON_LIST, ICON_IDEA, ICON_GEAR, ICON_EXTERNAL, ICON_FUND, ICON_AI, ICON_CLOCK, ICON_KANBAN, ICON_MUYU } from "./icons.js";
 
 export const MODULES = [
   { id: "dashboard", title: "今日概览", icon: ICON_HOME },
   { id: "quickaccess", title: "快捷访问", icon: ICON_EXTERNAL },
-  { id: "worklog", title: "工作记录", icon: ICON_LIST },
+  // 原「工作记录」已整体移除（含 state.workLogs），这个位置改为禅道待办看板
+  // icon 用 ICON_KANBAN（层叠任务卡 + 勾）：原来是 ICON_REQ（文档+折角），
+  // 既和浮层里「未验证需求」那一格撞图，也读不出「项目管理」这层意思。
+  { id: "ems-stats", title: "禅道", icon: ICON_KANBAN },
   { id: "ideabox", title: "灵感碎片", icon: ICON_IDEA },
-  { id: "ai", title: "AI 资讯", icon: ICON_AI },
+  // 原「AI 资讯」模块已移除（资讯列表 / 模型与免费额度 / AI 弹窗全部删除）。
+  // ⚠ 签到积分卡还活着，它复用 state.ai.checkin 但**不再有对应模块** ——
+  //   卡片清单里直接写 module: "credits"（不在 MODULES 里），点它不打开浮层，
+  //   只做实时刷新。别为了「统一」把它塞回 MODULES，那样会多出一个空浮层。
+  { id: "muyu", title: "电子木鱼", icon: ICON_MUYU },
   { id: "scheduler", title: "定时任务", icon: ICON_CLOCK },
-  { id: "system", title: "系统健康", icon: ICON_ACTIVITY },
   { id: "fund", title: "基金管家", icon: ICON_FUND },
   { id: "music", title: "在线音乐", icon: ICON_MUSIC },
   { id: "notes", title: "笔记列表", icon: ICON_NOTES },
@@ -39,7 +49,7 @@ export const PRIORITY_LABEL = { P0: "紧急", P1: "高", P2: "中", P3: "低", P
 // 提醒现在完全由用户在时钟块的配置弹窗里增删 / 启停 / 配置。
 
 // ─── 签到结果目录 ───
-// 唯一真相在这里：state.js 的默认结构与老数据迁移、views/ai.js 的读取，全部引用这个常量。
+// 唯一真相在这里：state.js 的默认结构与老数据迁移、首页签到卡的读取，全部引用这个常量。
 // ⚠ **脚本侧另有一份对应物**：签到脚本目录下的 `checkin_paths.py`（其 RESULT_DIR 常量）。
 //    改路径必须两边同时改，只改一边会出现「脚本写了、面板读不到」的静默失配
 //    （面板刷新按钮读 resultDir\last_result.json 与 trae_last_result.json）。
@@ -53,7 +63,7 @@ export const CHECKIN_RESULT_DIR = "C:\\TraeProjects\\deskoverlay\\.workbuddy\\ch
 const LEGACY_CHECKIN_RESULT_DIR_RE = /workbuddy-checkin[\\/]+logs[\\/]*$/i;
 
 /// 归一化结果目录：缺失 / 空 / 仍是旧路径 ⇒ 返回 CHECKIN_RESULT_DIR，否则原样保留用户设置。
-/// state.js（loadState 归一化）与 views/ai.js（ensureAi 兜底）共用这一条规则。
+/// state.js（loadState 归一化）与 workspace.js 的签到卡共用这一条规则。
 export function normalizeCheckinResultDir(dir) {
   return typeof dir === "string" && dir && !LEGACY_CHECKIN_RESULT_DIR_RE.test(dir)
     ? dir

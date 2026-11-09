@@ -234,3 +234,138 @@ pub fn start_explorer_watcher(hwnd: HWND, initial_target: HWND) {
         }
     });
 }
+
+/// 原生任务栏在当前显示器底部遮住了多少**逻辑像素**。
+///
+/// 为什么需要：工作台窗口被注入桌面后撑满**整块虚拟屏**（SM_CYVIRTUALSCREEN），
+/// 而 Windows 任务栏的 z-order 高于 WorkerW，会盖住窗口最底下一条。
+/// 前端若把内容按 100vh 铺到底，底部任务栏/最后一行卡片就被原生任务栏压住。
+///
+/// 实现：工作区（work area）就是「屏幕减去任务栏等 AppBar」的可用矩形，
+/// 虚拟屏高度减工作区高度即为遮挡量。任务栏在顶部/左侧时同样成立
+/// （对应返回 top/left 值，前端按需留边）。
+///
+/// 单位换算：GetSystemMetrics 返回**物理像素**，前端 CSS 用逻辑像素，
+/// 故按主显示器 scale_factor 折算。多显示器混合 DPI 时以主屏为准 ——
+/// 桌面窗口本就以虚拟屏为坐标系，取主屏比例是这里唯一可解释的近似。
+#[derive(serde::Serialize)]
+pub struct TaskbarInset {
+    /// 底部被遮挡的逻辑像素（任务栏在下方时的常见值）
+    pub bottom: f64,
+    /// 顶部被遮挡的逻辑像素（任务栏置于顶部时）
+    pub top: f64,
+    /// 左侧被遮挡的逻辑像素（任务栏竖排在左侧时）
+    pub left: f64,
+    /// 右侧被遮挡的逻辑像素（任务栏竖排在右侧时）
+    pub right: f64,
+    /// 折算用的缩放比例，便于前端排查
+    pub scale: f64,
+}
+
+/// 计算原生任务栏遮挡量（逻辑像素）。取不到时各项返回 0（即不额外留边）。
+pub fn taskbar_inset(scale: f64) -> TaskbarInset {
+    let s = if scale > 0.0 { scale } else { 1.0 };
+    unsafe {
+        let vx = GetSystemMetrics(SM_XVIRTUALSCREEN);
+        let vy = GetSystemMetrics(SM_YVIRTUALSCREEN);
+        let vw = GetSystemMetrics(SM_CXVIRTUALSCREEN);
+        let vh = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+
+        let mut wa = RECT::default();
+        // SPI_GETWORKAREA 返回主显示器工作区（物理像素）
+        if SystemParametersInfoW(
+            SPI_GETWORKAREA,
+            0,
+            Some(&mut wa as *mut RECT as *mut c_void),
+            SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
+        )
+        .is_err()
+        {
+            return TaskbarInset { bottom: 0.0, top: 0.0, left: 0.0, right: 0.0, scale: s };
+        }
+
+        // 虚拟屏与工作区的差集：负值钳到 0
+        // （工作区可能因多屏而「大于」单屏虚拟矩形，此时该方向无需留边）
+        //
+        // 注：embed_in_desktop 把窗口放在 (-2,-2)、尺寸 (vw+4, vh+4)，
+        // 视口确实比虚拟屏每边大 2px。但那是**故意的**溢出（让 DWM 圆角落到屏幕外），
+        // 属于窗口自身几何，不是「被任务栏遮挡」的部分 —— 不该折算进安全区，
+        // 否则四个方向都会凭空多出 2px 内缩，UI 反而变小、和屏幕边留缝。
+        let bottom = (vy + vh - wa.bottom).max(0) as f64 / s;
+        let top = (wa.top - vy).max(0) as f64 / s;
+        let left = (wa.left - vx).max(0) as f64 / s;
+        let right = (vx + vw - wa.right).max(0) as f64 / s;
+
+        TaskbarInset { bottom, top, left, right, scale: s }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    /// 把遮挡量公式抽出来做纯函数，便于脱离 Win32 验证几何关系。
+    /// 与 `taskbar_inset` 的实现保持逐字一致（只是把 GetSystemMetrics 的取值变成入参）。
+    fn inset_from_metrics(
+        vx: i32, vy: i32, vw: i32, vh: i32,
+        wa: (i32, i32, i32, i32),
+        scale: f64,
+    ) -> (f64, f64, f64, f64) {
+        let s = if scale > 0.0 { scale } else { 1.0 };
+        let (wl, wt, wr, wb) = wa;
+        (
+            (vy + vh - wb).max(0) as f64 / s,
+            (wt - vy).max(0) as f64 / s,
+            (wl - vx).max(0) as f64 / s,
+            (vx + vw - wr).max(0) as f64 / s,
+        )
+    }
+
+    #[test]
+    fn taskbar_at_bottom_leaves_bottom_inset() {
+        // 1440x900 虚拟屏 + 870 高工作区（Win11 任务栏 30px），100% 缩放
+        let (bottom, top, left, right) =
+            inset_from_metrics(0, 0, 1440, 900, (0, 0, 1440, 870), 1.0);
+        assert_eq!(bottom, 30.0, "任务栏占 30px");
+        assert_eq!(top, 0.0);
+        assert_eq!(left, 0.0);
+        assert_eq!(right, 0.0);
+    }
+
+    #[test]
+    fn taskbar_at_top_leaves_top_inset() {
+        let (bottom, top, _, _) =
+            inset_from_metrics(0, 0, 1920, 1080, (0, 48, 1920, 1080), 1.0);
+        assert_eq!(top, 48.0, "顶部任务栏 48px");
+        assert_eq!(bottom, 0.0);
+    }
+
+    #[test]
+    fn hi_dpi_scales_to_logical_pixels() {
+        // 125% 缩放：物理 32 → 逻辑 25.6
+        let (bottom, _, _, _) =
+            inset_from_metrics(0, 0, 2560, 1600, (0, 0, 2560, 1568), 1.25);
+        assert!((bottom - 25.6).abs() < 0.01, "got {bottom}");
+    }
+
+    #[test]
+    fn no_inset_when_work_area_equals_virtual_screen() {
+        // 自动隐藏任务栏 / 全屏应用：工作区 == 虚拟屏 → 不额外留边
+        let (bottom, top, left, right) =
+            inset_from_metrics(0, 0, 1920, 1080, (0, 0, 1920, 1080), 1.0);
+        assert_eq!(bottom, 0.0);
+        assert_eq!(top, 0.0);
+        assert_eq!(left, 0.0);
+        assert_eq!(right, 0.0);
+    }
+
+    #[test]
+    fn never_negative_when_work_area_exceeds_virtual() {
+        // 多显示器：工作区矩形可能超出单屏虚拟矩形 → 钳到 0，不留负边距
+        let (bottom, top, left, right) =
+            inset_from_metrics(0, 0, 1920, 1080, (-100, -100, 2020, 1180), 1.0);
+        assert_eq!(bottom, 0.0);
+        assert_eq!(top, 0.0);
+        assert_eq!(left, 0.0);
+        assert_eq!(right, 0.0);
+    }
+}
+

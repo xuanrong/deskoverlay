@@ -1,160 +1,21 @@
 // DeskOverlay 前端工作台 — 启动装配。
-// 范式：侧边导航 + 固定主区域单模块切换（无拖拽面板、无工作模式）。
+// 范式：一屏卡片工作台（无侧边导航）——首页是 6 列卡片网格 + 底部任务栏，
+//       点卡片打开对应模块的全屏浮层，模块内部仍是 views.js 里的完整视图。
 // 状态：统一由 state.js 单例管理，Rust 侧 state.json 持久化。
 import { MODULES } from "./config.js";
-import { state, loadState, saveState, pushRecentOp } from "./state.js";
+import { state, loadState, saveState } from "./state.js";
 import { Bus, invoke } from "./bus.js";
 import { Providers } from "./providers.js";
-import { VIEW_RENDERERS } from "./views.js";
 import { initPlayback } from "./views/music.js";
-import { Tasks } from "./tasks.js";
-import { CommandBar } from "./commandbar.js";
 import { initReminders } from "./reminders.js";
-import { initPomodoro, startPomodoroNow, ICON_TOMATO } from "./pomodoro.js";
+import { initPomodoro } from "./pomodoro.js";
 import { startLockController } from "./lock.js";
-import { initPlugins, onPluginsChanged } from "./plugins.js";
-import { Theme } from "./theme.js";
-import { initEyeCare, toggleEyeCare, restoreNativeColor } from "./eyeCare.js";
+import { initEyeCare } from "./eyeCare.js";
 import { initEyeCareCapsule } from "./eyeCareCapsule.js";
-import { ICON_CHECK, ICON_EXTERNAL, ICON_EYE } from "./icons.js";
+import { Theme } from "./theme.js";
 import { toast } from "./toast.js";
 import { pillFor, lunarText, lunarShort, getDayEvents, holidayOf, workdayOf } from "./festivals.js";
-
-// -------------------- 视图包装 --------------------
-class View {
-  constructor(root, moduleId) {
-    root.innerHTML = `<div class="view"><div class="view-header"></div><div class="view-body"></div></div>`;
-    this.moduleId = moduleId;
-    this.header = root.querySelector(".view-header");
-    this.body = root.querySelector(".view-body");
-    this._destroyers = [];
-  }
-  onDestroy(fn) { this._destroyers.push(fn); }
-  // 记录当前滚动位置到导航状态（切换/重启后恢复）
-  saveScroll() {
-    if (!state.navState) state.navState = {};
-    if (!state.navState[this.moduleId]) state.navState[this.moduleId] = {};
-    state.navState[this.moduleId].scrollTop = this.body.scrollTop || 0;
-  }
-  // 恢复上次滚动位置（视图内容渲染完成后调用）
-  restoreScroll() {
-    const st = state.navState?.[this.moduleId]?.scrollTop;
-    if (typeof st === "number" && st > 0) this.body.scrollTop = st;
-  }
-  destroy() {
-    this.saveScroll();
-    this._destroyers.forEach((f) => { try { f(); } catch (e) {} });
-    this._destroyers = [];
-  }
-}
-
-// -------------------- 导航 + 模块切换 --------------------
-const navList = document.getElementById("nav-list");
-const viewContainer = document.getElementById("view-container");
-let currentView = null;
-
-function renderNav() {
-  navList.innerHTML = MODULES.map((m) => `
-    <div class="nav-item${m.id === state.currentModule ? " active" : ""}" data-module="${m.id}">
-      <span class="ni-icon">${m.icon}</span>
-      <span class="ni-title">${m.title}</span>
-    </div>`).join("");
-  navList.querySelectorAll(".nav-item").forEach((el) => {
-    el.addEventListener("click", () => switchModule(el.dataset.module));
-  });
-}
-
-function switchModule(id) {
-  if (!VIEW_RENDERERS[id]) return;
-  state.currentModule = id;
-  saveState();
-  navList.querySelectorAll(".nav-item").forEach((el) => {
-    el.classList.toggle("active", el.dataset.module === id);
-  });
-  if (currentView) currentView.destroy();
-  currentView = new View(viewContainer, id);
-  VIEW_RENDERERS[id](currentView);
-  // 内容渲染完成后恢复该模块上次的滚动位置（异步渲染的视图也能生效）
-  requestAnimationFrame(() => currentView?.restoreScroll());
-}
-
-// 插件集合变化（添加/移除）后重建导航
-onPluginsChanged(() => renderNav());
-
-// -------------------- 快速指令条 --------------------
-function buildCommands() {
-  const cmds = [];
-  for (const m of MODULES) {
-    cmds.push({
-      id: "mod-" + m.id,
-      icon: m.icon,
-      title: "切换到：" + m.title,
-      sub: "侧边导航定位",
-      keywords: "module nav 切换 " + m.id + " " + m.title,
-      run: () => switchModule(m.id),
-    });
-  }
-  cmds.push({
-    id: "pomo-start",
-    icon: ICON_TOMATO,
-    title: "番茄钟：开始一轮专注",
-    sub: "25 分钟专注倒计时 · 顶栏胶囊可暂停",
-    keywords: "pomodoro 番茄钟 专注 focus timer 计时",
-    run: () => { if (startPomodoroNow()) toast("番茄钟已开始"); else toast("番茄钟正在进行中"); },
-  });
-  cmds.push({
-    id: "eyecare-toggle",
-    icon: ICON_EYE,
-    title: "护眼模式：开 / 关",
-    sub: "调节显卡输出色温，对整机所有应用生效",
-    keywords: "eyecare 护眼 蓝光 色温 gamma night 夜间 眼睛",
-    run: () => {
-      toggleEyeCare();
-      toast(state.eyeCare.enabled ? "护眼模式已开启" : "护眼模式已关闭");
-    },
-  });
-  cmds.push({
-    id: "eyecare-restore",
-    icon: ICON_EYE,
-    title: "护眼：恢复显示器原色",
-    sub: "立即还原原始色彩并关闭护眼（修图调色时用）",
-    keywords: "eyecare restore 护眼 恢复原色 关闭 修图",
-    run: () => { restoreNativeColor(); toast("已恢复显示器原始色彩"); },
-  });
-  cmds.push({
-    id: "add-task",
-    icon: ICON_CHECK,
-    title: "添加待办",
-    sub: "输入内容后回车，或用 「>内容」快速添加",
-    keywords: "task 任务 待办 add todo",
-    run: (text) => {
-      if (text) { Tasks.add({ text }); switchModule("dashboard"); toast("已添加待办"); }
-      else { CommandBar.open(">"); }
-    },
-  });
-  const apps = [
-    { name: "Figma", url: "https://figma.com" },
-    { name: "GitHub", url: "https://github.com" },
-    { name: "VS Code", url: "vscode://" },
-  ];
-  for (const a of apps) {
-    cmds.push({
-      icon: ICON_EXTERNAL, title: "启动：" + a.name,
-      sub: "打开 " + a.url,
-      keywords: "launch open 启动 " + a.name,
-      run: () => { window.open(a.url, "_blank"); toast("启动 " + a.name); },
-    });
-  }
-  return cmds;
-}
-
-CommandBar.init({
-  barEl: document.getElementById("command-bar"),
-  inputEl: document.getElementById("cb-input"),
-  resultsEl: document.getElementById("cb-results"),
-  commands: buildCommands(),
-  onClose: () => {},
-});
+import { initWorkspace, openModule, setQuietToast, toggleEditMode } from "./workspace.js";
 
 // -------------------- 启动 Provider --------------------
 Providers.startAll();
@@ -261,34 +122,79 @@ Bus.on("provider-emit", ({ config_hash, output }) => {
 refreshFestival();
 mcFest?.addEventListener("click", showFestivalPanel);
 
-// 久坐提醒弹出：记入最近操作，便于回溯。
-Bus.on("sedentary-fire", () => {
-  pushRecentOp({ type: "sedentary", action: "提醒弹出", name: "久坐提醒" });
+// -------------------- EMS 工作量统计 --------------------
+// Rust 侧 ems.rs 定时抓 EMS 任务/需求列表，经 provider-emit("ems-stats") 推上来。
+// 这里把它落进 state.emsStats 并持久化 —— 保持「前端是 state.json 唯一写者」。
+// 注意：null 与 0 语义不同。null = 还没抓到过（显示「—」），0 = 确实是零。
+Bus.on("provider-emit", ({ config_hash, output }) => {
+  if (config_hash !== "ems-stats") return;
+  if (!output || typeof output !== "object") return;
+
+  const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+  // 明细数组：非数组一律 null。空数组 = 确实查过且没有，null = 没这个数据源。
+  const rows = (v) => (Array.isArray(v) ? v : null);
+
+  const prev = state.emsStats || {};
+  const next = {
+    reqOpen: num(output.reqOpen),
+    reqOpenRows: rows(output.reqOpenRows),
+    reqUnverified: num(output.reqUnverified),
+    reqUnverifiedRows: rows(output.reqUnverifiedRows),
+    bugOpen: num(output.bugOpen),
+    bugOpenRows: rows(output.bugOpenRows),
+    bugUnverified: num(output.bugUnverified),
+    bugUnverifiedRows: rows(output.bugUnverifiedRows),
+    updatedAt: Number(output.updatedAt) || Date.now(),
+    error: typeof output.error === "string" ? output.error : "",
+  };
+
+  // 内容没变就不写盘，避免无谓重写 state.json。
+  // 签名带上明细条数：数字没变但明细变了（比如换了内容）也要更新。
+  // ⛔ 必须带上 updatedAt：它的语义是「上次成功抓取的时刻」，即使四个数字
+  //    一点没变，这个时间也该前进。漏了它会导致「抓取成功但 state 不更新」
+  //    → 卡片不重画 → 刷新按钮的 .is-busy 永久残留，图标一直转，
+  //    用户看到「一直在转没有返回数据」，其实数据早就回来了。
+  //    抓取现在是 2 小时一轮，多写几次 state.json 的成本可以忽略。
+  const sig = (o) =>
+    [
+      o.reqOpen, o.reqUnverified, o.bugOpen, o.bugUnverified, o.error,
+      o.reqOpenRows?.length ?? "-",
+      o.reqUnverifiedRows?.length ?? "-",
+      o.bugOpenRows?.length ?? "-",
+      o.bugUnverifiedRows?.length ?? "-",
+      o.updatedAt ?? 0,
+    ].join("|");
+  if (sig(prev) === sig(next)) return;
+
+  state.emsStats = next;
+  saveState();
+  // 卡片由 workspace.js 的 watch("ems", …) 自动重画，这里不主动重绘 ——
+  // 整体重建会打断用户正在操作的其它卡片（焦点、hover 全丢）。
 });
 
 
 // -------------------- 事件绑定 --------------------
 window.addEventListener("keydown", (e) => {
-  if ((e.ctrlKey || e.metaKey) && e.code === "Space") {
-    e.preventDefault();
-    CommandBar.toggle();
-  }
-});
-window.addEventListener("keydown", (e) => {
   if (e.key !== "Escape") return;
   const help = document.getElementById("help-overlay");
   if (help && !help.hidden) help.hidden = true;
 });
-document.getElementById("nav-quit").addEventListener("click", () => {
-  if (window.__TAURI__ || window.__TAURI_INTERNALS__) {
-    invoke("quit_app").catch(() => { try { window.close(); } catch (_) {} });
-  } else {
-    toast("桌面态可按 Esc 退出");
-  }
-});
 document.getElementById("help-close").addEventListener("click", () => {
   document.getElementById("help-overlay").hidden = true;
 });
+
+// 底部任务栏：设置 / 编辑模式 / 退出
+document.getElementById("tb-settings")?.addEventListener("click", () => openModule("settings"));
+document.getElementById("tb-edit")?.addEventListener("click", () => toggleEditMode());
+document.getElementById("tb-quit")?.addEventListener("click", () => {
+  if (window.__TAURI__ || window.__TAURI_INTERNALS__) {
+    invoke("quit_app").catch(() => { try { window.close(); } catch (_) {} });
+  } else {
+    toast("桌面态才能退出应用");
+  }
+});
+document.getElementById("tb-fund")?.addEventListener("click", () => openModule("fund"));
+// CPU / 内存 / 磁盘只是任务栏上的读数，不可点 —— 系统健康浮层已整体移除。
 
 // -------------------- 滚动条自动隐藏（滚动时显示，停止后隐藏） --------------------
 let scrollHideTimer = null;
@@ -302,44 +208,19 @@ document.addEventListener("scroll", (e) => {
   }, 500);
 }, true);
 
-// -------------------- 导航栏折叠/展开 --------------------
-const navToggle = document.getElementById("nav-toggle");
-function applyNavCollapsed(collapsed) {
-  document.body.classList.toggle("nav-collapsed", collapsed);
-  if (!navToggle) return;
-  navToggle.title = collapsed ? "展开导航" : "折叠导航";
-  const label = navToggle.querySelector("span");
-  if (label) label.textContent = collapsed ? "展开" : "收起";
-  const svg = navToggle.querySelector("svg");
-  if (svg) {
-    svg.innerHTML = collapsed
-      ? '<path d="M10 5l7 7-7 7"/>'
-      : '<path d="M14 5l-7 7 7 7"/><path d="M20 5l-7 7 7 7"/>';
-  }
-}
-navToggle.addEventListener("click", () => {
-  const collapsed = !document.body.classList.contains("nav-collapsed");
-  if (!state.settings) state.settings = {};
-  state.settings.navCollapsed = collapsed;
-  saveState();
-  applyNavCollapsed(collapsed);
-});
-
 // -------------------- 启动 --------------------
-// 异步初始化状态，就绪后加载外部插件、渲染导航与当前模块
+// 异步初始化状态，就绪后加载外部插件、渲染工作台卡片
 loadState().then(async () => {
   // 主题系统：最先应用（在任何模块渲染前把方案/token/背景写好，避免闪切）
   try { await Theme.init(); } catch (e) { console.warn("[theme] 初始化失败，使用默认深色", e); }
-  // 恢复导航栏折叠状态
-  applyNavCollapsed(!!state.settings?.navCollapsed);
-  // 先加载启用的外部插件（如微信读书），使插件模块注册进导航，再切初始模块（否则初始模块若是插件会找不到）
-  await initPlugins();
-  renderNav();
-  // 启动进入的模块：默认回到「今日概览」；设置允许记住上次所在模块
+  // 工作台首页：卡片网格 + 任务栏 + 浮层
+  initWorkspace();
+  setQuietToast(toast);
+
+  // 启动时是否自动打开上次模块的浮层（设置里可关；关掉就只显示卡片工作台）
   const remember = state.settings?.rememberModule !== false;
-  const last = MODULES.some((m) => m.id === state.currentModule) ? state.currentModule : "dashboard";
-  const initial = remember ? last : "dashboard";
-  switchModule(initial);
+  const last = MODULES.some((m) => m.id === state.currentModule) ? state.currentModule : null;
+  if (remember && last && last !== "dashboard") openModule(last);
 
   // 恢复音乐播放状态（队列/歌曲/播放位置）
   initPlayback();

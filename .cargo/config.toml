@@ -10,3 +10,14 @@ index = "https://rsproxy.cn/crates.io-index"
 
 [net]
 git-fetch-with-cli = true
+
+# ── 构建目录改到短路径 ──────────────────────────────────────────────
+# 本项目路径 C:\TraeProjects\deskoverlay\target 太长，会让 MSVC 的 cl.exe
+# 在编译 ring 的 C 代码时报：
+#   cl : Command line error D8050 : cannot execute '...c1.dll':
+#        failed to get command line into debug records
+# 原因是 /Z7 调试记录要写入完整命令行，路径一长就超出限制。
+# 实测：同一个 target 内容放到 C:\tb 下构建直接成功（3 分 07 秒，2.2 GB）。
+# 注意：若改这里的路径，记得把旧目录删掉，否则会残留几十 GB。
+[build]
+target-dir = "C:\\tb\\deskoverlay"

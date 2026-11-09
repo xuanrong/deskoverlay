@@ -21,16 +21,17 @@
   window.Audio = PatchedAudio;
   // 搜索结果：第 1 条刻意构造为「文件名不含查询词、仅父目录含」——
   // 这正是 file_index::search_files 必须保留全路径趟的原因，也是本冒烟要守住的行为。
+  // 路径用占位用户名（USER），不写真实账户名 —— 本仓库是公开的。
   const HITS = [
-    { path: "C:\\Users\\qiuxr\\Documents\\采购\\Q1 汇总表.xlsx", is_dir: false },
-    { path: "C:\\Users\\qiuxr\\Documents\\会议纪要\\2026-09-01 评审会.md", is_dir: false },
-    { path: "C:\\Users\\qiuxr\\Desktop\\临时", is_dir: true },
+    { path: "C:\\Users\\USER\\Documents\\采购\\Q1 汇总表.xlsx", is_dir: false },
+    { path: "C:\\Users\\USER\\Documents\\会议纪要\\2026-09-01 评审会.md", is_dir: false },
+    { path: "C:\\Users\\USER\\Desktop\\临时", is_dir: true },
   ];
 
   // 桌面文件列表：必须非空，否则文件中心会退化为「桌面无文件」空态而**不渲染搜索框**。
   const DESKTOP = [
-    { name: "2026 计划.txt", path: "C:\\Users\\qiuxr\\Desktop\\2026 计划.txt", ext: "txt", is_dir: false, size: 120, mtime: 1757000000 },
-    { name: "项目资料", path: "C:\\Users\\qiuxr\\Desktop\\项目资料", ext: "", is_dir: true, size: 0, mtime: 1757000000 },
+    { name: "2026 计划.txt", path: "C:\\Users\\USER\\Desktop\\2026 计划.txt", ext: "txt", is_dir: false, size: 120, mtime: 1757000000 },
+    { name: "项目资料", path: "C:\\Users\\USER\\Desktop\\项目资料", ext: "", is_dir: true, size: 0, mtime: 1757000000 },
   ];
 
   const table = {
@@ -41,7 +42,15 @@
         return raw ? JSON.parse(raw) : {};
       } catch { return {}; }
     },
-    save_state: () => null,
+    save_state: (args) => {
+      // 真后端把 state 写盘；mock 写 localStorage，让「刷新后状态还在」这条链路也能被测。
+      // 参数形状由 state.js 的 save_state 调用决定，取第一个对象参数。
+      try {
+        const s = args && (args.state ?? args.data ?? args);
+        if (s && typeof s === "object") localStorage.setItem("smoke_state", JSON.stringify(s));
+      } catch {}
+      return null;
+    },
     list_desktop_files: () => DESKTOP.slice(),
     index_status: () => ({ ready: true, building: false, scanned: 0, count: HITS.length, roots: ["C:\\"] }),
     search_files: () => HITS.map((h) => ({ ...h })),

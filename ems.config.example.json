@@ -1,0 +1,28 @@
+{
+  "_comment": "EMS 工作量抓取的连接配置。把本文件复制到 %APPDATA%/com.deskoverlay.desktop/ems.json 后填入真实值。⚠ 带真实凭据的那份 ems.json 绝不能提交到仓库。",
+
+  "host": "ems.example.com:9392",
+  "username": "YOUR_EMPLOYEE_ID",
+  "password": "YOUR_PASSWORD",
+
+  "context": "ecanerp",
+  "businessOfficeId": "10000",
+
+  "_comment_task": "任务列表页：统计「未完成需求」（指派给我、状态为 未开始/进行中/校验未通过）",
+  "pageId": "00000000000000000000000000000000",
+  "dataSetId": "00000000000000000000000000000000",
+  "scriptName": "javaSearch_xxx_00000,javaSearch_yyy_00000",
+  "version": 26,
+
+  "_comment_req": "需求列表页：统计「未验证需求」（validbyme 视图，见 README 说明）",
+  "reqPageId": "00000000000000000000000000000000",
+  "reqDataSetId": "00000000000000000000000000000000",
+  "reqScriptName": "javaSearch_zzz_00000,javaSearch_yyy_00000",
+  "reqVersion": 6,
+
+  "_comment_bug": "Bug 列表页：统计「未完成 / 未验证 Bug」。dataSetId 可能与任务页相同，靠 args 区分视图；args[4] 是 bug_step 过滤器。",
+  "bugPageId": "00000000000000000000000000000000",
+  "bugDataSetId": "00000000000000000000000000000000",
+  "bugScriptName": "javaSearch_www_00000",
+  "bugVersion": 31
+}

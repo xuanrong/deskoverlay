@@ -50,6 +50,116 @@ const STALE_WINDOW = 30 * 60 * 1000;
 // 请求超时（毫秒），防止个别接口长时间挂起拖垮整页
 const REQ_TIMEOUT = 12 * 1000;
 const HISTORY_POINTS = 20;
+// 大盘指数清单：任务栏行情与基金管家「大盘指数」区块共用同一份，避免两处各写一套符号
+const INDEXES = [
+  { sym: "sh000001", name: "上证指数" },
+  { sym: "sz399001", name: "深证成指" },
+  { sym: "sz399006", name: "创业板指" },
+  { sym: "sh000300", name: "沪深300" },
+  { sym: "sh000905", name: "中证500" },
+  { sym: "sh000688", name: "科创50" },
+  { sym: "rt_hkHSI", name: "恒生指数" },
+  { sym: "rt_hkHSTECH", name: "恒生科技" },
+  { sym: "gb_ixic", name: "纳斯达克" },
+  { sym: "gb_inx", name: "标普500" },
+  { sym: "gb_dji", name: "道琼斯" },
+];
+
+// 按前缀解析单条行情 → { name, price, prevClose, chg, pct, time }
+// A股  sh/sz ：名称,今开,昨收,现价,最高,最低,…（现价 idx3 / 昨收 idx2）
+// 港股 rt_hk：英文码,名称,今开,昨收,最高,最低,现价,涨跌额,涨跌幅,…（现价 idx6 / 涨跌额 idx7 / 涨跌幅 idx8）
+// 美股 gb_  ：名称,现价,涨跌幅,时间,涨跌额,今开,最高,最低,…（现价 idx1 / 涨跌幅 idx2 / 涨跌额 idx4）
+function parseIndexQuote(sym, p) {
+  if (sym.startsWith("rt_hk")) {
+    return {
+      name: p[1], price: num(p[6], 0), prevClose: num(p[3], 0),
+      chg: num(p[7], null), pct: num(p[8], null),
+      time: [p[17], p[18]].filter(Boolean).join(" "),
+    };
+  }
+  if (sym.startsWith("gb_")) {
+    const price = num(p[1], 0), chg = num(p[4], null);
+    return {
+      name: p[0], price, chg, pct: num(p[2], null),
+      prevClose: (price > 0 && chg !== null) ? price - chg : 0,
+      time: p[3] || "",
+    };
+  }
+  return {
+    name: p[0], price: num(p[3], 0), prevClose: num(p[2], 0),
+    chg: null, pct: null,
+    time: [p[30], p[31]].filter(Boolean).join(" "),
+  };
+}
+
+// 指数缓存读写（模块级，与视图生命周期解耦）：任务栏没打开基金模块时也要能取到行情，
+// 因此不能挂在 renderFund 的闭包里。缓存落在 state.fund.cache.index.idx。
+function indexCacheBucket() {
+  const F = state.fund;
+  if (!F || typeof F !== "object") return null;
+  if (!F.cache || typeof F.cache !== "object") F.cache = {};
+  if (!F.cache.index || typeof F.cache.index !== "object") F.cache.index = {};
+  return F.cache.index;
+}
+
+// 取大盘指数行情（带 30s 缓存 + 失效兜底）。返回 list；全失败时抛错。
+// opts.force=true 跳过新鲜缓存直接请求（基金模块「刷新」按钮用）。
+export async function fetchIndexQuotes(opts) {
+  const force = !!(opts && opts.force);
+  const bucket = indexCacheBucket();
+  const rec = bucket && bucket.idx;
+  if (!force && rec && typeof rec.at === "number" && Date.now() - rec.at < TTL_INDEX) {
+    return rec.data;
+  }
+  const syms = INDEXES.map((i) => i.sym).join(",");
+  // 注意一：新浪 hq.sinajs.cn 不解析 %2C，多代码必须用「原始逗号」分隔，
+  //         否则整串被当成一个无效代码 → 响应无匹配行 → 误判为「指数行情加载失败」。
+  // 注意二：该接口是「路径式」写法（/list=…，无 ? 号），任何后缀（如 &format=text）
+  //         都会被并入「最后一个代码」，使末位指数静默丢失。默认返回即为 text 格式，
+  //         故列表末尾不得追加任何 query 参数。
+  let raw;
+  try {
+    raw = await withTimeout(invoke("http_get", { url: `https://hq.sinajs.cn/list=${syms}`, headers: SINA_H }));
+  } catch (e) {
+    // 接口失败 → 回退 STALE_WINDOW 内的旧数据（界面会标「缓」，总比空着强）
+    if (rec && typeof rec.at === "number" && Date.now() - rec.at < STALE_WINDOW) return rec.data;
+    throw e;
+  }
+  // 新浪返回 GBK，宿主 http_get 已解码为 UTF-8（名称由本地映射兜底）
+  const list = [];
+  for (const line of String(raw || "").split("\n")) {
+    // 代码可能含大写与下划线（rt_hkHSI / gb_ixic），正则须涵盖
+    const m = /hq_str_([A-Za-z0-9_]+)="([^"]*)"/.exec(line);
+    if (!m) continue;
+    const meta = INDEXES.find((i) => i.sym === m[1]);
+    if (!meta) continue;
+    const q = parseIndexQuote(meta.sym, m[2].split(","));
+    const price = q.price;
+    // 优先用行情自带涨跌，缺失时用昨收推算
+    let pct = q.pct, chg = q.chg;
+    if (pct === null && q.prevClose > 0) pct = ((price - q.prevClose) / q.prevClose) * 100;
+    if (chg === null && q.prevClose > 0) chg = price - q.prevClose;
+    // 价与涨跌额均有效才算有数据（新浪缺数据的指数会返回价=0），否则界面显示「暂无数据」
+    const hasData = price > 0 && chg !== null;
+    list.push({ name: q.name || meta.name, sym: meta.sym, price, chg, pct, hasData, time: q.time });
+  }
+  if (!list.length) {
+    if (rec && typeof rec.at === "number" && Date.now() - rec.at < STALE_WINDOW) return rec.data;
+    throw new Error("指数行情加载失败");
+  }
+  if (bucket) bucket.idx = { at: Date.now(), data: list };
+  return list;
+}
+
+// 顶层超时包装：任务栏独立取数时也要有超时，不能只靠视图闭包里那份
+function withTimeout(p) {
+  let timer = 0;
+  const t = new Promise((_, rej) => {
+    timer = setTimeout(() => rej(new Error("请求超时")), REQ_TIMEOUT);
+  });
+  return Promise.race([p, t]).finally(() => clearTimeout(timer));
+}
+
 // 走势弹窗周期选择（近1周/1月/3月/6月/1年），本地切片无需额外请求
 const CHART_PERIODS = [
   { id: "1w", label: "近1周", days: 7 },
@@ -156,13 +266,7 @@ export function renderFund(view) {
     return await invoke("http_get", { url, headers: headers || null });
   }
   // 带超时的请求：用 AbortController 之外的方案（invoke 不支持取消，靠 Promise.race 兜底）
-  function withTimeout(p) {
-    let timer = 0;
-    const t = new Promise((_, rej) => {
-      timer = setTimeout(() => rej(new Error("请求超时")), REQ_TIMEOUT);
-    });
-    return Promise.race([p, t]).finally(() => clearTimeout(timer));
-  }
+  // 注：withTimeout 已提到模块顶层（任务栏独立取数也要用），此处不再重复定义。
   // 主请求：超时 + 静默重试（网络抖动 / 东财限流常见），默认 2 次尝试。
   // tries 可选：多路并发场景（如涨跌分布 5 页）需要更高次数，见 DIST_TRIES。
   async function get(url, headers, tries) {
@@ -501,79 +605,10 @@ export function renderFund(view) {
   // 排行 CSV 列索引（fundcode, name, pjz, jzzrq, dwjz, ljjz, rq, ...）
   const sortIdxOf = (s) => ({ "1nzf": 7, "1yzf": 8, "3yzf": 9, "6yzf": 10, "1jz": 11 })[s] || 7;
 
-  // ---------- 指数行情（新浪 hq.sinajs.cn，混合 A股 / 港股 / 美股） ----------
-  // 各市场返回格式不同，按代码前缀分别解析（见 parseIndexQuote）。
-  const INDEXES = [
-    { sym: "sh000001", name: "上证指数" },
-    { sym: "sz399001", name: "深证成指" },
-    { sym: "sz399006", name: "创业板指" },
-    { sym: "sh000300", name: "沪深300" },
-    { sym: "sh000905", name: "中证500" },
-    { sym: "sh000688", name: "科创50" },
-    { sym: "rt_hkHSI", name: "恒生指数" },
-    { sym: "rt_hkHSTECH", name: "恒生科技" },
-    { sym: "gb_ixic", name: "纳斯达克" },
-    { sym: "gb_inx", name: "标普500" },
-    { sym: "gb_dji", name: "道琼斯" },
-  ];
-  // 按前缀解析单条行情 → { name, price, prevClose, chg, pct, time }
-  // A股  sh/sz ：名称,今开,昨收,现价,最高,最低,…（现价 idx3 / 昨收 idx2）
-  // 港股 rt_hk：英文码,名称,今开,昨收,最高,最低,现价,涨跌额,涨跌幅,…（现价 idx6 / 涨跌额 idx7 / 涨跌幅 idx8）
-  // 美股 gb_  ：名称,现价,涨跌幅,时间,涨跌额,今开,最高,最低,…（现价 idx1 / 涨跌幅 idx2 / 涨跌额 idx4）
-  function parseIndexQuote(sym, p) {
-    if (sym.startsWith("rt_hk")) {
-      return {
-        name: p[1], price: num(p[6], 0), prevClose: num(p[3], 0),
-        chg: num(p[7], null), pct: num(p[8], null),
-        time: [p[17], p[18]].filter(Boolean).join(" "),
-      };
-    }
-    if (sym.startsWith("gb_")) {
-      const price = num(p[1], 0), chg = num(p[4], null);
-      return {
-        name: p[0], price, chg, pct: num(p[2], null),
-        prevClose: (price > 0 && chg !== null) ? price - chg : 0,
-        time: p[3] || "",
-      };
-    }
-    return {
-      name: p[0], price: num(p[3], 0), prevClose: num(p[2], 0),
-      chg: null, pct: null,
-      time: [p[30], p[31]].filter(Boolean).join(" "),
-    };
-  }
+  // ---------- 指数行情（复用模块级 fetchIndexQuotes，任务栏与视图共享同一份缓存） ----------
+  // 视图内的 get() 带重试、闭包缓存分级更细，这里保留 force 刷新语义即可。
   async function fetchIndexes() {
-    const key = "idx";
-    const hit = cached(key, "index");
-    if (hit) return hit;
-    const syms = INDEXES.map((i) => i.sym).join(",");
-    // 注意一：新浪 hq.sinajs.cn 不解析 %2C，多代码必须用「原始逗号」分隔，
-    //         否则整串被当成一个无效代码 → 响应无匹配行 → 误判为「指数行情加载失败」。
-    // 注意二：该接口是「路径式」写法（/list=…，无 ? 号），任何后缀（如 &format=text）
-    //         都会被并入「最后一个代码」，使末位指数静默丢失。默认返回即为 text 格式，
-    //         故列表末尾不得追加任何 query 参数。
-    const raw = await get(`https://hq.sinajs.cn/list=${syms}`, SINA_H);
-    // 新浪返回 GBK，宿主 http_get 已解码为 UTF-8（名称由本地映射兜底）
-    const list = [];
-    for (const line of raw.split("\n")) {
-      // 代码可能含大写与下划线（rt_hkHSI / gb_ixic），正则须涵盖
-      const m = /hq_str_([A-Za-z0-9_]+)="([^"]*)"/.exec(line);
-      if (!m) continue;
-      const meta = INDEXES.find((i) => i.sym === m[1]);
-      if (!meta) continue;
-      const q = parseIndexQuote(meta.sym, m[2].split(","));
-      const price = q.price;
-      // 优先用行情自带涨跌，缺失时用昨收推算
-      let pct = q.pct, chg = q.chg;
-      if (pct === null && q.prevClose > 0) pct = ((price - q.prevClose) / q.prevClose) * 100;
-      if (chg === null && q.prevClose > 0) chg = price - q.prevClose;
-      // 价与涨跌额均有效才算有数据（新浪缺数据的指数会返回价=0），否则界面显示「暂无数据」
-      const hasData = price > 0 && chg !== null;
-      list.push({ name: q.name || meta.name, sym: meta.sym, price, chg, pct, hasData, time: q.time });
-    }
-    if (!list.length) throw new Error("指数行情加载失败");
-    storeCache("index", key, list);
-    return list;
+    return await fetchIndexQuotes();
   }
 
   // ---------- 基金主题（天天基金「主题基金」ztjj） ----------
