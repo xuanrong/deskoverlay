@@ -30,7 +30,7 @@ function evRow(h) {
   const name = p.split(/[\\/]/).pop() || "";
   const dir = p.slice(0, -name.length).replace(/[\\/]$/, "");
   const icon = searchIcon((name.split(".").pop() || "").toLowerCase(), !!h.is_dir);
-  return `<div class="ev-item" data-path="${esc(p)}" title="${esc(p)}&#10;（右键操作）">
+  return `<div class="ev-item" data-path="${esc(p)}" aria-label="${esc(p)}（右键操作）">
     <span class="ev-icon">${icon}</span>
     <span class="ev-name">${esc(name)}</span>
     <span class="ev-path">${esc(dir)}</span>
@@ -62,7 +62,7 @@ function renderTasksMini(el, view) {
   el.innerHTML = `
     <div class="sec-title">
       <span>待办事项</span>
-      <button class="file-layout-toggle" id="d-task-add" title="添加待办" aria-label="添加待办">＋</button>
+      <button class="file-layout-toggle" id="d-task-add" aria-label="添加待办">＋</button>
     </div>
     <div class="dash-task-list" id="d-task-list"></div>`;
 
@@ -329,8 +329,8 @@ async function renderFilesBlock(el, view) {
     if (!tabs.includes(currentTab)) currentTab = tabs[0];
     el.innerHTML = `
     <div class="sec-title">文件中心
-      <span class="file-search" id="d-file-search-box"><input id="d-file-search" type="text" placeholder="全盘搜文件名…" spellcheck="false" autocomplete="off" /><button class="file-reindex" id="d-file-reindex" title="重建索引" type="button">${ICON_REFRESH}</button><button class="file-search-toggle" id="d-file-search-btn" title="全盘搜文件" type="button">${ICON_SEARCH}</button></span>
-      <button class="file-layout-toggle" id="d-file-layout" title="切换布局">${layout === "grid" ? LAYOUT_LIST_ICON : LAYOUT_GRID_ICON}</button>
+      <span class="file-search" id="d-file-search-box"><input id="d-file-search" type="text" placeholder="全盘搜文件名…" spellcheck="false" autocomplete="off" /><button class="file-reindex" id="d-file-reindex" aria-label="重建索引" type="button">${ICON_REFRESH}</button><button class="file-search-toggle" id="d-file-search-btn" aria-label="全盘搜文件" type="button">${ICON_SEARCH}</button></span>
+      <button class="file-layout-toggle" id="d-file-layout" aria-label="切换布局">${layout === "grid" ? LAYOUT_LIST_ICON : LAYOUT_GRID_ICON}</button>
     </div>
     <div class="file-tabs" id="d-file-tabs"></div>
     <div class="file-tab-content" id="d-file-content"></div>
@@ -465,7 +465,7 @@ async function renderFilesBlock(el, view) {
           ? `<span class="fg-thumb-box"><span class="fg-icon">${icon}</span><img class="fg-thumb" data-img="${esc(f.name)}" alt="" hidden></span>`
           : `<span class="fg-icon">${icon}</span>`;
         const cls = layout === "grid" ? "fg-card" : "fg-item";
-        return `<div class="${cls}" data-name="${esc(f.name)}" title="${esc(f.name)}（右键操作）">
+        return `<div class="${cls}" data-name="${esc(f.name)}" aria-label="${esc(f.name)}（右键操作）">
           ${thumb}<span class="fg-name">${esc(f.name)}</span>
         </div>`;
       };

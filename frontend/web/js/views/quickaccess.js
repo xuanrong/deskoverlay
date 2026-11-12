@@ -527,7 +527,7 @@ function showQuickAccessGroupsModal(onDone) {
   qaModalEl = document.createElement("div");
   qaModalEl.className = "task-modal-overlay";
   qaModalEl.innerHTML = `
-    <div class="task-modal">
+    <div class="task-modal qa-groups-modal">
       <h3>管理分组</h3>
       <div class="tm-field"><label>新增分组</label>
         <div class="tm-row" style="grid-template-columns: 1fr auto;">

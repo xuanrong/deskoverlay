@@ -769,7 +769,7 @@ function showDownloads() {
       ? tasks.map((t) => {
           const pct = t.total ? Math.min(100, Math.round((t.received / t.total) * 100)) : 0;
           const foot = t.status === "running"
-            ? `<div class="dl-row-foot"><div class="dl-bar"><div class="dl-bar-in" style="width:${pct}%"></div></div><span class="dl-pct">${t.total ? pct + "%" : fmtSize(t.received)}</span><button class="src-del" data-cancel="${t.id}" title="取消">${ICON_CLOSE}</button></div>`
+            ? `<div class="dl-row-foot"><div class="dl-bar"><div class="dl-bar-in" style="width:${pct}%"></div></div><span class="dl-pct">${t.total ? pct + "%" : fmtSize(t.received)}</span><button class="src-del" data-cancel="${t.id}" aria-label="取消">${ICON_CLOSE}</button></div>`
             : t.status === "failed"
             ? `<div class="dl-row-foot"><span class="dl-err">${esc(t.error || "失败")}</span></div>`
             : `<div class="dl-row-foot"><span class="dl-ok">已完成</span></div>`;
@@ -794,8 +794,8 @@ function showDownloads() {
               <div class="src-info">
                 <span class="src-name">${esc(f.filename.replace(/\.[^.]+$/, ""))}</span>
               </div>
-              <button class="mr-dl" data-up="${esc(f.filename)}" title="上传到云盘 /音乐">${ICON_UPLOAD} 云盘</button>
-              <button class="src-del" data-del="${esc(f.filename)}" title="删除">${ICON_TRASH}</button>
+              <button class="mr-dl" data-up="${esc(f.filename)}" aria-label="上传到云盘 /音乐">${ICON_UPLOAD} 云盘</button>
+              <button class="src-del" data-del="${esc(f.filename)}" aria-label="删除">${ICON_TRASH}</button>
             </div>`).join("")
         : `<div class="src-empty">还没有下载的歌曲<br /><span>下载完成后会出现在这里，可离线播放</span></div>`;
       doneEl.querySelectorAll("[data-play]").forEach((row) => {
@@ -831,7 +831,7 @@ function showDownloads() {
       const active = (tasks || []).filter((t) => t.status === "hashing" || t.status === "uploading").length;
       badgeUpload.textContent = active || "";
       uploadEl.innerHTML = `
-        <label class="ad-auto-row" title="本地下载完成后自动上传到云盘 /音乐">
+        <label class="ad-auto-row" aria-label="本地下载完成后自动上传到云盘 /音乐">
           <input type="checkbox" id="ad-auto" ${state.ad_auto_upload ? "checked" : ""} />
           <span>下载完成后自动上传到云盘</span>
         </label>
@@ -839,7 +839,7 @@ function showDownloads() {
           const pct = t.total ? Math.min(100, Math.round(((t.sent || 0) / t.total) * 100)) : 0;
           const statusText = { hashing: "计算哈希…", uploading: "上传中", done: "已完成", failed: "失败", cancelled: "已取消" }[t.status] || t.status;
           const foot = t.status === "hashing" || t.status === "uploading"
-            ? `<div class="dl-row-foot"><div class="dl-bar"><div class="dl-bar-in" style="width:${pct}%"></div></div><span class="dl-pct">${pct}%</span><button class="src-del" data-upcancel="${t.id}" title="取消">${ICON_CLOSE}</button></div>`
+            ? `<div class="dl-row-foot"><div class="dl-bar"><div class="dl-bar-in" style="width:${pct}%"></div></div><span class="dl-pct">${pct}%</span><button class="src-del" data-upcancel="${t.id}" aria-label="取消">${ICON_CLOSE}</button></div>`
             : t.status === "failed"
             ? `<div class="dl-row-foot"><span class="dl-err">${esc(t.error || "上传失败")}</span></div>`
             : `<div class="dl-row-foot"><span class="dl-ok">已完成${t.note ? " · " + esc(t.note) : ""}</span></div>`;
@@ -901,7 +901,7 @@ function renderFavoritesInto(el) {
         <span class="mr-play">${ICON_PLAY}</span>
         <span class="mr-title">${esc(f.title || "")}</span>
         <span class="mr-artist">${esc(f.artist || "")}</span>
-        <button class="mr-del" data-i="${i}" title="取消收藏">${ICON_CLOSE}</button>
+        <button class="mr-del" data-i="${i}" aria-label="取消收藏">${ICON_CLOSE}</button>
       </div>`).join("")
     : `<div class="dash-empty">暂无喜欢的音乐，播放时点红心收藏</div>`;
   el.querySelectorAll(".online-result").forEach((row, idx) => {
@@ -966,12 +966,12 @@ function showQueue() {
             <span class="qi-idx">${i + 1}</span>
             <span class="qi-title">${esc(it.meta.title || "")}</span>
             <span class="qi-artist">${esc(it.meta.artist || "")}</span>
-            ${favKey ? `<button class="qi-fav${faved ? " active" : ""}" data-fav="${i}" title="${faved ? "取消喜欢" : "加到喜欢"}">${ICON_HEART}</button>` : ""}
-            <button class="qi-dl" data-dl="${i}" title="下载">${ICON_DOWNLOAD}</button>
+            ${favKey ? `<button class="qi-fav${faved ? " active" : ""}" data-fav="${i}" aria-label="${faved ? '取消喜欢' : '加到喜欢'}">${ICON_HEART}</button>` : ""}
+            <button class="qi-dl" data-dl="${i}" aria-label="下载">${ICON_DOWNLOAD}</button>
           </div>`;
         }).join("") : `<div class="dash-empty">队列为空</div>`}
       </div>
-      <div class="tm-actions"><button class="tm-cancel q-locate" title="滚动到正在播放的歌曲">${ICON_LOCATE}<span>定位当前</span></button><button class="btn-primary cm-ok">关闭</button></div>
+      <div class="tm-actions"><button class="tm-cancel q-locate" aria-label="滚动到正在播放的歌曲">${ICON_LOCATE}<span>定位当前</span></button><button class="btn-primary cm-ok">关闭</button></div>
     </div>`;
   document.body.appendChild(ov);
 
@@ -1014,7 +1014,7 @@ function showQueue() {
       const faved = (state.favorites || []).some((f) =>
         favKeyOf(f) === favKeyOf({ url: "", song: it.song, srcId }));
       btn.classList.toggle("active", faved);
-      btn.title = faved ? "取消喜欢" : "加到喜欢";
+      btn.setAttribute("aria-label", faved ? "取消喜欢" : "加到喜欢");
     });
   });
   // 行内下载按钮：云盘歌曲保持原始音质直接下；在线歌曲走音质选择（不触发播放/关闭）
@@ -1512,13 +1512,13 @@ function showMusicSources(onDone) {
     list.innerHTML = n
       ? state.musicSources.map((s, i) => `
         <div class="src-row" data-i="${i}">
-          <span class="src-drag" title="拖拽排序">⋮⋮</span>
+          <span class="src-drag" aria-label="拖拽排序">⋮⋮</span>
           <span class="src-order">${i + 1}</span>
           <div class="src-info">
             <span class="src-name">${esc(s.name || "未命名")}</span>
             <span class="src-src">${esc(s.src || "本地文件")}</span>
           </div>
-          <button class="src-del" data-i="${i}" title="移除">${ICON_CLOSE}</button>
+          <button class="src-del" data-i="${i}" aria-label="移除">${ICON_CLOSE}</button>
         </div>`).join("")
       : `<div class="src-empty">还没有安装音源<br /><span>从右侧添加在线地址或本地 .js 文件</span></div>`;
     // 排序：指针事件自实现拖拽（mousedown 起拖 + ghost 跟随 + mouseup 落位）。
@@ -1735,22 +1735,22 @@ export function renderMusic(view) {
           <div class="music-sub" id="music-sub">${esc(currentSong ? (currentSong.artist || currentSong.type || "") : "未播放")}</div>
         </div>
         <div class="music-controls">
-          <button class="mc-btn" id="mc-like" title="喜欢（收藏到在线音乐-喜欢）">${ICON_HEART}</button>
-          <button class="mc-btn" id="mc-shuffle" title="随机/顺序播放">${ICON_REPEAT}</button>
-          <button class="mc-btn" id="mc-prev" title="上一首">${ICON_PREV}</button>
-          <button class="mc-btn mc-big" id="mc-play" title="播放/暂停">${ICON_PLAY}</button>
-          <button class="mc-btn" id="mc-next" title="下一首">${ICON_NEXT}</button>
-          <button class="mc-btn" id="mc-list" title="列表">${ICON_LIST}</button>
-          <button class="mc-btn" id="mc-dl" title="下载管理">${ICON_DOWNLOAD}</button>
+          <button class="mc-btn" id="mc-like" aria-label="喜欢（收藏到在线音乐-喜欢）">${ICON_HEART}</button>
+          <button class="mc-btn" id="mc-shuffle" aria-label="随机/顺序播放">${ICON_REPEAT}</button>
+          <button class="mc-btn" id="mc-prev" aria-label="上一首">${ICON_PREV}</button>
+          <button class="mc-btn mc-big" id="mc-play" aria-label="播放/暂停">${ICON_PLAY}</button>
+          <button class="mc-btn" id="mc-next" aria-label="下一首">${ICON_NEXT}</button>
+          <button class="mc-btn" id="mc-list" aria-label="列表">${ICON_LIST}</button>
+          <button class="mc-btn" id="mc-dl" aria-label="下载管理">${ICON_DOWNLOAD}</button>
         </div>
         <div class="music-right">
-          <button class="mc-btn mc-pill" id="mc-online" title="在线音乐（音源搜索/歌单/排行榜）">在线</button>
-          <button class="mc-btn" id="mc-lyric" title="桌面歌词（在桌面最上层显示歌词条）">${ICON_LYRICS}</button>
-          <div class="mc-vol" title="音量">
-            <button class="mc-btn" id="mc-vol-icon" title="静音/恢复（点击切换）">${state.playback.muted ? ICON_VOLUME_MUTE : ICON_VOLUME}</button>
+          <button class="mc-btn mc-pill" id="mc-online" aria-label="在线音乐（音源搜索/歌单/排行榜）">在线</button>
+          <button class="mc-btn" id="mc-lyric" aria-label="桌面歌词（在桌面最上层显示歌词条）">${ICON_LYRICS}</button>
+          <div class="mc-vol" aria-label="音量">
+            <button class="mc-btn" id="mc-vol-icon" aria-label="静音/恢复（点击切换）">${state.playback.muted ? ICON_VOLUME_MUTE : ICON_VOLUME}</button>
             <input type="range" id="mc-vol-range" min="0" max="100" value="${Math.round((state.playback.muted ? 0 : (state.playback.volume ?? 0.8)) * 100)}" />
           </div>
-          <button class="mc-btn" id="mc-more" title="更多">${ICON_MORE}</button>
+          <button class="mc-btn" id="mc-more" aria-label="更多">${ICON_MORE}</button>
         </div>
       </div>
     </div>`;
@@ -2151,8 +2151,8 @@ async function renderAdDriveTab(resultsEl, panelEl, modeTabsEl) {
   panelEl.style.display = "";
   panelEl.innerHTML = `
     <input id="ad-input" type="text" placeholder="搜索云盘歌曲…" autocomplete="off" spellcheck="false" />
-    <button class="mc-btn mc-pill" id="ad-refresh" title="刷新目录">${ICON_REFRESH}</button>
-    <button class="mc-btn mc-pill" id="ad-unbind" title="解绑阿里云盘">解绑</button>`;
+    <button class="mc-btn mc-pill" id="ad-refresh" aria-label="刷新目录">${ICON_REFRESH}</button>
+    <button class="mc-btn mc-pill" id="ad-unbind" aria-label="解绑阿里云盘">解绑</button>`;
   const input = panelEl.querySelector("#ad-input");
   panelEl.querySelector("#ad-refresh").addEventListener("click", async () => { adMusicFolderId = null; loadAdFolder(resultsEl, await adResolveMusicFolder()); });
   panelEl.querySelector("#ad-unbind").addEventListener("click", async () => {
@@ -2198,7 +2198,7 @@ function renderAdFiles(resultsEl, songs, ctx) {
     const bar = document.createElement("div");
     bar.className = "online-ctx";
     bar.innerHTML = ctx.back
-      ? `<button class="oc-back" title="返回">${ICON_BACK}</button><span class="oc-title">${esc(ctx.title)}</span>`
+      ? `<button class="oc-back" aria-label="返回">${ICON_BACK}</button><span class="oc-title">${esc(ctx.title)}</span>`
       : `<span class="oc-title">${esc(ctx.title)}</span>`;
     if (ctx.back) bar.querySelector(".oc-back").addEventListener("click", ctx.back);
     resultsEl.appendChild(bar);
@@ -2213,8 +2213,8 @@ function renderAdFiles(resultsEl, songs, ctx) {
       <span class="mr-play">${ICON_PLAY}</span>
       <span class="mr-title">${esc(s.title)}</span>
       <span class="mr-artist">${esc(s.artist)}</span>
-      <button class="mr-fav${isFav(s) ? " active" : ""}" data-fav="${esc(s.fileId)}" title="${isFav(s) ? "取消喜欢" : "加到喜欢"}">${ICON_HEART}</button>
-      <button class="mr-dl" data-dl="${esc(s.fileId)}" title="下载">${ICON_DOWNLOAD}</button>
+      <button class="mr-fav${isFav(s) ? " active" : ""}" data-fav="${esc(s.fileId)}" aria-label="${isFav(s) ? '取消喜欢' : '加到喜欢'}">${ICON_HEART}</button>
+      <button class="mr-dl" data-dl="${esc(s.fileId)}" aria-label="下载">${ICON_DOWNLOAD}</button>
     </div>`).join("");
   frag.querySelectorAll(".online-result").forEach((row, idx) => row.addEventListener("click", () => playCloudList(songs, idx)));
   // ♡ 收藏：与音源行同款 toggleFavSong（song 含 fileId/ext，key 稳定）
@@ -2225,7 +2225,7 @@ function renderAdFiles(resultsEl, songs, ctx) {
       if (!s) return;
       toggleFavSong(s, "cloud", { title: s.title, artist: s.artist });
       btn.classList.toggle("active");
-      btn.title = btn.classList.contains("active") ? "取消喜欢" : "加到喜欢";
+      btn.setAttribute("aria-label", btn.classList.contains("active") ? "取消喜欢" : "加到喜欢");
     });
   });
   // ⬇ 下载：云盘歌曲保持原始音质直接下
@@ -2255,7 +2255,7 @@ function openOnlineMusic() {
     <div class="online-modal">
       <div class="online-modal-head">
         <span class="om-title">在线音乐</span>
-        <button class="om-close" title="关闭">${ICON_CLOSE}</button>
+        <button class="om-close" aria-label="关闭">${ICON_CLOSE}</button>
       </div>
       <div class="online-body">
         <div class="online-src-side" id="online-src-side"></div>
@@ -2323,7 +2323,7 @@ function openOnlineMusic() {
     const bar = document.createElement("div");
     bar.className = "online-ctx";
     bar.innerHTML = back
-      ? `<button class="oc-back" title="返回">${ICON_BACK}</button><span class="oc-title">${esc(title)}</span>`
+      ? `<button class="oc-back" aria-label="返回">${ICON_BACK}</button><span class="oc-title">${esc(title)}</span>`
       : `<span class="oc-title">${esc(title)}</span>`;
     if (back) bar.querySelector(".oc-back").addEventListener("click", back);
     return bar;
@@ -2372,8 +2372,8 @@ function openOnlineMusic() {
         <span class="mr-play">${ICON_PLAY}</span>
         <span class="mr-title">${esc(song.title || song.name)}</span>
         <span class="mr-artist">${esc(song.artist || "未知歌手")}</span>
-        ${ctx?.fav ? `<button class="mr-fav${isFav(song) ? " active" : ""}" data-i="${i}" title="${isFav(song) ? "取消喜欢" : "加到喜欢"}">${ICON_HEART}</button>` : ""}
-        ${current ? `<button class="mr-dl" data-dl="${i}" title="下载">${ICON_DOWNLOAD}</button>` : ""}
+        ${ctx?.fav ? `<button class="mr-fav${isFav(song) ? " active" : ""}" data-i="${i}" aria-label="${isFav(song) ? '取消喜欢' : '加到喜欢'}">${ICON_HEART}</button>` : ""}
+        ${current ? `<button class="mr-dl" data-dl="${i}" aria-label="下载">${ICON_DOWNLOAD}</button>` : ""}
       </div>`).join("");
     frag.querySelectorAll(".online-result").forEach((row, idx) => row.addEventListener("click", () => playList(songs, idx, current)));
     // 行内下载按钮：弹出音质选择菜单（选定档缺失时自动降级）
@@ -2401,7 +2401,7 @@ function openOnlineMusic() {
           const song = songs[Number(btn.dataset.i)];
           toggleFavSong(song, srcId, { title: song.title || song.name || "", artist: song.artist || "" });
           btn.classList.toggle("active");
-          btn.title = btn.classList.contains("active") ? "取消喜欢" : "加到喜欢";
+          btn.setAttribute("aria-label", btn.classList.contains("active") ? "取消喜欢" : "加到喜欢");
         });
       });
     }
@@ -2501,7 +2501,7 @@ function openOnlineMusic() {
           const desc = it.description || "";
           // 悬停 title 显示完整榜名与描述（列表内被单行省略截断）
           const tip = desc ? `${name}：${desc}` : name;
-          html += `<div class="online-item toplist-item${topCls}" title="${esc(tip)}"><span class="tl-rank">${rank}</span><span class="tl-main"><span class="mr-title">${esc(name)}</span>${desc ? `<span class="mr-artist">${esc(desc)}</span>` : ""}</span></div>`;
+          html += `<div class="online-item toplist-item${topCls}" aria-label="${esc(tip)}"><span class="tl-rank">${rank}</span><span class="tl-main"><span class="mr-title">${esc(name)}</span>${desc ? `<span class="mr-artist">${esc(desc)}</span>` : ""}</span></div>`;
         }
       }
       const frag = document.createElement("div");
@@ -2613,7 +2613,7 @@ function openOnlineMusic() {
     const isSheet = mode === "sheet";
     panelEl.innerHTML = `
       <input id="online-input" type="text" placeholder="${isSheet ? "搜索歌单…" : "搜索歌曲…"}" autocomplete="off" spellcheck="false" />
-      ${isSheet ? "" : `<div id="online-type" class="online-type-cs" title="搜索类型"></div>`}
+      ${isSheet ? "" : `<div id="online-type" class="online-type-cs" aria-label="搜索类型"></div>`}
       <button class="mc-btn mc-pill" id="online-btn">搜索</button>`;
     panelInput = panelEl.querySelector("#online-input");
     typeSelectEl = isSheet ? null : panelEl.querySelector("#online-type");
@@ -2630,13 +2630,13 @@ function openOnlineMusic() {
     const sources = (state.musicSources || []).filter((s) => s.code);
     if (current && !sources.some((s) => s.id === current.id)) current = sources[0] || null;
     srcSideEl.innerHTML =
-      `<button class="online-src online-src-fav${favMode ? " active" : ""}" id="online-src-fav" title="喜欢的音乐">${ICON_HEART}<span>喜欢</span></button>` +
-      `<button class="online-src online-src-fav${adMode ? " active" : ""}" id="online-src-ad" title="阿里云盘音乐">${ICON_CLOUD}<span>云盘</span></button>` +
+      `<button class="online-src online-src-fav${favMode ? " active" : ""}" id="online-src-fav" aria-label="喜欢的音乐">${ICON_HEART}<span>喜欢</span></button>` +
+      `<button class="online-src online-src-fav${adMode ? " active" : ""}" id="online-src-ad" aria-label="阿里云盘音乐">${ICON_CLOUD}<span>云盘</span></button>` +
       (sources.length
         ? sources.map((s, i) => `
-          <button class="online-src${!favMode && !adMode && current && s.id === current.id ? " active" : ""}" data-i="${i}" title="${esc(s.name || "")}">${esc(s.name || "未命名")}</button>`).join("")
+          <button class="online-src${!favMode && !adMode && current && s.id === current.id ? " active" : ""}" data-i="${i}" aria-label="${esc(s.name || "")}">${esc(s.name || "未命名")}</button>`).join("")
         : `<span class="online-src-none">未安装音源</span>`)
-      + `<button class="online-src online-src-add" id="online-src-btn" title="音源管理">+ 音源</button>`;
+      + `<button class="online-src online-src-add" id="online-src-btn" aria-label="音源管理">+ 音源</button>`;
 
     srcSideEl.querySelector("#online-src-fav").addEventListener("click", () => {
       favMode = true;

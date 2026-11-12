@@ -70,6 +70,20 @@ export const BUILTIN_SKINS = [
   },
 ];
 
+// 首页音乐卡歌词配色预设 —— 命名色板，每个是双色渐变（取 c1 作主色、c1→c2 做色卡预览）。
+// 另有两个特殊项不在此列：cover=跟随封面主色（canvas 取色），off=不染色（正文灰）。
+// 选中的 id 落在 state.lyric.homePalette；workspace.js 据此给当前歌词行上色。
+export const LYRIC_PALETTES = [
+  { id: "sunset",   name: "落日晖", c1: "#ff9a56", c2: "#ff5e8a" },
+  { id: "sky",      name: "晴空",   c1: "#4facfe", c2: "#7bd8ff" },
+  { id: "forest",   name: "森野",   c1: "#43e97b", c2: "#38f9d7" },
+  { id: "lavender", name: "薰衣草", c1: "#a18cd1", c2: "#fbc2eb" },
+  { id: "amber",    name: "琥珀",   c1: "#f6d365", c2: "#fda085" },
+  { id: "mint",     name: "薄荷",   c1: "#5ee7df", c2: "#b490ca" },
+  { id: "rose",     name: "晚樱",   c1: "#f78ca0", c2: "#f9748f" },
+  { id: "steel",    name: "霜蓝",   c1: "#8e9eab", c2: "#eef2f3" },
+];
+
 // -------------------- 颜色计算（纯函数） --------------------
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 

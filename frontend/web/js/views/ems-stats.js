@@ -43,7 +43,7 @@ const STAT_ITEMS = [
     label: "未完成",
     icon: ICON_BUG,
     tone: "warn",
-    desc: "指派给我、阶段为「待测试 / 待内部验证 / 测试中」的 Bug",
+    desc: "指派给我、阶段为「待解决 / 测试不通过」的 Bug（测试打回重做的也算未完成）",
   },
   {
     key: "bugUnverified",

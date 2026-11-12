@@ -561,12 +561,11 @@ fn spec_req_unverified(cfg: &EmsConfig) -> TableSpec {
     }
 }
 
-/// Bug 阶段码（`bug_step`）。
-///
-/// ⛔ 语义按**禅道页面的真实口径**来，不要凭字面猜：
-///   * `20 待解决` —— 派给我、**我还没动手修** → 这才是「未完成 Bug」；
+/// Bug 阶段码（`bug_step`）——语义按**禅道页面的真实口径**来，不要凭字面猜：
+///   * `10 待确认` / `20 待解决` —— 派给我、还没修完 → 「未完成 Bug」；
+///   * `32 测试不通过` —— 测试打回重做，**也算「未完成」**（活还在我手上）；
 ///   * `29 待测试` / `30 待内部验证` / `33 测试中` —— 已经修完、等验证，属「未验证」那一族；
-///   * `50 已关闭` —— 收尾，不算待办。
+///   * `40 非bug` / `50 已关闭` —— 收尾，不算待办。
 ///
 /// 曾经把 `{29,30,33}` 当成「未完成」，理由是「活还在我手上」——**错了**：
 /// 那三个都已经是 `resolved`（已修复），是「等我验证」而不是「等我修」，
@@ -574,15 +573,24 @@ fn spec_req_unverified(cfg: &EmsConfig) -> TableSpec {
 /// 对照 curl 才确认 5 = `待解决(20)`。
 ///
 /// ⚠ 「未验证 Bug」用的是 `validbyme` 视图（见 `spec_bug_unverified`），
-/// 不是这里的 step 过滤，所以本常量只服务于「未完成」。
-const BUG_STEP_PENDING_RESOLVE: &str = "20";
+/// 不是这里的 step 过滤。
+///
+/// 「未完成 Bug」的 `bug_step` 过滤值 = `待解决(20) + 测试不通过(32)`。
+///
+/// ⛔ **32 也必须算**——「测试不通过」是测试打回重做，活还在我手上，跟任务的
+/// 「校验未通过(5)」同一个道理（见 `spec_task_open` 的注释）。曾经只算 20，
+/// 导致打回的 Bug 四个格子都不算（既不在「未完成」也不在「未验证」）。
+/// 实时分布（2026-11-11）：20→2、32→1、33→34、50→20；只算 20 会漏掉那条 32。
+///
+/// 旧常量 `BUG_STEP_PENDING_RESOLVE = "20"` 已被本常量取代，删除以免 dead_code。
+const BUG_STEP_OPEN: &str = "20,32";
 
-/// 「未完成 Bug」= 指派给我、**还没修**的 Bug → `待解决(20)`。
+/// 「未完成 Bug」= 指派给我、**还没修完**的 Bug → `待解决(20) + 测试不通过(32)`。
 fn spec_bug_open(cfg: &EmsConfig) -> TableSpec {
     // Bug 页 args 是 14 段：[0] 视图、[4] bug_step 过滤，其余 null。
     let mut args: Vec<String> = vec!["null".to_string(); 14];
     args[0] = "assigntome".to_string();
-    args[4] = BUG_STEP_PENDING_RESOLVE.to_string();
+    args[4] = BUG_STEP_OPEN.to_string();
     TableSpec {
         page_id: cfg.bug_page_id.clone(),
         data_set_id: cfg.bug_data_set_id.clone(),
@@ -1221,10 +1229,12 @@ mod tests {
         let open = spec_bug_open(&cfg);
         assert_eq!(open.args.len(), 14, "Bug 页 args 是 14 段");
         assert_eq!(open.args[0], "assigntome", "只看指派给我的");
-        // ⛔ 未完成 = 待解决(20)：派给我、我还没动手修。
+        // ⛔ 未完成 = 待解决(20) + 测试不通过(32)：派给我、还没修完。
         //    曾经写成 29,30,33（待测试/待内部验证/测试中），但那三个都是 resolved
         //    的「等我去验」，把 35 个待验证报成了「未完成」。
-        assert_eq!(open.args[4], "20", "未完成 = 待解决");
+        //    也曾经只写 20，漏掉 32 测试不通过（测试打回重做，活还在我手上），
+        //    导致打回的 Bug 四个格子都不算。
+        assert_eq!(open.args[4], "20,32", "未完成 = 待解决 + 测试不通过");
         assert_eq!(open.version, 31, "Bug 页默认版本 31");
 
         // ⛔ 未验证 = validbyme 视图，**不加 step 过滤**。

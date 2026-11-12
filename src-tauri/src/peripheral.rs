@@ -12,8 +12,17 @@
 //!     `PKEY_Device_FriendlyName` 取真实设备名。
 //!   - 输入：SetupAPI 按 Mouse/Keyboard 设备类枚举 + 上游父链判定（见下）。
 //!
-//! ⚠️ 不做电量：实测 `DEVPKEY_Device_BatteryLevel` 对全部在线外设返回空，
-//!    蓝牙耳机电量要走 GATT 连接（代价极大）。与其画一个永远 "--" 的假进度条，不如不画。
+//! 电量（2026-11-11 起支持）：
+//!   蓝牙键鼠 / 蓝牙耳机都能读 `DEVPKEY_Device_BatteryLevel`（0-100），
+//!   实测本机 MCHOSE 键盘 43%、vivo TWS 耳机 90%。
+//!
+//!   ⚠️ 旧注释说「该属性对全部在线外设返回空」—— 那是**查错节点**导致的：
+//!      电量挂在**设备节点**（`BTHLE\DEV_<mac>` / `BTHENUM\DEV_<mac>`）上，
+//!      而 HID 集合（`HID\{00001812…}&COLxx`）和音频端点（`SWD\MMDEVAPI\…`）
+//!      上都没有。所以现在的读法是「从集合节点沿父链往上找」。
+//!
+//!   仍读不到的情况：有线设备（本来没电池）、部分固件只把电量报给厂商工具。
+//!   这类返回 null，前端**不显示**电量字段 —— 宁可没有，也不画 "--" 的假进度条。
 //!
 //! 轮询而非事件：`WM_DEVICECHANGE` 需要挂窗口消息循环，与当前 Tauri 主循环耦合，
 //! 成本远高于 3 秒一次枚举（实测单次枚举 < 1ms）。
@@ -79,21 +88,48 @@ const USB_HUB_VIDS: &[&str] = &[
 ///
 /// ⚠️ 这个判据是「启发式」，不追求 100% 准确 —— 用户把真键鼠插在扩展坞上
 /// 时也会命中。所以前端仍然保留「忽略」开关作为兜底。
+///
+/// ⛔ 2026-11-10 修正：**不能再只看「父链上有没有 Hub」**。
+///
+/// 实测本机拓扑（真实 USB 鼠标接在扩展坞上）：
+///   HID\VID_3151&PID_5032&MI_00   ← 真鼠标（VID 3151 = 设备厂商）
+///     → USB\VID_3151&PID_5032
+///       → USB\VID_2109&PID_2817    ← VIA 通用 USB 集线器（VID 2109）
+///         → USB\ROOT_HUB30
+/// 旧判据在这里返回 true ⇒ 用户的**真实鼠标**被当成「扩展坞假设备」默认不计入，
+/// 桌面胶囊显示「鼠标未连接」。这正是本次要修的第二个缺陷。
+///
+/// 真正的区分点是：**Hub 的 VID 与设备的 VID 是否相同**。
+///   · 扩展坞 HID 芯片冒充键鼠：设备本身挂在 Hub 上，且**设备 VID == Hub VID**
+///     （同一颗芯片既当 Hub 又当键鼠，VID 必然一样）。
+///   · 真设备插在扩展坞上：设备 VID（3151）≠ Hub VID（2109）。
+///
+/// 所以现在只在「上游 Hub 的 VID 与本设备 VID 相同」时才判 viaHub。
+/// 拿不到设备 VID 时保守返回 false（宁可多算一个，也不要漏掉用户真实的设备 ——
+/// 漏掉是「以为没接」，多算只是「多显示一个」，后者可由用户手动忽略）。
 unsafe fn is_via_hub(devinst: u32) -> bool {
+    // 1) 先取设备自身 VID
+    let self_vid = extract_vid(&device_id_of(devinst));
+    let Some(self_vid) = self_vid else {
+        return false;
+    };
+
+    // 2) 沿父链找 Hub，比较 VID
     let mut cur = devinst;
     // 最多向上走 6 层，避免异常拓扑死循环
     for _ in 0..6 {
-        let id = device_id_of(cur);
-        if let Some(vid) = extract_vid(&id) {
-            if USB_HUB_VIDS.contains(&vid.as_str()) {
-                return true;
-            }
-        }
         let mut parent = 0u32;
         if CM_Get_Parent(&mut parent, cur, 0).0 != 0 {
             break;
         }
         cur = parent;
+        let id = device_id_of(cur);
+        if let Some(vid) = extract_vid(&id) {
+            if USB_HUB_VIDS.contains(&vid.as_str()) {
+                // Hub 自己的 VID 与设备 VID 相同 ⇒ 同一颗芯片既当 Hub 又冒充键鼠
+                return vid == self_vid;
+            }
+        }
     }
     false
 }
@@ -220,6 +256,9 @@ unsafe fn collect_endpoints(enumerator: &IMMDeviceEnumerator, flow: EDataFlow) -
             // 播放流 = 输出设备，录音流 = 输入设备
             "flow": flow_name,
             "formFactor": ff,
+            // 蓝牙耳机电量：音频端点自己不带这个属性，按型号名去 PnP 设备反查。
+            // 查不到就是 null（有线耳机 / 内置声卡本来就没有电量）。
+            "battery": if flow.0 == eRender.0 { battery_for_audio_name(&name) } else { None },
         }));
     }
     out
@@ -250,7 +289,43 @@ unsafe fn collect_endpoints(enumerator: &IMMDeviceEnumerator, flow: EDataFlow) -
 /// 用户对自己的硬件最清楚。Rust 侧保持无状态，忽略名单存在前端 state.json。
 unsafe fn collect_external_input() -> serde_json::Value {
     let mice = collect_external_in_class(&GUID_DEVCLASS_MOUSE);
-    let keys = collect_external_in_class(&GUID_DEVCLASS_KEYBOARD);
+    let keys_all = collect_external_in_class(&GUID_DEVCLASS_KEYBOARD);
+
+    // ⛔ 一个物理设备只算一种身份：**鼠标优先**。
+    //
+    //   2026-11-10 实测（用户本机）：VID_3151&PID_5032 是一只游戏鼠标
+    //   （DEVPKEY_Device_BusReportedDeviceDesc = "Gaming Mouse"），
+    //   但它同时暴露了 keyboard 类集合（MI_01&COL03，svc=kbdhid）——
+    //   那是鼠标的宏键/多媒体键，不是第二个键盘。
+    //   旧实现按类各数一遍，于是胶囊显示「鼠标 1 + 键盘 2」，而用户桌上只有
+    //   一只鼠标 + 一把蓝牙键盘。用户直接指出这是误判。
+    //
+    //   判据：同一个「设备身份」（VID:PID，即同一个 USB 复合设备/接收器）
+    //   如果已经作为鼠标计入，就把它在 Keyboard 类里的集合**剔除**。
+    //   这条规则对无线键鼠套装同样安全：一套接收器通常只声明一个鼠标 +
+    //   一个键盘，鼠标优先时仍会把键盘剔掉 —— 那正是期望行为（用户看到的
+    //   是一个输入设备组，不是两台机器）。
+    let mouse_keys: std::collections::HashSet<String> = mice
+        .iter()
+        .filter_map(|m| {
+            let vid = m["vid"].as_str().unwrap_or("");
+            let pid = m["pid"].as_str().unwrap_or("");
+            if vid.is_empty() || pid.is_empty() {
+                None
+            } else {
+                Some(format!("{vid}:{pid}"))
+            }
+        })
+        .collect();
+    let keys: Vec<serde_json::Value> = keys_all
+        .into_iter()
+        .filter(|k| {
+            let vid = k["vid"].as_str().unwrap_or("");
+            let pid = k["pid"].as_str().unwrap_or("");
+            !mouse_keys.contains(&format!("{vid}:{pid}"))
+        })
+        .collect();
+
     // 蓝牙键鼠不在 Mouse/Keyboard 类里，必须单独找（见 collect_bluetooth_hid）
     let bt = collect_bluetooth_hid();
     serde_json::json!({
@@ -285,9 +360,10 @@ unsafe fn collect_external_in_class(class: &GUID) -> Vec<serde_json::Value> {
                 // 从实例 ID 里抽 VID/PID 给用户看的身份标识。
                 // 例：HID\VID_1EA7&PID_0066&MI_01&COL02\9&24BB373&0&0001
                 let (vid, pid) = parse_vid_pid(&inst);
-                // 上游是否经过 USB Hub —— 经过的多半是扩展坞自带的假键鼠。
-                // 这不是硬过滤：真键鼠插扩展坞上也会命中，所以只作为
-                // 「默认不计入 + 前端可恢复」的软判据。
+                // 上游是否经过 USB Hub —— 见 is_via_hub 的注释：
+                // 只有「Hub 的 VID == 本设备 VID」才算冒充（同一颗芯片既当 Hub 又当键鼠）。
+                // 真设备插在扩展坞上（设备 VID ≠ Hub VID）现在**不再**被判为 viaHub，
+                // 否则用户的真实鼠标会被默认过滤掉（2026-11-10 实测踩到）。
                 let via_hub = is_devinst_via_hub(dev.DevInst);
                 // ⚠️ id 必须是**每个接口唯一**的，不能只用 "VID:PID"：
                 // 同一个扩展坞的鼠标接口（MI_01&COL02）和键盘接口（MI_00）
@@ -329,55 +405,248 @@ unsafe fn collect_bluetooth_hid() -> serde_json::Value {
     const BLE_HID_UUID: &str = "00001812-0000-1000-8000-00805F9B34FB";
     const BT_HID_UUID: &str = "00001124-0000-1000-8000-00805F9B34FB";
 
-    let mut mouse = false;
-    let mut keyboard = false;
-    let mut names: Vec<String> = Vec::new();
+    // ⛔ 一台蓝牙设备只能算「一个键盘」或「一个鼠标」，**不能既算键盘又算鼠标**。
+    //
+    //   2026-11-10 用户反馈 + 实测：MCHOSE G87 V2-1 是**三模**键盘（USB/2.4G/蓝牙
+    //   三种连接方式，不是「键盘能当鼠标用」）。但它固件同时上报了三个 HID 集合：
+    //     COL05  Keyboard  svc=kbdhid   present
+    //     COL01  Keyboard  svc=kbdhid   present
+    //     COL03  Mouse     svc=mouhid   present   ← 媒体键/鼠标模拟的附带集合
+    //   Windows 认为 COL03 是真鼠标（driver 都加载了），但用户面前的桌上只有一把
+    //   键盘。旧实现见 COL03 就置 mouse=true，于是胶囊同时亮「鼠标 + 键盘」。
+    //
+    //   新判据：**按设备（实例路径里的 MAC）分组**，每组只产出一种身份：
+    //     组内有任何 Keyboard 集合 → 这组算键盘（键盘优先）；
+    //     只有 Mouse 集合 → 才算是鼠标。
+    //   这样一个三模键盘 = 1 键盘 + 0 鼠标，符合用户认知。
+    //
+    // 另外必须扫**三个类**：蓝牙键鼠的 COLxx 注册在 Keyboard / Mouse 类，
+    // 只有杂项集合（用户控制设备、系统控制器）留在 HIDClass。只扫 HIDClass 会漏键鼠。
+    // 每个类都不带 DIGCF_PRESENT 枚举，再逐个 `devnode_present` 定位 ——
+    // 配对记忆的节点也在枚举结果里，定位失败即视为没连。
 
-    // 从 HIDClass 类枚举拿**所有** BTH 来源的节点（含 BTHLEDEVICE 与 COLxx）。
-    // 注意不能只按 DIGCF_PRESENT：这里要枚举到未激活的节点再逐个试定位，
-    // 所以去掉 PRESENT 过滤，靠 locate 结果判断在线与否。
-    let Ok(set) = SetupDiGetClassDevsW(Some(&GUID_DEVCLASS_HIDCLASS), None, None, Default::default())
-    else {
-        return serde_json::json!({ "mouse": false, "keyboard": false, "names": names });
-    };
-    let mut i = 0u32;
-    loop {
-        let mut dev = SP_DEVINFO_DATA {
-            cbSize: std::mem::size_of::<SP_DEVINFO_DATA>() as u32,
-            ..Default::default()
+    // mac（大写十六进制）→ (键盘集合数, 鼠标集合数, 型号名, 电量)
+    // 电量从顶层设备节点读（见 read_battery_level），集合节点上读不到。
+    // ⛔ 必须记**数量**而不是布尔：一台设备同时暴露键盘和鼠标集合时，
+    //    靠「哪个多」才能判主属性（实测蓝牙鼠标 Professor 1 是 2 键盘 + 1 鼠标，
+    //    键盘集合反而更多 —— 所以数量也不是万能，见下方 adjudicate）。
+    let mut groups: std::collections::BTreeMap<String, (usize, usize, String, Option<u8>)> =
+        std::collections::BTreeMap::new();
+
+    for class in [GUID_DEVCLASS_HIDCLASS, GUID_DEVCLASS_KEYBOARD, GUID_DEVCLASS_MOUSE] {
+        let Ok(set) = SetupDiGetClassDevsW(Some(&class), None, None, Default::default()) else {
+            continue;
         };
-        if SetupDiEnumDeviceInfo(set, i, &mut dev).is_err() {
+        let mut i = 0u32;
+        loop {
+            let mut dev = SP_DEVINFO_DATA {
+                cbSize: std::mem::size_of::<SP_DEVINFO_DATA>() as u32,
+                ..Default::default()
+            };
+            if SetupDiEnumDeviceInfo(set, i, &mut dev).is_err() {
+                break;
+            }
+            i += 1;
+
+            let Some(inst) = read_instance_id(set, &dev) else { continue };
+            let up = inst.to_uppercase();
+            let is_bt = up.contains(BLE_HID_UUID) || up.contains(BT_HID_UUID);
+            // 只看 HID 集合节点（带 &COLxx），父节点 BTHLEDEVICE 本身不算
+            if !is_bt || !up.contains("&COL") {
+                continue;
+            }
+            if !devnode_present(&inst) {
+                continue;
+            }
+            let Some(desc) = read_device_desc(set, &dev) else { continue };
+            let d = desc.to_lowercase();
+            let is_kb = d.contains("keyboard") || d.contains("键盘");
+            let is_mouse = d.contains("mouse") || d.contains("鼠标");
+            // 杂项集合（用户控制设备 / 系统控制器）既不是键也不是鼠，跳过
+            if !is_kb && !is_mouse {
+                continue;
+            }
+            let key = bt_device_key(&inst);
+            let e = groups.entry(key.clone()).or_insert((0, 0, String::new(), None));
+            // 电量：设备级属性，挂在顶层节点。集合节点上查必然为空 ——
+            // 这是旧实现「电量恒空」的真正原因（查错节点了）。
+            if e.3.is_none() {
+                // 电量在**顶层设备节点**上，集合节点查不到（旧实现"恒空"的真因）。
+                // 沿 devinst 的父链往上走，遇到 BTHLE\DEV_* / BTHENUM\ 之类就试读，
+                // 不靠实例 ID 字符串拼路径 —— 那条路试过，前缀过滤语义容易踩偏。
+                e.3 = battery_from_ancestors(dev.DevInst);
+            }
+            if is_kb {
+                e.0 += 1;
+            }
+            if is_mouse {
+                e.1 += 1;
+            }
+            if e.2.is_empty() {
+                e.2 = bt_model_name(&inst);
+            }
+        }
+        let _ = SetupDiDestroyDeviceInfoList(set);
+    }
+
+    // 逐台输出（**不再合并成「一个鼠标 + 一个键盘」**）：
+    // 实测两台蓝牙设备的 HID 报告描述符完全一致（Keyboard×2 + Mouse×1，
+    // btnCaps/valCaps 逐字段相同），协议层分不出谁是主属性。
+    // 与其猜一个必然有一半概率错的结论，不如如实上报每台设备各自具备的能力，
+    // 由前端按设备呈现（一台设备 = 一个条目），这样：
+    //   · 只连键盘 → 1 条；只连鼠标 → 1 条；两个都连 → 2 条，不会互相覆盖；
+    //   · 名字用真实型号（MCHOSE G87 V2-1 / Professor 1），用户一眼能对上自己的硬件。
+    let mut devices: Vec<serde_json::Value> = Vec::new();
+    let mut names: Vec<String> = Vec::new();
+    for (mac, (kb_n, mouse_n, model, battery)) in groups.iter() {
+        if *kb_n == 0 && *mouse_n == 0 {
+            continue;
+        }
+        if !model.is_empty() && !names.contains(model) {
+            names.push(model.clone());
+        }
+        devices.push(serde_json::json!({
+            "mac": mac,
+            "name": model,
+            "keyboard": *kb_n > 0,
+            "mouse": *mouse_n > 0,
+            "kbCollections": *kb_n,
+            "mouseCollections": *mouse_n,
+            // 电量百分比（0-100）；None/缺省表示这台设备不报电量
+            "battery": *battery,
+        }));
+    }
+    // 兼容字段：任一设备具备该能力即置 true（旧前端 / 检查脚本仍在读这两个布尔）
+    let mouse = devices.iter().any(|d| d["mouse"].as_bool().unwrap_or(false));
+    let keyboard = devices.iter().any(|d| d["keyboard"].as_bool().unwrap_or(false));
+    let model = names.first().cloned().unwrap_or_default();
+
+    serde_json::json!({
+        "mouse": mouse,
+        "keyboard": keyboard,
+        "names": names,
+        "model": model,
+        // 逐台明细：前端按它渲染「一台一条」，避免两台设备抢同一个 id
+        "devices": devices,
+    })
+}
+
+
+/// 从蓝牙 HID 集合的实例路径里取「设备级」标识（MAC）。
+///
+/// 同一台蓝牙设备的多个 HID 集合共享同一个 MAC，例如：
+///   HID\{00001812-...}_DEV_VID&0107D7_PID&EFFF_REV&0120_C818F53D9AFD&COL05\...
+///                                                       ^^^^^^^^^^^^ MAC
+/// 取不到 MAC 时退回完整路径（宁可多算一台，也不要把两台设备并成一台）。
+fn bt_device_key(instance: &str) -> String {
+    let up = instance.to_uppercase();
+    // 形如 ..._REV&0120_C818F53D9AFD&COL05\...
+    //      ^^^^^^^^ 先锚到 "REV&"，跳过其后的版本号（0120）与分隔 '_'，
+    //               再取后面连续的十六进制串（12 位 MAC）。
+    // ⛔ 不能直接对整串 find('_')：第一个 '_' 属于 "_REV" 自己，
+    //    那样取到的是版本号，两台集合会落到不同的组（实测踩过）。
+    let Some(rev) = up.find("REV&") else { return up };
+    let after_rev = &up[rev + 4..];              // "0120_C818F53D9AFD&COL05\..."
+    let Some(us) = after_rev.find('_') else { return up };
+    let rest = &after_rev[us + 1..];             // "C818F53D9AFD&COL05\..."
+    let mac: String = rest
+        .chars()
+        .take_while(|c| c.is_ascii_hexdigit())
+        .collect();
+    // MAC 至少 12 位；短于此视为没取到，退回完整路径（宁可多算一台也不要并错）
+    if mac.len() >= 12 { mac } else { up }
+}
+
+/// 取蓝牙设备的真实型号名。
+///
+/// COLxx 节点自己叫 "HID Keyboard Device" / "HID-compliant mouse"，没有型号信息。
+/// 型号在父链更上游：`BTHLE\Dev_<mac>\...` 的 FriendlyName（实测 "MCHOSE G87 V2-1"）。
+/// 沿父链最多走 4 层找第一个像型号的名字，取不到返回空串（调用方回退到 desc）。
+///
+/// ⚠️ 用 `SetupDiOpenDeviceInfoW` 而不是 `CM_Get_DevNode_PropertyW`：
+/// 后者要开 `Win32_Devices_Properties` feature，而本项目基线是 0 warning。
+unsafe fn bt_model_name(instance_id: &str) -> String {
+    use windows::Win32::Devices::DeviceAndDriverInstallation::{
+        CM_Locate_DevNodeW, CM_LOCATE_DEVNODE_NORMAL,
+    };
+    let wide: Vec<u16> = instance_id.encode_utf16().chain(std::iter::once(0)).collect();
+    let mut devinst = 0u32;
+    if CM_Locate_DevNodeW(&mut devinst, windows::core::PCWSTR(wide.as_ptr()), CM_LOCATE_DEVNODE_NORMAL).0 != 0 {
+        return String::new();
+    }
+    let mut cur = devinst;
+    for _ in 0..4 {
+        let mut parent = 0u32;
+        if CM_Get_Parent(&mut parent, cur, 0).0 != 0 {
             break;
         }
-        i += 1;
-
-        let Some(inst) = read_instance_id(set, &dev) else { continue };
-        let up = inst.to_uppercase();
-        let is_bt = up.contains(BLE_HID_UUID) || up.contains(BT_HID_UUID);
-        // 只看 HID 集合节点（带 &COLxx），父节点 BTHLEDEVICE 本身不算
-        if !is_bt || !up.contains("&COL") {
-            continue;
-        }
-        // 关键：能不能 locate —— 定位失败说明这个集合当前没激活（设备没连）
-        if !devnode_present(&inst) {
-            continue;
-        }
-        if let Some(desc) = read_device_desc(set, &dev) {
-            let d = desc.to_lowercase();
-            if d.contains("mouse") || d.contains("鼠标") {
-                mouse = true;
-            }
-            if d.contains("keyboard") || d.contains("键盘") {
-                keyboard = true;
-            }
-            if !names.contains(&desc) {
-                names.push(desc);
+        cur = parent;
+        if let Some(name) = friendly_name_of_devinst(cur) {
+            // "Bluetooth LE Service {…}" / 纯 GUID 都不算型号
+            if !name.is_empty() && !name.contains("Bluetooth LE Service") && !name.contains("00001812") {
+                return name;
             }
         }
     }
-    let _ = SetupDiDestroyDeviceInfoList(set);
+    String::new()
+}
 
-    serde_json::json!({ "mouse": mouse, "keyboard": keyboard, "names": names })
+/// 读某个 devinst 的 `SPDRP_FRIENDLYNAME`。
+///
+/// ⛔ 宽字符串必须先落到具名变量：`PCWSTR(vec.chain(..).collect().as_ptr())`
+///    里那个临时 Vec 会在语句结束就释放，传给 Win32 的是悬垂指针，
+///    函数静默返回空（实测就是这么丢掉 "MCHOSE G87 V2-1" 的）。
+unsafe fn friendly_name_of_devinst(devinst: u32) -> Option<String> {
+    use windows::Win32::Devices::DeviceAndDriverInstallation::{SetupDiOpenDeviceInfoW, DIGCF_ALLCLASSES};
+    const SPDRP_FRIENDLYNAME: u32 = 0x0000_000C;
+
+    let inst = device_id_of(devinst);
+    if inst.is_empty() {
+        return None;
+    }
+    let wide: Vec<u16> = inst.encode_utf16().chain(std::iter::once(0)).collect();
+
+    // DIGCF_ALLCLASSES 不能省：空 GUID + 默认 flags 建出来的集合是空的。
+    let set = match SetupDiGetClassDevsW(None, None, None, DIGCF_ALLCLASSES) {
+        Ok(s) => s,
+        Err(_) => return None,
+    };
+    let mut dev = SP_DEVINFO_DATA {
+        cbSize: std::mem::size_of::<SP_DEVINFO_DATA>() as u32,
+        ..Default::default()
+    };
+    let opened = SetupDiOpenDeviceInfoW(
+        set,
+        windows::core::PCWSTR(wide.as_ptr()),
+        None,
+        0,
+        Some(&mut dev),
+    )
+    .is_ok();
+    let out = if opened { read_reg_string(set, &dev, SPDRP_FRIENDLYNAME) } else { None };
+    let _ = SetupDiDestroyDeviceInfoList(set);
+    out
+}
+
+/// 读 `SPDRP_*` 字符串属性（REG_SZ）。
+unsafe fn read_reg_string(set: HDEVINFO, dev: &SP_DEVINFO_DATA, prop: u32) -> Option<String> {
+    let mut buf = vec![0u8; 1024];
+    SetupDiGetDeviceRegistryPropertyW(
+        set,
+        dev,
+        SETUP_DI_REGISTRY_PROPERTY(prop),
+        None,
+        Some(&mut buf),
+        None,
+    )
+    .ok()?;
+    let u16s: Vec<u16> = buf
+        .chunks_exact(2)
+        .map(|c| u16::from_le_bytes([c[0], c[1]]))
+        .collect();
+    let end = u16s.iter().position(|&c| c == 0).unwrap_or(u16s.len());
+    let s = String::from_utf16_lossy(&u16s[..end]);
+    if s.is_empty() { None } else { Some(s) }
 }
 
 /// 设备节点当前是否存在/已启动。`CM_Locate_DevNodeW` 定位失败 = 不在线。
@@ -501,6 +770,185 @@ unsafe fn read_removal_policy(
     Some(u32::from_le_bytes(buf))
 }
 
+/// 读外设电量（0–100）。读不到返回 None。
+///
+/// ⚠️ 旧注释说「`DEVPKEY_Device_BatteryLevel` 对全部在线外设返回空」—— 那是错的，
+///    2026-11-11 在本机实测三台蓝牙设备分别是 43 / 100 / 79。
+///    当初读不到的真实原因大概率是**查的节点不对**：电量挂在蓝牙设备的**顶层
+///    设备节点**（`BTHLE\DEV_<mac>`）上，而不是它的 HID 集合子节点
+///    （`HID\{00001812…}&COLxx`）上。在子节点上查当然全是空。
+///
+/// 属性形状（来自 PnP 实测）：
+///   key  = {104EA319-6EE2-4701-BD47-8DDBF425BBE5}, pid = 2
+///   type = DEVPROP_TYPE_BYTE（UInt8），取值 0–100
+///
+/// 用 `CM_Get_DevNode_PropertyW` 直接按 devinst 读，不经过 SetupAPI 的类枚举 ——
+/// 因为要读的是「设备节点」属性，不是「设备类实例」属性。
+unsafe fn read_battery_level(devinst: u32) -> Option<u8> {
+    use windows::Win32::Devices::Properties::DEVPROPTYPE;
+    use windows::Win32::Foundation::DEVPROPKEY;
+
+    // {104EA319-6EE2-4701-BD47-8DDBF425BBE5}, 2
+    const PKEY_DEV_BATTERY_LEVEL: DEVPROPKEY = DEVPROPKEY {
+        fmtid: windows::core::GUID::from_u128(0x104ea319_6ee2_4701_bd47_8ddbf425bbe5),
+        pid: 2,
+    };
+    // ⚠️ 实测这个属性的 DEVPROP 类型是 **0x03 (DEVPROP_TYPE_UINT32)**，
+    //    不是 PowerShell 里 `Type: Byte` 显示的那样 —— CIM 层会把 UINT32 映射成 Byte。
+    //    只按 BYTE(0x11) 判会一直读不到（踩过）。
+    const DEVPROP_TYPE_UINT32: u32 = 0x03;
+    const DEVPROP_TYPE_BYTE: u32 = 0x11;
+
+    let mut typ = DEVPROPTYPE::default();
+    let mut buf = [0u8; 8];
+    let mut size: u32 = buf.len() as u32;
+    let rc = windows::Win32::Devices::DeviceAndDriverInstallation::CM_Get_DevNode_PropertyW(
+        devinst,
+        &PKEY_DEV_BATTERY_LEVEL,
+        &mut typ,
+        Some(buf.as_mut_ptr()),
+        &mut size,
+        0,
+    );
+    if rc.0 != 0 || size == 0 {
+        return None;
+    }
+    // ⚠️ 实测该属性的 (type, size) 组合是 **(0x03 UINT32, size=1)** ——
+    //    类型标称 32 位但实际只写了 1 字节。所以不能要求 size>=4，
+    //    否则一直返回 None（这里踩过一次）。
+    //    统一按「取首字节」读，UINT32 且 size>=4 时再按小端解析。
+    let v = match typ.0 {
+        DEVPROP_TYPE_UINT32 => {
+            if size >= 4 {
+                u32::from_le_bytes([buf[0], buf[1], buf[2], buf[3]]) as u8
+            } else {
+                buf[0]
+            }
+        }
+        DEVPROP_TYPE_BYTE => buf[0],
+        _ => return None,
+    };
+    // 100 以上视为异常值（有些驱动写 255 表示未知）
+    if v <= 100 { Some(v) } else { None }
+}
+
+/// 沿 devinst 父链向上找「报电量的那个节点」，返回其电量。
+///
+/// 为什么沿父链而不是拼实例 ID：
+///   HID 集合（`HID\{00001812…}&COLxx`）自己不带电量，
+///   它的父链依次是 BTHLEDEVICE\…\{00001812…} → BTHLE\DEV_<mac>。
+///   电量挂在 **BTHLE\DEV_<mac>** 这一层。
+///   拼字符串的路子（CM_Get_Device_ID_List 前缀过滤）实测不稳：
+///   flag 语义容易用错，一旦用错就整段返回空、静默丢电量。
+///   父链遍历不依赖任何字符串规则，只依赖「设备树」这个事实。
+unsafe fn battery_from_ancestors(devinst: u32) -> Option<u8> {
+    let mut cur = devinst;
+    for _ in 0..6 {
+        // 先试当前节点自己
+        if let Some(v) = read_battery_level(cur) {
+            return Some(v);
+        }
+        let mut parent = 0u32;
+        if CM_Get_Parent(&mut parent, cur, 0).0 != 0 {
+            break;
+        }
+        cur = parent;
+    }
+    None
+}
+
+/// 给「蓝牙音频端点」补电量。
+///
+/// 为什么音频端点自己拿不到电量：
+///   Core Audio 的 `IMMDevice` 只暴露音频属性（名字 / FormFactor / 状态），
+///   电量属于**蓝牙设备节点**（`BTHENUM\DEV_<mac>` 或其子服务
+///   `BTHENUM\{0000111E-…}`），不在音频属性里。
+///
+/// 做法：按名字里的型号关键词（如 "vivo TWS A2"）去 PnP 设备里找同名蓝牙节点，
+/// 命中后沿父链读 DEVPKEY_Device_BatteryLevel —— 与键鼠电量同一条读法。
+/// 名字匹配不上就返回 None（宁可没有，也不张冠李戴）。
+unsafe fn battery_for_audio_name(name: &str) -> Option<u8> {
+    if name.is_empty() {
+        return None;
+    }
+    // 从 "耳机 (vivo TWS A2 Hands-Free AG Audio)" 里取出 "vivo TWS A2"
+    let model = audio_model_key(name);
+    if model.len() < 3 {
+        return None;
+    }
+    use windows::Win32::Devices::DeviceAndDriverInstallation::{DIGCF_ALLCLASSES, DIGCF_PRESENT};
+    let Ok(set) = SetupDiGetClassDevsW(None, None, None, DIGCF_ALLCLASSES | DIGCF_PRESENT) else {
+        return None;
+    };
+    let mut found: Option<u8> = None;
+    let mut i = 0u32;
+    loop {
+        let mut dev = SP_DEVINFO_DATA {
+            cbSize: std::mem::size_of::<SP_DEVINFO_DATA>() as u32,
+            ..Default::default()
+        };
+        if SetupDiEnumDeviceInfo(set, i, &mut dev).is_err() {
+            break;
+        }
+        i += 1;
+        let Some(inst) = read_instance_id(set, &dev) else { continue };
+        let up = inst.to_uppercase();
+        // 只看蓝牙来源的节点（BTHENUM / BTHLE / BTHLEDEVICE）
+        if !(up.starts_with("BTHENUM\\")
+            || up.starts_with("BTHLE\\")
+            || up.starts_with("BTHLEDEVICE\\"))
+        {
+            continue;
+        }
+        // 名字匹配（大小写不敏感）
+        let Ok(desc) = setup_read_friendly(set, &dev) else { continue };
+        if !desc.to_lowercase().contains(&model) {
+            continue;
+        }
+        if let Some(v) = battery_from_ancestors(dev.DevInst) {
+            found = Some(v);
+            break;
+        }
+    }
+    let _ = SetupDiDestroyDeviceInfoList(set);
+    found
+}
+
+/// 读 SetupAPI 枚举到的设备 FriendlyName（用于音频端点与 PnP 设备的名称匹配）。
+unsafe fn setup_read_friendly(
+    set: HDEVINFO,
+    dev: &SP_DEVINFO_DATA,
+) -> Result<String, ()> {
+    const SPDRP_FRIENDLYNAME: u32 = 0x0000_000C;
+    read_reg_string(set, dev, SPDRP_FRIENDLYNAME).ok_or(())
+}
+
+/// 从音频端点名里抽「型号关键词」。
+///   "耳机 (vivo TWS A2 Hands-Free AG Audio)" → "vivo tws a2"
+///   "耳机 (vivo TWS A2 Stereo)"              → "vivo tws a2"
+/// 规则：取括号内文本，砍掉已知后缀词，转小写。
+fn audio_model_key(name: &str) -> String {
+    let inner = match (name.find('('), name.rfind(')')) {
+        (Some(a), Some(b)) if b > a => &name[a + 1..b],
+        _ => name,
+    };
+    let mut s = inner.to_lowercase();
+    // 常见后缀：把「连接方式/档位」去掉，只留型号
+    for suffix in [
+        " hands-free ag audio",
+        " hands-free ag",
+        " hands-free",
+        " stereo",
+        " avrcp",
+        " target",
+    ] {
+        if let Some(p) = s.find(suffix) {
+            s.truncate(p);
+        }
+    }
+    s.trim().to_string()
+}
+
 /// 采集一次外设快照。COM 初始化/反初始化在本函数内配对完成，
 /// 因为它在独立线程里以 3 秒间隔反复调用。
 fn snapshot() -> serde_json::Value {
@@ -509,33 +957,74 @@ fn snapshot() -> serde_json::Value {
         let result = (|| -> serde_json::Value {
             let input = collect_external_input();
             let bt = input["bluetooth"].clone();
-            // 蓝牙键鼠补进设备明细：它们不在 Mouse/Keyboard 类里，只能靠 HIDClass 找。
-            // 蓝牙设备没有可靠的 VID/PID（VID&0107D7_PID&EFFF 是 HID 规范伪 ID），
-            // 所以用固定 id "bluetooth"，前端不再给「忽略」按钮（忽略整类没有意义）。
+            // 蓝牙设备逐个并入明细。
+            //
+            // ⛔ 不能再按「一个蓝牙鼠标 + 一个蓝牙键盘」硬编码两条：
+            //    旧实现只产出固定 id `bluetooth:mouse` / `bluetooth:keyboard`，
+            //    同时连两把蓝牙设备（键盘 + 鼠标）时，两条记录抢同一个 id，
+            //    前端按 id 去重就只剩一条 —— 用户「鼠标改蓝牙后识别不到」就是这么来的。
+            //    现在按设备 MAC 生成 `bluetooth:<MAC>`，一台一条，互不覆盖。
+            //
+            // ⛔ 也不再试图判定「这台到底是键盘还是鼠标」：
+            //    实测两台设备的 HID 报告描述符**完全一致**
+            //    （Keyboard×2 + Mouse×1，btnCaps/valCaps 逐字段相同），
+            //    协议层分不出主属性。与其猜，不如忠实上报「这台设备有键、有鼠」，
+            //    让 count 按设备数计（一台 = 1 个输入设备）。
             let mut mice = input["mouse"].as_array().cloned().unwrap_or_default();
             let mut keys = input["keyboard"].as_array().cloned().unwrap_or_default();
-            let bt_mouse = bt["mouse"].as_bool().unwrap_or(false);
-            let bt_keyboard = bt["keyboard"].as_bool().unwrap_or(false);
-            if bt_mouse {
-                mice.push(serde_json::json!({
-                    "id": "bluetooth:mouse",
+            let bt_devices = bt["devices"].as_array().cloned().unwrap_or_default();
+            for d in bt_devices {
+                let name = d["name"].as_str().unwrap_or("");
+                let mac = d["mac"].as_str().unwrap_or("");
+                let has_kb = d["keyboard"].as_bool().unwrap_or(false);
+                let has_mouse = d["mouse"].as_bool().unwrap_or(false);
+                if !has_kb && !has_mouse {
+                    continue;
+                }
+                let id = if mac.is_empty() {
+                    "bluetooth:unknown".to_string()
+                } else {
+                    format!("bluetooth:{mac}")
+                };
+                let item = serde_json::json!({
+                    "id": id,
                     "vid": "", "pid": "",
                     "instance": "BTHLE",
                     "viaHub": false,
                     "bluetooth": true,
-                }));
+                    "name": name,
+                    // 这台设备同时具备键鼠用法；前端据此只说「蓝牙设备」，
+                    // 不再硬贴「键盘」或「鼠标」标签。
+                    "hasKeyboard": has_kb,
+                    "hasMouse": has_mouse,
+                    // 电量（0-100）。⛔ 这一行不能漏 —— 重建 item 时漏搬字段，
+                    // 上游算好的电量会在这一步凭空消失（踩过）。
+                    "battery": d["battery"].clone(),
+                });
+                if has_mouse {
+                    mice.push(item.clone());
+                }
+                if has_kb {
+                    keys.push(item);
+                }
             }
-            if bt_keyboard {
-                keys.push(serde_json::json!({
-                    "id": "bluetooth:keyboard",
-                    "vid": "", "pid": "",
-                    "instance": "BTHLE",
-                    "viaHub": false,
-                    "bluetooth": true,
-                }));
-            }
-            let mouse_count = mice.len();
-            let keyboard_count = keys.len();
+            // 计数口径：**一台设备算一个**。
+            // 蓝牙设备的同一条记录会同时出现在 mice 与 keys 里（因为它的 HID
+            // 描述符同时声明了键与鼠用法），直接 len() 会把同一台设备数两遍
+            // ——实测会变成「鼠标 2 / 键盘 2」而桌上只有两台设备。
+            // 这里按 id 去重后分别统计：
+            //   · 有鼠标能力的设备数 → mouse（胶囊「鼠标」槽位看它）
+            //   · 有键盘能力的设备数 → keyboard
+            // 同 id 在两个列表里只贡献一次。
+            let uniq = |list: &[serde_json::Value]| -> usize {
+                let mut seen = std::collections::HashSet::new();
+                list.iter()
+                    .filter_map(|d| d["id"].as_str())
+                    .filter(|id| seen.insert(id.to_string()))
+                    .count()
+            };
+            let mouse_count = uniq(&mice);
+            let keyboard_count = uniq(&keys);
 
             let audio = match CoCreateInstance::<_, IMMDeviceEnumerator>(&MMDeviceEnumerator, None, CLSCTX_ALL) {
                 Ok(en) => {
@@ -633,6 +1122,86 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// 回归：**一台设备只算一种身份**，鼠标优先。
+    ///
+    /// 起因（2026-11-10 用户反馈）：桌面胶囊显示「鼠标 1 + 键盘 2」，
+    /// 而用户桌上只有一只游戏鼠标 + 一把蓝牙键盘。
+    /// 实测根因：VID_3151&PID_5032 是游戏鼠标（BusReportedDeviceDesc = "Gaming Mouse"），
+    /// 却同时暴露 keyboard 类集合（MI_01&COL03，svc=kbdhid，宏键/多媒体键），
+    /// 按类各数一遍就会多出一个「键盘」。
+    ///
+    /// 同理，MCHOSE G87 三模键盘（装入方式：USB/2.4G/蓝牙）固件里也带一个
+    /// mouse 集合（COL03，svc=mouhid），旧实现会把它算成「键盘 + 鼠标」。
+    /// ⛔「三模」指三种连接方式，不是「键盘能当鼠标用」—— 用户明确指出过。
+    ///
+    /// 这两条都用纯函数钉住：给出真实的实例路径，校验归组结果。
+    #[test]
+    fn one_physical_device_yields_one_identity() {
+        // ① 蓝牙：同一台设备的键盘集合 + 鼠标集合必须归到同一个 key
+        let bt_kb = r"HID\{00001812-0000-1000-8000-00805F9B34FB}_DEV_VID&0107D7_PID&EFFF_REV&0120_C818F53D9AFD&COL05\9&E068E2F&0&0004";
+        let bt_ms = r"HID\{00001812-0000-1000-8000-00805F9B34FB}_DEV_VID&0107D7_PID&EFFF_REV&0120_C818F53D9AFD&COL03\9&E068E2F&0&0002";
+        assert_eq!(
+            bt_device_key(bt_kb),
+            bt_device_key(bt_ms),
+            "同一台蓝牙设备的两个 HID 集合必须归到同一个设备键"
+        );
+        // 且必须真的取到 MAC（不是退回完整路径）
+        assert_eq!(bt_device_key(bt_kb), "C818F53D9AFD");
+
+        // ② 不同蓝牙设备必须区分开（否则两台设备会被并成一台）
+        let other = r"HID\{00001812-0000-1000-8000-00805F9B34FB}_DEV_VID&0107D7_PID&EFFF_REV&0120_A46BB62D9190&COL01&1&0&0000";
+        assert_ne!(bt_device_key(bt_kb), bt_device_key(other), "不同蓝牙设备不能并成一台");
+
+        // ③ 取不到 MAC 时退回完整路径（宁可多算一台，也不要并错）
+        let no_mac = r"HID\SOMETHING\WITHOUT_MAC";
+        assert_eq!(bt_device_key(no_mac), no_mac.to_uppercase());
+    }
+
+    /// 电量读取的正确性：`audio_model_key` 必须能把端点名收敛成型号关键词。
+    ///
+    /// 这条容易错的地方是「同一副耳机会暴露多个音频端点」
+    /// （Stereo / Hands-Free AG / Avrcp…），型号必须归一成同一个串，
+    /// 否则每个端点各查一次、结果还可能不一致。
+    #[test]
+    fn audio_model_key_normalizes_endpoint_names() {
+        // 同一副 vivo 耳机的三种端点名 → 同一个关键词
+        assert_eq!(audio_model_key("耳机 (vivo TWS A2 Stereo)"), "vivo tws a2");
+        assert_eq!(
+            audio_model_key("耳机 (vivo TWS A2 Hands-Free AG Audio)"),
+            "vivo tws a2"
+        );
+        // 没有括号的名字原样转小写
+        assert_eq!(audio_model_key("Realtek Audio"), "realtek audio");
+        // 空名字不 panic
+        assert_eq!(audio_model_key(""), "");
+    }
+
+    /// 电量节点在**父链**上，不在集合节点自己身上。
+    /// 这条实测过：HID 集合节点查 DEVPKEY_Device_BatteryLevel 返回
+    /// CR_NO_SUCH_VALUE(37)，沿父链走到 BTHLE\DEV_<mac> 才有值。
+    /// 所以 battery_from_ancestors 必须真的向上遍历，不能只看自己。
+    #[test]
+    fn battery_read_from_ancestors_not_collection() {
+        // 这台机器上若连着蓝牙键盘，应当能读到 0..=100 的值；
+        // 没连时返回 None 也算通过（CI/别的机器上没有该设备）。
+        let snap = snapshot();
+        let mut saw_any = false;
+        for key in ["mouseDevices", "keyboardDevices"] {
+            if let Some(list) = snap[key].as_array() {
+                for d in list {
+                    if d["bluetooth"].as_bool().unwrap_or(false) {
+                        if let Some(v) = d["battery"].as_u64() {
+                            assert!(v <= 100, "电量必须是 0-100，实际 {v}");
+                            saw_any = true;
+                        }
+                    }
+                }
+            }
+        }
+        // 不断言一定读到（设备可能没连），只打印，便于排查
+        println!("本次读到蓝牙电量的设备数 > 0: {saw_any}");
     }
 
     /// `device_key` 是「忽略名单」的唯一键，错了会导致：

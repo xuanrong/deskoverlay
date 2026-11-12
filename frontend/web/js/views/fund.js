@@ -988,8 +988,8 @@ export function renderFund(view) {
             <button class="fund-tab" data-tab="search">基金搜索</button>
           </div>
           <div class="fund-head-actions">
-            <button class="btn-ghost" id="fund-refresh" title="刷新行情">刷新</button>
-            <button class="btn" id="fund-add-watch" title="添加自选基金">添加自选</button>
+            <button class="btn-ghost" id="fund-refresh" aria-label="刷新行情">刷新</button>
+            <button class="btn" id="fund-add-watch" aria-label="添加自选基金">添加自选</button>
           </div>
         </div>
         <div class="fund-status" id="fund-status" hidden></div>
@@ -1544,10 +1544,10 @@ export function renderFund(view) {
           <div class="fr-val ${pctClass(pct)}" title="${esc(pctTitle)}">${fmtPct(pct)}${estTag}${q && q.stale ? '<span class="fr-est" title="数据源失败，显示缓存">缓</span>' : ""}</div>
           <div class="fr-act">
             ${held
-              ? `<button class="btn-ghost fr-edit" data-code="${esc(w.code)}" title="编辑持仓">编辑</button>`
-              : `<button class="btn-ghost fr-buy" data-code="${esc(w.code)}" title="记一笔持仓">持仓</button>`}
-            <button class="btn-ghost fr-chart" data-code="${esc(w.code)}" title="净值走势">走势</button>
-            <button class="btn-ghost fr-del" data-code="${esc(w.code)}" title="移出自选">移除</button>
+              ? `<button class="btn-ghost fr-edit" data-code="${esc(w.code)}" aria-label="编辑持仓">编辑</button>`
+              : `<button class="btn-ghost fr-buy" data-code="${esc(w.code)}" aria-label="记一笔持仓">持仓</button>`}
+            <button class="btn-ghost fr-chart" data-code="${esc(w.code)}" aria-label="净值走势">走势</button>
+            <button class="btn-ghost fr-del" data-code="${esc(w.code)}" aria-label="移出自选">移除</button>
           </div>
         </div>`;
     }).join("");
@@ -2132,12 +2132,12 @@ export function renderFund(view) {
             ? `样本 ${d.total} 只 · 净值 ${d.date} · 缺 ${d.pagesTotal - d.pagesOk} 页`
             : `全市场 ${d.total} 只 · 净值 ${d.date}`;
           srcEl.classList.toggle("fb-src-warn", !!d.partial);
-          srcEl.title = d.partial
+          srcEl.setAttribute("aria-label", d.partial
             ? `仅取到 ${d.pagesOk}/${d.pagesTotal} 页（接口按日增长率降序排列，缺页截掉的是跌幅端，`
               + `分布为偏样，仅作参考）。按成功页计得有效样本 ${d.total} 只，`
               + `另有 ${d.skipped} 只次新/未披露净值基金未计入。`
             : `口径：开放式基金「日增长率」（净值口径，非盘中估值）。`
-              + `另有 ${d.skipped} 只次新/未披露净值基金未计入。`;
+              + `另有 ${d.skipped} 只次新/未披露净值基金未计入。`);
         }
       } catch (e) {
         const el = panelOverview.querySelector("#fund-ov-dist");
@@ -2158,7 +2158,7 @@ export function renderFund(view) {
           bkEl.innerHTML = list.map((b, i) => {
             const v = b.pct;
             return `
-          <div class="bk-card" title="${esc(b.name)}">
+          <div class="bk-card" aria-label="${esc(b.name)}">
             <span class="bk-rank">${i + 1}</span>
             <span class="bk-name">${esc(b.name)}</span>
             <span class="bk-pct ${pctClass(v)}">${fmtPct(v)}</span>
@@ -2299,7 +2299,7 @@ export function renderFund(view) {
     whBody.innerHTML = `
       <div class="fund-block">
         <div class="fai-bar">
-          <span class="fai-sum" title="${esc(cfg.baseUrl || "尚未配置接口地址")}">${
+          <span class="fai-sum" aria-label="${esc(cfg.baseUrl || "尚未配置接口地址")}">${
             esc(cfg.model || "未填模型")} · ${esc(host || "未填地址")} · ${cfg.maxTokens} tokens</span>
           <span class="fb-acts">
             <button class="btn-ghost btn-xs" id="fai-cfgbtn">${aiCfgOpen ? "收起设置" : "设置"}</button>
@@ -2347,7 +2347,7 @@ export function renderFund(view) {
         </div>
         ${a.history.length
           ? `<div class="fai-hist">${a.history.map((r) => `
-              <button class="fai-chip${cur && cur.id === r.id ? " on" : ""}" data-id="${esc(r.id)}" title="${
+              <button class="fai-chip${cur && cur.id === r.id ? " on" : ""}" data-id="${esc(r.id)}" aria-label="${
                 esc((r.at || "") + (r.summary ? " · " + r.summary : ""))}">${esc(String(r.at || "").slice(5, 16))}</button>`).join("")}</div>`
           : `<div class="fund-empty">暂无历史报告</div>`}
       </div>`;
@@ -2637,7 +2637,7 @@ export function renderFund(view) {
     html += `<div class="fund-block"><div class="fund-block-head">
         <span class="fb-title">持仓账本</span>
         <span class="fb-hint">市值 = 最新净值 × 份额</span>
-        <button class="btn-ghost btn-xs" id="fund-exp-hold" title="导出为 CSV（UTF-8，可直接用 Excel 打开）">导出 CSV</button>
+        <button class="btn-ghost btn-xs" id="fund-exp-hold" aria-label="导出为 CSV（UTF-8，可直接用 Excel 打开）">导出 CSV</button>
       </div>`;
     if (holdings.length) {
       html += `
@@ -2674,8 +2674,8 @@ export function renderFund(view) {
                 <button class="btn-ghost fr-trade" data-code="${esc(h.code)}" data-type="buy">申购</button>
                 <button class="btn-ghost fr-trade" data-code="${esc(h.code)}" data-type="sell">赎回</button>
                 <button class="btn-ghost fr-trade" data-code="${esc(h.code)}" data-type="div">分红</button>
-                <button class="btn-ghost fr-edit" data-code="${esc(h.code)}" title="编辑">编辑</button>
-                <button class="btn-ghost fr-delh" data-code="${esc(h.code)}" title="删除持仓">删除</button>
+                <button class="btn-ghost fr-edit" data-code="${esc(h.code)}" aria-label="编辑">编辑</button>
+                <button class="btn-ghost fr-delh" data-code="${esc(h.code)}" aria-label="删除持仓">删除</button>
               </div>
             </div>
             ${c.daySrc === "fit" && c.dayEst ? estPanelHTML(c.dayEst) : ""}`;
@@ -2868,7 +2868,7 @@ export function renderFund(view) {
     let html = `<div class="fund-block"><div class="fund-block-head">
         <span class="fb-title">交易流水</span>
         <span class="fb-hint">${trades.length} 笔${trades.length > 30 ? "（下方只显示最近 30 笔，导出为全部）" : ""}</span>
-        <button class="btn-ghost btn-xs" id="fund-exp-trades" title="导出全部流水为 CSV（按日期升序）">导出 CSV</button>
+        <button class="btn-ghost btn-xs" id="fund-exp-trades" aria-label="导出全部流水为 CSV（按日期升序）">导出 CSV</button>
       </div>`;
     if (trades.length) {
       html += `<div class="fund-list fund-trades">`;
@@ -2885,7 +2885,7 @@ export function renderFund(view) {
             <div class="${amtCls}">${t.type === "sell" ? "-" : "+"}¥${fmtMoney(t.amount || 0)}</div>
             <div class="fr-sub">${t.shares ? (t.shares > 0 ? "+" : "") + t.shares.toFixed(2) + " 份" : (t.type === "div" ? "现金分红" : "")}</div>
           </div>
-          <div class="fr-act"><button class="btn-ghost tr-del" data-id="${esc(t.id)}" title="删除">删除</button></div>
+          <div class="fr-act"><button class="btn-ghost tr-del" data-id="${esc(t.id)}" aria-label="删除">删除</button></div>
         </div>`;
       }).join("");
       html += `</div>`;
@@ -2963,7 +2963,7 @@ export function renderFund(view) {
         <span class="fb-title">定投计划</span>
         <span class="fb-hint">${active.length} 个进行中${plans.length - active.length ? ` · ${plans.length - active.length} 个已暂停` : ""} · 每月合计 ¥${fmtMoney(monthly)}</span>
         <span class="fb-acts">
-          <button class="btn-ghost btn-xs" id="fund-exp-plans" title="导出定投计划为 CSV">导出 CSV</button>
+          <button class="btn-ghost btn-xs" id="fund-exp-plans" aria-label="导出定投计划为 CSV">导出 CSV</button>
           <button class="btn btn-xs" id="fund-newplan">新建定投</button>
         </span>
       </div>`;
@@ -3248,9 +3248,9 @@ export function renderFund(view) {
               <div class="fr-val"><span class="fr-type">${esc(r.type || "--")}</span></div>
               <div class="fr-act">
                 ${inWatch
-                  ? `<button class="btn-ghost fr-rmwatch" data-code="${esc(r.code)}" title="移出自选">已自选</button>`
-                  : `<button class="btn-ghost fr-addwatch" data-code="${esc(r.code)}" data-name="${esc(r.name || "")}" data-type="${esc(r.type || "")}" title="加入自选">加入自选</button>`}
-                <button class="btn-ghost fr-chart" data-code="${esc(r.code)}" title="净值走势">走势</button>
+                  ? `<button class="btn-ghost fr-rmwatch" data-code="${esc(r.code)}" aria-label="移出自选">已自选</button>`
+                  : `<button class="btn-ghost fr-addwatch" data-code="${esc(r.code)}" data-name="${esc(r.name || "")}" data-type="${esc(r.type || "")}" aria-label="加入自选">加入自选</button>`}
+                <button class="btn-ghost fr-chart" data-code="${esc(r.code)}" aria-label="净值走势">走势</button>
               </div>
             </div>`;
           }).join("")}
@@ -3319,7 +3319,7 @@ export function renderFund(view) {
               <div class="fr-val"><span class="fr-type">${esc(r.type || "--")}</span></div>
               <div class="fr-act">
                 ${inWatch
-                  ? `<button class="btn-ghost fr-rmwatch" data-code="${esc(r.code)}" title="移出自选">已自选</button>`
+                  ? `<button class="btn-ghost fr-rmwatch" data-code="${esc(r.code)}" aria-label="移出自选">已自选</button>`
                   : `<button class="btn btn-primary btn-xs fr-addwatch" data-code="${esc(r.code)}" data-name="${esc(r.name || "")}" data-type="${esc(r.type || "")}">加入自选</button>`}
               </div>
             </div>`;

@@ -1,10 +1,12 @@
-// 节日 / 节气 / 法定假期 —— 日期栏药丸与面板数据源（纯前端，零依赖，无网络请求）。
+// 节日 / 节气 / 法定假期 —— 日期栏药丸与面板数据源（纯前端，无网络请求，除「更新节假日」主动联网）。
 // 组成：
 //   1) 农历转换：经典压缩位表（1900-2100），推导农历节日（春节/元宵/端午/中秋/除夕…）
 //   2) 二十四节气：太阳视黄经低精度天文算法（误差约 ±0.01°，日期精确到日）
 //   3) 公历节日：固定月日规则
 //   4) 法定假期 + 调休补班：国务院年度通知，无法算法推导，按年内置 LEGAL 表
-// 数据更新：每年 11 月国务院公布次年安排后，在 LEGAL 表追加一条即可。
+// 数据更新：日历面板「更新节假日」联网拉最新年度安排（见 fetchLegalYear），
+//           拉不到时可回退手动粘贴（见 app.js openHolidayEditor）。
+import { invoke } from "./bus.js";
 
 const LUNAR_INFO = [
   0x04bd8, 0x04ae0, 0x0a570, 0x054d5, 0x0d260, 0x0d950, 0x16554, 0x056a0, 0x09ad0, 0x055d2, // 1900-1909
@@ -175,9 +177,16 @@ const dKey = (d) => `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
 const md = (y, m, d) => new Date(y, m - 1, d);
 
 const legalCache = new Map();
+// 用户覆盖层：state.settings.legalOverride 里的年度安排会**覆盖**内置 LEGAL 表同年数据。
+// 结构与 LEGAL 一致：{ 2027: [ { name, start:[m,d], end:[m,d], workdays:[[m,d],...] }, ... ] }
+// 用途：国务院每年 11 月公布次年安排后，用户在日历面板「更新节假日」粘贴 JSON 即可，
+//       无需改代码、无需联网（贴合本模块零网络依赖原则）。
+let legalOverride = null;
 function legalOf(y) {
   if (legalCache.has(y)) return legalCache.get(y);
-  const list = (LEGAL[y] || []).map((h) => {
+  // 覆盖优先：override 有该年就用 override，否则用内置表
+  const raw = (legalOverride && legalOverride[y]) || LEGAL[y] || [];
+  const list = raw.map((h) => {
     const start = md(y, h.start[0], h.start[1]);
     const end = md(y, h.end[0], h.end[1]);
     return {
@@ -188,6 +197,121 @@ function legalOf(y) {
   });
   legalCache.set(y, list);
   return list;
+}
+
+// 设置用户覆盖的法定假期（来自 state.settings.legalOverride），并清空缓存立即生效。
+// 传 null = 清除覆盖，回到内置 LEGAL 表。
+export function setLegalOverride(obj) {
+  legalOverride = obj && typeof obj === "object" ? obj : null;
+  legalCache.clear();
+  evCache.clear();
+}
+
+// 联网拉取某年国务院法定假期安排，聚合成与内置 LEGAL 表同结构：
+// { [年份]: [ { name, start:[月,日], end:[月,日], workdays:[[月,日],…] }, … ] }
+// 数据源：timor.tech 免费节假日 API（逐日返回，holiday=true 假期 / false 调休补班）。
+// 走 Rust http_get 代理（无 CORS）。返回 { [年份]: [...] }，可直接喂 setLegalOverride。
+// 聚合要点：API 的假期名是逐日的（除夕/初一/初二…），要合并连续日成区间并取规范名（春节）。
+export async function fetchLegalYear(year) {
+  const y = Math.round(+year);
+  if (!y || y < 2000 || y > 2100) throw new Error("年份无效（2000–2100）");
+  const raw = await invoke("http_get", {
+    url: `https://timor.tech/api/holiday/year/${y}`,
+    headers: { Accept: "application/json" },
+  });
+  // 防御：少数服务端/代理会在响应头加 UTF-8 BOM（\uFEFF），JSON.parse 会直接抛错 → strip 掉。
+  const json = JSON.parse(String(raw).replace(/^\uFEFF/, ""));
+  if (!json || json.code !== 0 || !json.holiday) throw new Error("接口返回异常");
+  const days = Object.keys(json.holiday)
+    .map((md) => ({ md, ...json.holiday[md] }))
+    .sort((a, b) => (a.md < b.md ? -1 : a.md > b.md ? 1 : 0));
+
+  // 区间规范名：优先「春节」（区间常含除夕+初一~初七，应叫春节而非除夕），再其他节日。
+  // ⛔ 「除夕」不进 CANON —— 否则 pickName 会在 CANON 循环里直接命中「除夕」返回，
+  //    走不到下面的 NAME_ALIAS 分支（除夕/初一 → 春节），2027 这类除夕/初一被拆开就会误命名。
+  const CANON = ["春节", "元旦", "清明节", "劳动节", "端午节", "中秋节", "国庆节"];
+  // 段内「逐日名」→ 所属节日的别名（处理 lunar 节日：除夕/初一 都属于「春节」段）。
+  const NAME_ALIAS = { "除夕": "春节", "初一": "春节" };
+  const pickName = (range) => {
+    for (const cn of CANON) if (range.some((d) => d.name === cn)) return cn;
+    // 别名：段内含除夕/初一 → 这是春节段（lunar 春节常无「春节」这个逐日名）
+    for (const d of range) if (NAME_ALIAS[d.name]) return NAME_ALIAS[d.name];
+    // 退化：取名气最大的（wage=3 法定 > 2 休息），否则取首日名
+    return [...range].sort((a, b) => (b.wage || 0) - (a.wage || 0))[0].name;
+  };
+  const toMD = (md) => md.split("-").map(Number);
+
+  // 合并连续假期日为区间（相邻自然日即同一段）
+  const holidays = days.filter((d) => d.holiday === true);
+  const ranges = [];
+  for (const d of holidays) {
+    const last = ranges[ranges.length - 1];
+    const prev = last && last[last.length - 1];
+    if (prev && nextDay(prev.md) === d.md) last.push(d);
+    else ranges.push([d]);
+  }
+
+  // 调休补班归属（两步，target 优先）：
+  //   1. 补班日自带 target（它服务的节日官方名，如「春节」「国庆节」）—— 最可靠，优先用。
+  //      把 target 名映射到「段内含该名字」的区间（春节段的初一/初二…名字含「春节」？否 ——
+  //      所以 target 匹配按「段内任一日名 == target」可能落空，此时回退到 target 的别名集）。
+  //   2. 无 target / target 匹配不上的补班 → 按「日期最近的前一个区间」就近归属。
+  // 区间名用 CANON 从段内逐日名推（春节段的除夕/初一 → pickName 命中「春节」优先级）。
+  // 别名表：target 官方名 → 可能出现在段内的逐日名（处理 lunar 节日逐日名不叫节日名的情况）。
+  const TARGET_ALIAS = {
+    "春节": ["春节", "除夕", "初一"],
+    "端午节": ["端午节"], "中秋节": ["中秋节"], "清明节": ["清明节"],
+    "劳动节": ["劳动节"], "国庆节": ["国庆节"], "元旦": ["元旦"],
+  };
+  for (const r of ranges) {
+    r.canonName = pickName(r);
+    r.workdays = [];
+  }
+  const rangeStart = (r) => toMD(r[0].md);
+  const rangeEnd = (r) => toMD(r[r.length - 1].md);
+  const dist = (a, b) => Math.abs(new Date(2001, a[0] - 1, a[1]) - new Date(2001, b[0] - 1, b[1]));
+  const dayDist = (a, b) => Math.abs(new Date(2001, a[0] - 1, a[1]) - new Date(2001, b[0] - 1, b[1]));
+
+  const workdays = days.filter((d) => d.holiday === false);
+  // 1) target 精确归属
+  const unassigned = [];
+  for (const d of workdays) {
+    const t = d.target || "";
+    const names = TARGET_ALIAS[t] || [t];
+    const r = ranges.find((rr) => rr.some((x) => names.includes(x.name)));
+    if (r) r.workdays.push(toMD(d.md));
+    else unassigned.push(d);
+  }
+  // 2) 无 target / 匹配不上的 → 就近的前一个区间
+  for (const d of unassigned) {
+    const t = toMD(d.md);
+    let best = null, bestD = Infinity;
+    for (const r of ranges) {
+      const dd = dayDist(t, rangeEnd(r));
+      if (dd < bestD) { bestD = dd; best = r; }
+    }
+    if (best) best.workdays.push(t);
+  }
+  // 每段补班按日期排序
+  for (const r of ranges) {
+    r.workdays.sort((a, b) => (a[0] - b[0]) || (a[1] - b[1]));
+  }
+
+  return {
+    [y]: ranges.map((r) => ({
+      name: r.canonName,
+      start: rangeStart(r),
+      end: rangeEnd(r),
+      workdays: r.workdays,
+    })),
+  };
+}
+
+// "MM-DD" 的下一个自然日 → "MM-DD"（跨月/跨年由 Date 归一化）
+function nextDay(md) {
+  const [m, d] = md.split("-").map(Number);
+  const dt = new Date(2001, m - 1, d + 1); // 闰年无关，仅算相邻
+  return `${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`;
 }
 
 // 某年全部事件 → Map(月-日-年 key → [{name, type}])，type: festival | term | workday
@@ -279,7 +403,8 @@ export function pillFor(now) {
   const term = todays.find((e) => e.type === "term");
   if (fest) return { text: `今日 · ${fest.name}`, cls: "today", tip: `今天是${fest.name}` };
   if (term) return { text: `今日 · ${term.name}`, cls: "today term", tip: `今天是二十四节气·${term.name}` };
-  // 3) 倒计时：假期（≤60 天优先）> 最近的节日/节气
+  // 3) 倒计时：优先节假日（≤60 天）；其次节日。⚠ 节气**不进倒计时** —— 节气只在实际
+  //    当天显示（见第 2 步），平时不再「距XX节气 N 天」（用户要求：只倒计时节假日）。
   const hols = [...legalOf(base.getFullYear()), ...legalOf(base.getFullYear() + 1)]
     .map((h) => ({ h, days: Math.round((stripTime(h.start) - base) / MS_DAY) }))
     .filter((x) => x.days > 0)
@@ -289,12 +414,9 @@ export function pillFor(now) {
     const wd = nextHol.h.workdays.length ? `，${nextHol.h.workdays.map(fmtMD).join("、")}补班` : "";
     return { text: `距${nextHol.h.name} ${nextHol.days} 天`, cls: "holiday", tip: `${nextHol.h.name}：${fmtMD(nextHol.h.start)} 至 ${fmtMD(nextHol.h.end)}，共${nextHol.h.days}天${wd}` };
   }
-  const ups = getUpcoming(base, 45, 24);
-  const nf = ups.find((e) => e.type === "festival");
-  const nt = ups.find((e) => e.type === "term");
-  const near = !nf ? nt : !nt ? nf : (nf.days <= nt.days ? nf : nt);
-  if (near) {
-    return { text: `距${near.name} ${near.days} 天`, cls: near.type === "term" ? "term" : "", tip: `${fmtMD(near.date)} · ${near.name}` };
+  const nf = getUpcoming(base, 45, 24).find((e) => e.type === "festival");
+  if (nf) {
+    return { text: `距${nf.name} ${nf.days} 天`, cls: "", tip: `${fmtMD(nf.date)} · ${nf.name}` };
   }
   return { text: "", cls: "", tip: "" };
 }

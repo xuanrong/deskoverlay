@@ -3,8 +3,26 @@ import { invoke, Heartbeat } from "./bus.js";
 import { state, saveState } from "./state.js";
 import { ICON_CLOCK, ICON_WATER, ICON_CLOSE } from "./icons.js";
 import { esc, ymd, hhmm, uid } from "./utils.js";
+import { holidayOf, workdayOf } from "./festivals.js";
 
 const mcReminders = document.getElementById("mc-reminders");
+
+// 今天是否工作日（用于 dayFilter=workday / rest 的提醒过滤）。
+// 口径跟日历一致（复用 festivals.js 法定假期表，含调休补班），不是简单判周末：
+//   调休补班日（哪怕周六）→ 工作日；法定假期（哪怕周三）→ 休息日；其余按周一~周五。
+function isWorkday(date) {
+  if (workdayOf(date)) return true;   // 调休补班日算工作日
+  if (holidayOf(date)) return false;  // 法定假期算休息日
+  const d = date.getDay();
+  return d >= 1 && d <= 5;            // 周一~周五
+}
+// 提醒今天是否该触发（按 dayFilter）。undefined / "all" 视作每天（兼容旧数据）。
+function matchesDayFilter(r, date) {
+  const f = r.dayFilter || "all";
+  if (f === "workday") return isWorkday(date);
+  if (f === "rest") return !isWorkday(date);
+  return true;
+}
 
 // 将久坐配置推送到后端（监控线程据此启停与计时）。
 // 注意：参数名用 intervalMin（camelCase）——Tauri v2 将 Rust 的 interval_min 转成
@@ -72,6 +90,9 @@ function renderReminders() {
   }
   const active = (state.reminders || [])
     .filter((r) => r.enabled)
+    // 显示也按 dayFilter 过滤：今天不触发的提醒不上榜（周末看不到「上班打卡」这类）。
+    // 否则用户会看到一条「今天根本不会响」的提醒，徒增困惑。
+    .filter((r) => matchesDayFilter(r, new Date()))
     .map((r) => {
       const sub = r.time || "--:--";
       return { id: r.id, icon: r.icon, label: r.label, sub, key: approachingMs(r, nowTs) };
@@ -83,12 +104,12 @@ function renderReminders() {
   }
   mcReminders.innerHTML = rows.length
     ? rows.map((r) => `
-      <div class="mc-rem-row${r.sed ? " mc-rem-sed" : ""}${r.water ? " mc-rem-water" : ""}" data-id="${esc(r.id)}" title="${esc(r.label)} · ${esc(r.sub)}">
+      <div class="mc-rem-row${r.sed ? " mc-rem-sed" : ""}${r.water ? " mc-rem-water" : ""}" data-id="${esc(r.id)}" aria-label="${esc(r.label)} · ${esc(r.sub)}">
         <span class="mc-rem-icon">${r.icon}</span>
         <span class="mc-rem-label">${esc(r.label)}</span>
         <span class="mc-rem-time">${esc(r.sub)}</span>
       </div>`).join("")
-    : `<div class="mc-rem-row mc-rem-empty" title="提醒设置"><span class="mc-rem-icon">${ICON_CLOCK}</span><span class="mc-rem-label">提醒设置</span></div>`;
+    : `<div class="mc-rem-row mc-rem-empty" aria-label="提醒设置"><span class="mc-rem-icon">${ICON_CLOCK}</span><span class="mc-rem-label">提醒设置</span></div>`;
   mcReminders.querySelectorAll(".mc-rem-row").forEach((b) => b.addEventListener("click", openReminderSettings));
 }
 
@@ -150,6 +171,9 @@ function checkReminders() {
       // 不做错过补弹：应用没开/心跳停摆错过的提醒不补（用户明确要求）。
       // 配套：改时间/重新启用会重置当日标记（避免脏标记锁死当天触发）；
       // 标记延后到弹窗确认成功才写，失败仍在触发分钟内的心跳会自动重试。
+      // dayFilter：今天不是该提醒的目标日（工作日/休息日）就不触发。
+      // 不写当日标记——明天若是目标日仍应正常弹。
+      if (!matchesDayFilter(r, now)) continue;
       if (r.time === cur && r.lastTriggeredDate !== today) {
         showReminderToast(r).then((ok) => {
           if (ok) {
@@ -312,9 +336,14 @@ function openReminderSettings() {
       <div class="rm-row">
         <span class="rm-icon">${r.icon}</span>
         <input class="rm-name" data-i="${i}" value="${esc(r.label)}" placeholder="提醒名称" />
-        <input class="rm-time" type="time" data-i="${i}" value="${esc(r.time || "")}" title="每日触发时刻" />
+        <input class="rm-time" type="time" data-i="${i}" value="${esc(r.time || "")}" aria-label="每日触发时刻" />
+        <select class="rm-type" data-i="${i}" aria-label="触发日">
+          <option value="all"${r.dayFilter === "all" || !r.dayFilter ? " selected" : ""}>每天</option>
+          <option value="workday"${r.dayFilter === "workday" ? " selected" : ""}>工作日</option>
+          <option value="rest"${r.dayFilter === "rest" ? " selected" : ""}>休息日</option>
+        </select>
         <label class="rm-toggle"><input type="checkbox" data-i="${i}" ${r.enabled ? "checked" : ""} /><span>启用</span></label>
-        <button class="rm-del" data-i="${i}" title="删除">${ICON_CLOSE}</button>
+        <button class="rm-del" data-i="${i}" aria-label="删除">${ICON_CLOSE}</button>
       </div>`;
     }).join("");
 
@@ -334,6 +363,15 @@ function openReminderSettings() {
         // 改时间必须重置当日触发标记：否则当天改时间后区间匹配看到「今天已触发过」
         // 直接跳过，新设置的时刻永远不弹（用户实测踩中：改到 10:52 仍不弹）
         r.lastTriggeredDate = "";
+        saveState();
+        renderReminders();
+      });
+    });
+    list.querySelectorAll(".rm-type").forEach((el) => {
+      el.addEventListener("change", () => {
+        const r = state.reminders[el.dataset.i];
+        if (!r) return;
+        r.dayFilter = el.value; // all / workday / rest
         saveState();
         renderReminders();
       });
@@ -360,7 +398,7 @@ function openReminderSettings() {
   }
 
   ov.querySelector("#rm-add-btn").addEventListener("click", () => {
-    state.reminders.push({ id: uid("r"), label: "新提醒", icon: ICON_CLOCK, type: "daily", time: "09:00", enabled: true, lastTriggeredDate: "" });
+    state.reminders.push({ id: uid("r"), label: "新提醒", icon: ICON_CLOCK, type: "daily", time: "09:00", dayFilter: "all", enabled: true, lastTriggeredDate: "" });
     saveState();
     renderRows();
     renderReminders();

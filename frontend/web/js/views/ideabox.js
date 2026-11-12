@@ -83,10 +83,10 @@ function tagPicker(container, current, onChange, onTagsMutated) {
     return `
       <span class="idea-form-chip">
         <button class="idea-tag-opt${on ? " active" : ""}" data-tag="${esc(t)}"${s}>${esc(t)}</button>
-        ${deletable ? `<button class="idea-form-del" data-del="${esc(t)}" title="删除该标签">×</button>` : ""}
+        ${deletable ? `<button class="idea-form-del" data-del="${esc(t)}" aria-label="删除该标签">×</button>` : ""}
       </span>`;
   }).join("")
-    + `<button class="idea-tag-opt idea-tag-add" data-add="1" title="新增标签">＋ 新增标签</button>`;
+    + `<button class="idea-tag-opt idea-tag-add" data-add="1" aria-label="新增标签">＋ 新增标签</button>`;
 
   container.querySelectorAll("[data-tag]").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -196,8 +196,8 @@ export function renderIdeabox(view) {
         </div>
         <div class="idea-text">${esc(it.text)}</div>
         <div class="idea-acts">
-          <button class="idea-edit" data-id="${esc(it.id)}" title="编辑">${ICON_EDIT}</button>
-          <button class="idea-del" data-id="${esc(it.id)}" title="删除">${ICON_CLOSE}</button>
+          <button class="idea-edit" data-id="${esc(it.id)}" aria-label="编辑">${ICON_EDIT}</button>
+          <button class="idea-del" data-id="${esc(it.id)}" aria-label="删除">${ICON_CLOSE}</button>
         </div>
       </div>`;
   }

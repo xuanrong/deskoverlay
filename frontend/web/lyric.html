@@ -251,15 +251,15 @@
          模式/样式/对齐/配色已移入「设置」面板（网易云交互），工具条只留高频操作。 -->
     <div class="ly-tools" id="tools">
       <!-- 设置：弹出面板（模式/样式/对齐/时间偏移/配色），参考网易云「点开面板直接选」的交互 -->
-      <button class="ly-btn text" id="btn-panel" title="模式、样式、对齐与配色设置">设置</button>
+      <button class="ly-btn text" id="btn-panel" aria-label="模式、样式、对齐与配色设置">设置</button>
       <!-- 锁定 / 解锁：**双向**切换。
            只做单向锁定会把人锁死 —— 锁定后窗口穿透、页面收不到鼠标事件，
            而工具条又随锁定隐藏，用户再也没有入口回到可交互状态。
            点「解锁」置 sticky，悬停探测线程不再自动锁回。 -->
-      <button class="ly-btn text" id="btn-lock" title="锁定：穿透鼠标，可点到底下的窗口/图标">锁定</button>
-      <button class="ly-btn text" id="btn-smaller" title="减小字号">A-</button>
-      <button class="ly-btn text" id="btn-bigger" title="增大字号">A+</button>
-      <button class="ly-btn danger" id="btn-close" title="关闭桌面歌词">
+      <button class="ly-btn text" id="btn-lock" aria-label="锁定：穿透鼠标，可点到底下的窗口/图标">锁定</button>
+      <button class="ly-btn text" id="btn-smaller" aria-label="减小字号">A-</button>
+      <button class="ly-btn text" id="btn-bigger" aria-label="增大字号">A+</button>
+      <button class="ly-btn danger" id="btn-close" aria-label="关闭桌面歌词">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M18 6 6 18M6 6l12 12"/>
         </svg>

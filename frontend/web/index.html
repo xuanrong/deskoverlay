@@ -21,7 +21,7 @@
           <div class="mc-time" id="mc-time">--:--:--</div>
           <div class="mc-date-row">
             <div class="mc-date" id="mc-date"></div>
-            <div class="mc-fest" id="mc-fest" hidden title="节日·节气·假期"></div>
+            <div class="mc-fest" id="mc-fest" hidden aria-label="节日·节气·假期"></div>
           </div>
         </div>
         <div class="mc-reminders" id="mc-reminders"></div>
@@ -47,7 +47,7 @@
       <!-- 底部任务栏：设置 / 指标 / 时间 / 基金行情 / 编辑模式 / 退出 -->
       <footer class="taskbar" id="taskbar">
         <div class="taskbar__left">
-          <button class="taskbar-btn" id="tb-settings" title="设置">
+          <button class="taskbar-btn" id="tb-settings" aria-label="设置">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <circle cx="12" cy="12" r="3"></circle>
               <path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1"></path>
@@ -56,7 +56,7 @@
           </button>
         </div>
         <div class="taskbar__center">
-          <div class="taskbar-metric taskbar-metric--cpu" id="tb-cpu" data-ready="0" title="CPU 使用率">
+          <div class="taskbar-metric taskbar-metric--cpu" id="tb-cpu" data-ready="0" aria-label="CPU 使用率">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <rect x="6" y="6" width="12" height="12" rx="2"></rect>
               <rect x="10" y="10" width="4" height="4"></rect>
@@ -64,14 +64,14 @@
             </svg>
             <span class="tm-label">CPU</span><span class="tm-val"><span class="tm-num" id="tb-cpu-val">--</span><span class="tm-pct">%</span></span>
           </div>
-          <div class="taskbar-metric taskbar-metric--ram" id="tb-ram" data-ready="0" title="内存使用率">
+          <div class="taskbar-metric taskbar-metric--ram" id="tb-ram" data-ready="0" aria-label="内存使用率">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M4 8h16v8H4z"></path>
               <path d="M7 16v3M12 16v3M17 16v3"></path>
             </svg>
             <span class="tm-label">内存</span><span class="tm-val"><span class="tm-num" id="tb-ram-val">--</span><span class="tm-pct">%</span></span>
           </div>
-          <div class="taskbar-metric taskbar-metric--disk" id="tb-disk" data-ready="0" title="磁盘占用">
+          <div class="taskbar-metric taskbar-metric--disk" id="tb-disk" data-ready="0" aria-label="磁盘占用">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <ellipse cx="12" cy="6" rx="7" ry="3"></ellipse>
               <path d="M5 6v12c0 1.7 3.1 3 7 3s7-1.3 7-3V6"></path>
@@ -80,7 +80,10 @@
             <span class="tm-label">磁盘</span><span class="tm-val"><span class="tm-num" id="tb-disk-val">--</span><span class="tm-pct">%</span></span>
           </div>
           <span class="taskbar-sep"></span>
-          <div class="taskbar-fund" id="tb-fund" title="点击打开基金管家">
+          <!-- 指数条：只显示「数量（点位）+ 百分比」两项，鼠标悬停不弹 tooltip。
+               原先这里挂 title="点击打开基金管家"，原生 tooltip 会盖住数字，
+               用户明确要求去掉。点击行为保留（标题栏 hover 高亮已足够提示可点）。 -->
+          <div class="taskbar-fund" id="tb-fund">
             <svg class="taskbar-fund__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M3 17l5-5 4 4 8-8"></path>
               <path d="M15 8h6v6"></path>
@@ -89,6 +92,10 @@
               <div class="taskbar-fund__row">
                 <span class="taskbar-fund__label">上证</span>
                 <span class="taskbar-fund__value" id="tb-fund-idx">--</span>
+                <!-- 涨跌额（点数变化）。用户要求「数量 + 百分比」都展示：
+                     数量 = 涨跌额（+11.61），百分比 = 涨跌幅（+0.32%）。
+                     和基金弹窗里指数卡的 +涨跌额 0.32% 口径一致。 -->
+                <span class="taskbar-fund__delta" id="tb-fund-delta">--</span>
                 <span class="taskbar-fund__chg" id="tb-fund-chg">--</span>
               </div>
             </div>
@@ -101,34 +108,46 @@
                它是常驻状态指示器，和 CPU/内存/磁盘那组「中间指标」语义不同，
                贴着右侧操作区更像系统托盘。浮层定位走 getBoundingClientRect，
                移动位置不影响（见 workspace.js positionPeriphPop）。 -->
-          <button class="periph-pill" id="tb-periph" data-ready="0" title="外设状态（点击展开）" aria-haspopup="true" aria-expanded="false">
+          <button class="periph-pill" id="tb-periph" data-ready="0" aria-label="外设状态（点击展开）" aria-haspopup="true" aria-expanded="false">
             <span class="pi" data-kind="headphone" data-on="0">
+              <!-- 电量环：弧长 = 电量百分比，中间镂空露出图标。
+                   不能改用 ::before/::after —— 那两个已被「断开斜杠」和
+                   「已连接绿点」占用，只能单加一个子元素。 -->
+              <span class="pi__ring" aria-hidden="true"></span>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M3 18v-6a9 9 0 0 1 18 0v6"></path>
                 <path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"></path>
               </svg>
             </span>
             <span class="pi" data-kind="mouse" data-on="0">
+              <!-- 电量环：弧长 = 电量百分比，中间镂空露出图标。
+                   不能改用 ::before/::after —— 那两个已被「断开斜杠」和
+                   「已连接绿点」占用，只能单加一个子元素。 -->
+              <span class="pi__ring" aria-hidden="true"></span>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
                 <rect x="6" y="3" width="12" height="18" rx="6"></rect>
                 <path d="M12 3v7"></path>
               </svg>
             </span>
             <span class="pi" data-kind="keyboard" data-on="0">
+              <!-- 电量环：弧长 = 电量百分比，中间镂空露出图标。
+                   不能改用 ::before/::after —— 那两个已被「断开斜杠」和
+                   「已连接绿点」占用，只能单加一个子元素。 -->
+              <span class="pi__ring" aria-hidden="true"></span>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
                 <rect x="2" y="6" width="20" height="12" rx="2"></rect>
                 <path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M8 14h8"></path>
               </svg>
             </span>
           </button>
-          <button class="taskbar-btn" id="tb-edit" title="编辑模式（拖动卡片调整布局）">
+          <button class="taskbar-btn" id="tb-edit" aria-label="编辑模式（拖动卡片调整布局）">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M12 20h9"></path>
               <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"></path>
             </svg>
             <span>编辑模式</span>
           </button>
-          <button class="taskbar-btn taskbar-btn--exit" id="tb-quit" title="退出应用">
+          <button class="taskbar-btn taskbar-btn--exit" id="tb-quit" aria-label="退出应用">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M12 3v9"></path>
               <path d="M6.3 6.3a8 8 0 1 0 11.4 0"></path>
@@ -147,7 +166,7 @@
         <span class="mo-icon" id="mo-icon"></span>
         <span class="mo-title" id="mo-title"></span>
         <span class="mo-sub" id="mo-sub"></span>
-        <button class="mo-close" id="mo-close" title="关闭（Esc）">
+        <button class="mo-close" id="mo-close" aria-label="关闭（Esc）">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M18 6 6 18M6 6l12 12"></path>
           </svg>

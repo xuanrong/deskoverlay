@@ -96,11 +96,11 @@ function renderCapsule() {
   if (subEl) subEl.textContent = subText();
   if (actEl) {
     actEl.innerHTML = p.running ? ICON_PAUSE : ICON_PLAY;
-    actEl.title = p.running ? "暂停" : "开始";
+    actEl.setAttribute("aria-label", p.running ? "暂停" : "开始");
   }
   setArc(p.running || remain < full ? remain / full : 0);
   pomoEl.dataset.running = p.running ? "1" : "0";
-  pomoEl.title = `番茄钟 · ${esc(subText())} · ${fmtMs(remain)}`;
+  pomoEl.setAttribute("aria-label", `番茄钟 · ${subText()} · ${fmtMs(remain)}`);
   // 跨日/浮层统计刷新
   if (popEl) renderPopover();
 }
@@ -341,7 +341,7 @@ export function initPomodoro() {
       <div class="pomo-time">25:00</div>
       <div class="pomo-sub">专注 · 点击开始</div>
     </div>
-    <button class="pomo-act" title="开始"></button>`;
+    <button class="pomo-act" aria-label="开始"></button>`;
 
   // 浮层结构（懒挂载到 body）
   popEl = document.createElement("div");
@@ -353,7 +353,7 @@ export function initPomodoro() {
       <span class="pomo-pop-title">${ICON_TOMATO}番茄钟</span>
       <span class="pomo-pop-right">
         <span class="pomo-pop-today">今日 0 / 8</span>
-        <button class="pomo-gear" id="pomo-gear" title="时长与目标">${ICON_GEAR}</button>
+        <button class="pomo-gear" id="pomo-gear" aria-label="时长与目标">${ICON_GEAR}</button>
       </span>
     </div>
     <div class="pomo-config" id="pomo-config" hidden>

@@ -139,7 +139,7 @@ export function renderNotes(view) {
             <span style="position:absolute;left:8px;color:var(--text-faint);display:inline-flex;width:14px;height:14px;">${SVG.search}</span>
             <input id="nt-search" type="text" placeholder="搜索笔记…" style="flex:1;height:100%;background:transparent;border:0;outline:0;padding:0 8px 0 28px;color:var(--text);font-size:12px;font-family:var(--font);" />
           </div>
-          <button id="nt-new" title="新建笔记" style="background:var(--green);color:#0c0c0d;width:30px;height:30px;border:0;border-radius:6px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;">${SVG.plus}</button>
+          <button id="nt-new" aria-label="新建笔记" style="background:var(--green);color:#0c0c0d;width:30px;height:30px;border:0;border-radius:6px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;">${SVG.plus}</button>
         </div>
         <div class="nt-sidebar-scroll" id="nt-list"></div>
       </aside>
@@ -147,11 +147,11 @@ export function renderNotes(view) {
         <div class="nt-toolbar">
           <input id="nt-title" class="nt-title-input" type="text" placeholder="笔记标题…" />
           <div class="spacer" style="flex:1 1 auto;"></div>
-          <button id="nt-export" class="nt-tool" title="导出为 Markdown">${SVG.export}</button>
+          <button id="nt-export" class="nt-tool" aria-label="导出为 Markdown">${SVG.export}</button>
           <span class="nt-tool-sep"></span>
-          <button id="nt-mode" class="nt-tool" title="预览">${SVG.eye}</button>
-          <button id="nt-pin" class="nt-tool pin" title="置顶">${SVG.pin}</button>
-          <button id="nt-del" class="nt-tool del" title="删除笔记">${SVG.del}</button>
+          <button id="nt-mode" class="nt-tool" aria-label="预览">${SVG.eye}</button>
+          <button id="nt-pin" class="nt-tool pin" aria-label="置顶">${SVG.pin}</button>
+          <button id="nt-del" class="nt-tool del" aria-label="删除笔记">${SVG.del}</button>
         </div>
         <!-- Editing Toolbar：编辑格式栏（一期，仅编辑态显示） -->
         <div id="nt-fmt" class="et-row disabled" hidden></div>
@@ -585,8 +585,8 @@ export function renderNotes(view) {
                 ${preview ? `<div class="nt-preview">${esc(preview)}</div>` : ""}
               </div>
               <div class="nt-actions">
-                <button class="${pinClass}" data-act="pin" data-id="${esc(n.id)}" title="${n.pinned ? "取消置顶" : "置顶"}">${pinIcon}</button>
-                <button class="nt-act del" data-act="del" data-id="${esc(n.id)}" title="删除">${SVG.del}</button>
+                <button class="${pinClass}" data-act="pin" data-id="${esc(n.id)}" aria-label="${n.pinned ? '取消置顶' : '置顶'}">${pinIcon}</button>
+                <button class="nt-act del" data-act="del" data-id="${esc(n.id)}" aria-label="删除">${SVG.del}</button>
               </div>
             </div>`;
           })
@@ -762,14 +762,14 @@ export function renderNotes(view) {
       elTextarea.hidden = true;
       elPreview.hidden = false;
       elMode.innerHTML = SVG.edit;
-      elMode.title = "编辑";
+      elMode.setAttribute("aria-label", "编辑");
       renderPreview(elTextarea.value);
       elPreview.scrollTop = 0;
     } else {
       elTextarea.hidden = false;
       elPreview.hidden = true;
       elMode.innerHTML = SVG.eye;
-      elMode.title = "预览";
+      elMode.setAttribute("aria-label", "预览");
       if (focus) elTextarea.focus();
     }
   }
@@ -897,7 +897,7 @@ export function renderNotes(view) {
     elTitle.value = note.title || extractTitle(note.content);
     elPin.classList.toggle("active", note.pinned);
     elPin.innerHTML = note.pinned ? SVG.pinFill : SVG.pin;
-    elPin.title = note.pinned ? "取消置顶" : "置顶";
+    elPin.setAttribute("aria-label", note.pinned ? "取消置顶" : "置顶");
     elTextarea.value = note.content;
     // 恢复该笔记上次的状态：上次停在预览则进预览，否则保持编辑页；均不抢焦点
     renderNoteState();
@@ -967,7 +967,7 @@ export function renderNotes(view) {
         elTextarea.value = "";
         elPin.classList.remove("active");
         elPin.innerHTML = SVG.pin;
-        elPin.title = "置顶";
+        elPin.setAttribute("aria-label", "置顶");
         renderEmptyState();
         setMode(false); // 保持编辑页（输入已禁用），显示空态引导
       }

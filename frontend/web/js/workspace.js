@@ -12,6 +12,7 @@ import { musicControl, musicLyricAt } from "./views/music.js";
 import { fetchIndexQuotes } from "./views/fund.js";
 // 签到实时查询：刷新按钮要能主动拉最新余额，不能只重读那个早上 10 点的旧文件
 import { createCheckin } from "./views/ai-checkin.js";
+import { LYRIC_PALETTES } from "./theme.js";
 // 待办弹窗：卡片标题栏的「新增」按钮复用浮层那套表单，不另写简化版
 import { showTaskModal } from "./views/dashboard.js";
 import { esc, ymd, hhmm } from "./utils.js";
@@ -20,7 +21,7 @@ import {
   ICON_FUND, ICON_MUSIC, ICON_NOTES, ICON_GEAR,
   ICON_CHECK, ICON_PLAY, ICON_PAUSE, ICON_NEXT, ICON_PREV, ICON_CHEV, ICON_GRID,
   ICON_CREDIT, ICON_FOLDER, ICON_GLOBE, ICON_DOC, ICON_REFRESH, ICON_SPARK,
-  ICON_MUYU, ICON_MUYU_BIG, ICON_EXPAND, ICON_PLUS, ICON_KANBAN,
+  ICON_MUYU, ICON_MUYU_BIG, ICON_EXPAND, ICON_PLUS, ICON_KANBAN, ICON_BELL,
 } from "./icons.js";
 
 // -------------------- 卡片配置 --------------------
@@ -274,7 +275,7 @@ function sizeClass(id, span, row) {
 
 // 把手：纯 CSS 折角，不用 SVG（装饰性，不是图标）。
 function resizeHandleHTML() {
-  return `<span class="widget__resize" data-resize title="拖动改大小"></span>`;
+  return `<span class="widget__resize" data-resize aria-label="拖动改大小"></span>`;
 }
 
 function cardShell(cfg) {
@@ -283,7 +284,7 @@ function cardShell(cfg) {
   const icon = cfg.icon || moduleIcon(mod);
   const cls = sizeClass(cfg.id, cfg.span, cfg.row);
   if (cfg.kind === "mini") {
-    return `<button class="widget widget--1 ${cls}" data-card="${cfg.id}" data-module="${mod}" title="打开${esc(cfg.title)}">
+    return `<button class="widget widget--1 ${cls}" data-card="${cfg.id}" data-module="${mod}" aria-label="打开${esc(cfg.title)}">
       <span class="w-icon">${icon}</span>
       <span class="w-label">${esc(cfg.title)}</span>
       <span class="w-badge" data-badge hidden></span>
@@ -303,7 +304,7 @@ function cardShell(cfg) {
         <span class="widget__icon">${icon}</span>
         <span class="widget__name">${esc(cfg.title)}</span>
         <span class="widget__extra" data-extra></span>
-        <button class="widget__open" data-open="${mod}" title="打开${esc(cfg.title)}" aria-label="打开${esc(cfg.title)}">${ICON_EXPAND}</button>
+        <button class="widget__open" data-open="${mod}" aria-label="打开${esc(cfg.title)}">${ICON_EXPAND}</button>
       </div>
       <div class="widget__body widget__body--stars" data-body>${skeletonHTML()}</div>
       ${resizeHandleHTML()}
@@ -312,7 +313,7 @@ function cardShell(cfg) {
   // 电子木鱼：1 格宽，整卡可点（不设 data-open，避免点一下既敲又开浮层）。
   // 用 <button> 而不是 <section>：天然可聚焦、支持 Enter/Space，无障碍不用额外写。
   if (cfg.kind === "muyu") {
-    return `<button class="widget widget--muyu ${cls}" data-card="${cfg.id}" data-module="${mod}" title="敲一下，功德 +1">
+    return `<button class="widget widget--muyu ${cls}" data-card="${cfg.id}" data-module="${mod}" aria-label="敲一下，功德 +1">
       <div class="widget__title">
         <span class="widget__icon">${icon}</span>
         <span class="widget__name">${esc(cfg.title)}</span>
@@ -329,7 +330,7 @@ function cardShell(cfg) {
         <span class="widget__icon">${icon}</span>
         <span class="widget__name">${esc(cfg.title)}</span>
         <span class="widget__extra" data-extra></span>
-        <button class="widget__open" data-open="${mod}" title="打开${esc(cfg.title)}" aria-label="打开${esc(cfg.title)}">${ICON_EXPAND}</button>
+        <button class="widget__open" data-open="${mod}" aria-label="打开${esc(cfg.title)}">${ICON_EXPAND}</button>
       </div>
       <div class="widget__body" data-body>${skeletonHTML()}</div>
       ${resizeHandleHTML()}
@@ -340,7 +341,7 @@ function cardShell(cfg) {
       <span class="widget__icon">${icon}</span>
       <span class="widget__name">${esc(cfg.title)}</span>
       <span class="widget__extra" data-extra></span>
-      <button class="widget__open" data-open="${mod}" title="打开${esc(cfg.title)}" aria-label="打开${esc(cfg.title)}">${ICON_EXPAND}</button>
+      <button class="widget__open" data-open="${mod}" aria-label="打开${esc(cfg.title)}">${ICON_EXPAND}</button>
     </div>
     <div class="widget__body" data-body>${skeletonHTML()}</div>
     ${resizeHandleHTML()}
@@ -387,7 +388,7 @@ function taskRowHTML(t) {
   return `<div class="wt-row" data-task="${esc(t.id)}">
     <i class="wt-bar st-${esc(status)}" aria-hidden="true"></i>
     <button class="wt-check" data-toggle="${esc(t.id)}"
-      title="标记完成" aria-label="标记完成">${ICON_CHECK}</button>
+      aria-label="标记完成">${ICON_CHECK}</button>
     <span class="wt-pri ${priCls}">${pri}</span>
     <span class="wt-text">${esc(t.text || "")}</span>
     ${tags ? `<span class="wt-tags">${tags}</span>` : ""}
@@ -410,7 +411,7 @@ function renderTasksCard() {
   //   加号放最后才能贴右边缘，和邻卡的「展开」按钮对齐成一条竖线。
   if (extra) {
     extra.innerHTML = `<span class="w-pill">${st.done}/${st.total} 完成</span>
-      <button class="cr-refresh wt-add" data-task-add title="新增待办" aria-label="新增待办">${ICON_PLUS}</button>`;
+      <button class="cr-refresh wt-add" data-task-add aria-label="新增待办">${ICON_PLUS}</button>`;
     const addBtn = extra.querySelector("[data-task-add]");
     if (addBtn) {
       // ⛔ 必须 stopPropagation：整张卡是可点的（点卡开浮层），
@@ -485,6 +486,7 @@ function renderTasksCard() {
 }
 
 // 笔记：state.notes 按 updatedAt 降序取前 5 条
+// 最近笔记卡：干净的单行列表 —— 标题 + 日期，不加多余装饰。
 function renderNotesCard() {
   const el = cardEl("notes");
   if (!el) return;
@@ -543,12 +545,12 @@ function renderMusicCard() {
         <div class="wm-lyric" hidden></div>
       </div>
       <div class="wm-ctrl">
-        <button class="wm-btn" data-mc="prev" title="上一首">${ICON_PREV}</button>
-        <button class="wm-btn wm-btn--main" data-mc="toggle" title="播放/暂停">${pb.playing ? ICON_PAUSE : ICON_PLAY}</button>
-        <button class="wm-btn" data-mc="next" title="下一首">${ICON_NEXT}</button>
+        <button class="wm-btn" data-mc="prev" aria-label="上一首">${ICON_PREV}</button>
+        <button class="wm-btn wm-btn--main" data-mc="toggle" aria-label="播放/暂停">${pb.playing ? ICON_PAUSE : ICON_PLAY}</button>
+        <button class="wm-btn" data-mc="next" aria-label="下一首">${ICON_NEXT}</button>
       </div>
     </div>
-    <div class="wm-prog" title="${fmtTime(cur)} / ${dur > 0 ? fmtTime(dur) : "未知时长"}">
+    <div class="wm-prog" aria-label="${fmtTime(cur)} / ${dur > 0 ? fmtTime(dur) : '未知时长'}">
       <span class="wm-time">${fmtTime(cur)}</span>
       <div class="wm-track${dur > 0 ? "" : " wm-track--idle"}"><div class="wm-fill" style="transform:scaleX(${pct.toFixed(4)})"></div></div>
       <span class="wm-time wm-time--dur">${dur > 0 ? fmtTime(dur) : ""}</span>
@@ -564,6 +566,83 @@ function renderMusicCard() {
   });
   paintMusicTick({ currentTime: cur, duration: dur, playing: pb.playing, lyric: lastMusicLyric });
   bindMusicTick();
+}
+
+// 封面主色取色：给首页音乐卡的当前歌词行染上封面主色（color-thief 思路的轻量版）。
+// ⚠ artwork 有三种来源：本地文件 / 在线远程 URL / data URL。远程图若图源不带 CORS 头，
+//   画进 canvas 后 `getImageData` 会抛 SecurityError（tainted canvas）⇒ 必须防御：
+//   取不到就返回 null，调用方回落到 CSS 的主题强调色，绝不让歌词变透明或报错。
+// 缓存按 artwork 字符串存结果（含 null=取不到），因为 paintMusicTick 每秒跑多次，
+// 不缓存会反复 new Image + 采样，白烧 CPU。换歌（artwork 变）才重新取色。
+const lyricColorCache = new Map();
+let lyricColorArtwork = null; // 已取色（或在取）的封面，换歌才重新取
+
+function loadImage(src) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    // 远程图带 crossOrigin 才可能在 canvas 上取到像素；本地/data URL 不受影响。
+    if (!src.startsWith("data:")) img.crossOrigin = "anonymous";
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error("封面加载失败"));
+    img.src = src;
+  });
+}
+
+/// 从封面图提取一个「足够亮、看得清」的主色，返回 CSS 颜色串；取不到返回 null。
+async function lyricColorFromArtwork(artwork) {
+  if (!artwork || typeof artwork !== "string") return null;
+  if (lyricColorCache.has(artwork)) return lyricColorCache.get(artwork);
+  let color = null;
+  try {
+    const img = await loadImage(artwork);
+    // 缩到 24×24 采样就够算主色，避免大图逐像素遍历。
+    const N = 24;
+    const cv = document.createElement("canvas");
+    cv.width = N; cv.height = N;
+    const ctx = cv.getContext("2d", { willReadFrequently: true });
+    ctx.drawImage(img, 0, 0, N, N);
+    const data = ctx.getImageData(0, 0, N, N).data;
+    // 按 16 级量化 RGB 统计频次，取出现最多的桶的中心色（简化版主色）。
+    const buckets = new Map();
+    for (let i = 0; i < data.length; i += 4) {
+      if (data[i + 3] < 125) continue; // 跳过透明像素
+      const r = data[i], g = data[i + 1], b = data[i + 2];
+      const key = ((r >> 4) << 8) | ((g >> 4) << 4) | (b >> 4);
+      const cur = buckets.get(key);
+      if (cur) { cur.n++; cur.r += r; cur.g += g; cur.b += b; }
+      else buckets.set(key, { n: 1, r, g, b });
+    }
+    let best = null;
+    for (const v of buckets.values()) if (!best || v.n > best.n) best = v;
+    if (best) {
+      const [h, s, l] = rgbToHsl(best.r / best.n, best.g / best.n, best.b / best.n);
+      // 压到中等亮度 + 保底饱和度：太暗/太灰在卡片背景上看不清。
+      const L = Math.min(72, Math.max(55, l));
+      const S = Math.min(85, Math.max(45, s));
+      color = `hsl(${Math.round(h)} ${Math.round(S)}% ${Math.round(L)}%)`;
+    }
+  } catch {
+    color = null; // 跨域污染 / 加载失败 / 无 2d ctx ⇒ 回落主题色
+  }
+  lyricColorCache.set(artwork, color);
+  return color;
+}
+
+/// RGB(0-255) → [h(0-360), s%(0-100), l%(0-100)]
+function rgbToHsl(r, g, b) {
+  r /= 255; g /= 255; b /= 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  const l = (max + min) / 2;
+  let h = 0, s = 0;
+  if (max !== min) {
+    const d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    if (max === r) h = ((g - b) / d + (g < b ? 6 : 0));
+    else if (max === g) h = (b - r) / d + 2;
+    else h = (r - g) / d + 4;
+    h *= 60;
+  }
+  return [h, s * 100, l * 100];
 }
 
 // 高频重绘：只改已有节点，不重建。卡片不在页面上时直接跳过。
@@ -587,7 +666,7 @@ function paintMusicTick(t) {
   if (track) track.classList.toggle("wm-track--idle", dur <= 0);
   if (curEl) curEl.textContent = fmtTime(cur);
   if (durEl) durEl.textContent = dur > 0 ? fmtTime(dur) : "";
-  if (prog) prog.title = `${fmtTime(cur)} / ${dur > 0 ? fmtTime(dur) : "未知时长"}`;
+  if (prog) prog.setAttribute("aria-label", `${fmtTime(cur)} / ${dur > 0 ? fmtTime(dur) : "未知时长"}`);
 
   // 歌词：只显示「当前行」，上一行淡出在上方做上下文。没有歌词就整块收起，不占高度。
   if (lyricEl) {
@@ -605,10 +684,45 @@ function paintMusicTick(t) {
       if (prevLine) prevLine.textContent = ly.prev || "";
       lyricEl.hidden = false;
       musicLyricShown = true;
+      applyLyricLook(lyricEl);
     } else {
       lyricEl.hidden = true;
       musicLyricShown = false;
     }
+  }
+}
+
+// ── 首页音乐卡歌词配色（可配置，照桌面歌词 state.lyric.* 那套）──
+// 配置项（设置 → 音乐 → 歌词配色，落在 state.lyric.homePalette）：
+//   LYRIC_PALETTES 里的 id（落日晖/晴空/…）→ 取该色板主色 c1
+//   "cover" = 跟随封面主色（canvas 取色，取不到回落主题色）
+//   "off"   = 不染色（正文灰）
+// 字号/间距走 .wm-lyric CSS 变量默认值，不在此配置。
+// 每秒 tick 都调；封面取色按 artwork 缓存，开销可忽略。
+function applyLyricLook(lyricEl) {
+  const pal = state.lyric?.homePalette ?? "cover";
+  const curLine = lyricEl.querySelector(".wm-lyric-cur");
+  if (!curLine) return;
+
+  // off：拔掉 inline 颜色 → 回落 CSS 的正文灰（--text-dim）。
+  if (pal === "off") { curLine.style.color = ""; return; }
+  // 命名色板：取该色板主色 c1（落日晖=暖橙、晴空=天蓝…）。
+  if (pal !== "cover") {
+    const p = LYRIC_PALETTES.find((x) => x.id === pal);
+    curLine.style.color = p ? p.c1 : "";
+    return;
+  }
+  // cover：取封面主色，取不到回落主题色（远程图跨域污染时取不到，绝不透明）。
+  const artwork = state.playback?.song?.artwork || "";
+  if (artwork !== lyricColorArtwork) {
+    lyricColorArtwork = artwork;
+    lyricColorFromArtwork(artwork).then((c) => {
+      // 取色期间配置可能已切走（换模式/换歌），只在自己还是 cover 时上色
+      if ((state.lyric?.homePalette ?? "cover") !== "cover") return;
+      curLine.style.color = c || "var(--blue)";
+    }).catch(() => { curLine.style.color = "var(--blue)"; });
+  } else if (lyricColorCache.has(artwork)) {
+    curLine.style.color = lyricColorCache.get(artwork) || "var(--blue)";
   }
 }
 
@@ -619,22 +733,134 @@ function bindMusicTick() {
   Bus.on("music-progress", paintMusicTick);
 }
 
-// 定时任务：scheduler_status 给出 running / nextDue；卡片展示下一批到期任务
+// 定时任务：scheduler_status 给出 running / nextDue；卡片展示任务列表，
+// 标题栏 [data-extra] 显示「今日异常」警告（失败 / 漏跑 / 到点未跑），由 refreshSchedWarnings() 异步填充。
+// ⛔ 警告放标题栏（不占正文独立行）—— 正文只有约 89px，独立横幅会挤掉任务行。
+// 列表每行：圆点 + 任务名 + **下次运行时刻**（右侧，替代原来难读的裸 cron）。
+//   今天到期 → 「HH:MM」；非今天 → 「周X HH:MM」；无 cron / 没拉到 → 「—」。
+//   cron 原文降级为该行 title（悬停可看），不再占主视觉。
+const WD_CN = ["日", "一", "二", "三", "四", "五", "六"];
+function schedNextLabel(ms) {
+  if (typeof ms !== "number" || ms <= 0) return "—";
+  const d = new Date(ms);
+  const p = (n) => String(n).padStart(2, "0");
+  const hm = `${p(d.getHours())}:${p(d.getMinutes())}`;
+  const now = new Date();
+  const sameDay = d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+  return sameDay ? hm : `周${WD_CN[d.getDay()]} ${hm}`;
+}
 function renderSchedCard() {
   const el = cardEl("sched");
   if (!el) return;
   const body = el.querySelector("[data-body]");
   const extra = el.querySelector("[data-extra]");
   const tasks = (state.scheduler?.tasks || []).filter((t) => t.enabled !== false);
+  // extra 先给个基础态（启用数），refreshSchedWarnings 拉到数据后覆盖成警告胶囊（无异常则回落到此）
   if (extra) extra.textContent = tasks.length ? `${tasks.length} 个启用` : "";
   if (!tasks.length) { body.innerHTML = emptyHTML("暂无定时任务"); return; }
-  const rows = tasks.slice(0, 4).map((t) => `
+  const tk = todayKeyLocal();
+  // 全部启用任务都列出（正文 overflow-y:auto，超出滚动），每行用「状态点」标出今天跑了没跑。
+  // 状态取 heat 当天 last（最终结果）：success=已跑成 / failed=失败 / timeout=超时 / canceled=已停 /
+  // missed=漏跑 / 无记录=今天还没跑。颜色见 .sch-st-* CSS。
+  const rows = tasks.map((t) => {
+    const name = t.name || t.title || "未命名任务";
+    const agg = schedHeat?.[t.id]?.[tk];
+    const st = schedRunState(agg);
+    const next = schedNextLabel(schedNextDue[t.id]);
+    return `
     <div class="w-li">
-      <span class="w-li-dot"></span>
-      <span class="w-li-title">${esc(t.name || t.title || "未命名任务")}</span>
-      <span class="w-li-time">${esc(t.cron || t.schedule || "")}</span>
-    </div>`).join("");
+      <span class="w-li-dot sch-st-${st}"></span>
+      <span class="w-li-title">${esc(name)}</span>
+      <span class="w-li-time">${esc(next)}</span>
+    </div>`;
+  }).join("");
+  // ⛔ 保留 .w-list / .w-li / .w-li-dot / .w-li-title / .w-li-time：card 检查脚本依赖。
   body.innerHTML = `<div class="w-list">${rows}</div>`;
+  // 静态渲染完立刻刷一次警告（异步，不阻塞首帧）
+  refreshSchedWarnings();
+}
+
+// 今天该任务的运行状态 → 状态点 class 后缀 + 文案。依据 heat 当天 last（最终结果）。
+// 没拉到 heat（后端没起/首帧）→ pending（中性），拉到后心跳按 nextDue/heat 签名重画。
+function schedRunState(agg) {
+  if (!agg) return "pending";
+  return ({ success: "ok", failed: "bad", timeout: "warn", canceled: "stop", missed: "missed" })[agg.last] || "pending";
+}
+const ST_TEXT = {
+  ok: "已跑成", bad: "失败", warn: "超时",
+  stop: "已停止", missed: "漏跑", pending: "待运行",
+};
+
+// ── 今日异常警告：失败 / 漏跑 / 到点未跑 ─────────────────────────────────
+// 数据源：
+//   · scheduler_heat → daily[taskId]["YYYY-MM-DD"] = { ok, bad, warn, stop, missed, last }
+//     bad=失败，missed=到点没启动（漏跑），两者都算异常。
+//   · scheduler_status → nextDue[taskId] = 下次到期时间戳(ms)。
+//     若某启用任务的 nextDue 落在「今天且已过去」，但 heat 里该任务今天**零记录**，
+//     说明它到点了却还没跑（调度器没补跑/还没轮到）→ 也算异常「到点未跑」。
+// 轻量：两个 IPC 都不带 output，60s 刷一次开销可忽略。
+let schedWarnFetching = false;
+// 缓存 scheduler_status.nextDue（taskId → 下次到期 ms），供 renderSchedCard 显示「下次运行时刻」。
+// 列表重画时若还没拉到数据就先不显示时刻，refreshSchedWarnings 回填后下一轮心跳补上。
+let schedNextDue = {};
+// 缓存 scheduler_heat（taskId → { "YYYY-MM-DD": { ok,bad,warn,stop,missed,last } }），
+// 供 renderSchedCard 给每行画「跑了没跑」状态点（当天 last 状态）。
+let schedHeat = {};
+async function refreshSchedWarnings() {
+  const el = cardEl("sched");
+  const extraEl = el && el.querySelector("[data-extra]");
+  if (!extraEl) return;
+  const tasks = (state.scheduler?.tasks || []).filter((t) => t.enabled !== false);
+  // 无任务/拉取前：标题栏回落显示「N 个启用」
+  const base = () => { extraEl.textContent = tasks.length ? `${tasks.length} 个启用` : ""; };
+  if (!tasks.length) { base(); return; }
+  if (schedWarnFetching) return;
+  schedWarnFetching = true;
+  let heat = {}, nextDue = {};
+  try {
+    const [h, st] = await Promise.all([
+      invoke("scheduler_heat").catch(() => ({})),
+      invoke("scheduler_status", {}).catch(() => ({})),
+    ]);
+    if (h && typeof h === "object" && !Array.isArray(h)) heat = h;
+    if (st && typeof st === "object") nextDue = st.nextDue || {};
+    schedNextDue = nextDue; // 供列表显示「下次运行时刻」
+    schedHeat = heat;       // 供列表画「跑了没跑」状态点
+  } catch (_) { base(); return; } // 后端没起/浏览器态：回落「N 个启用」
+  finally { schedWarnFetching = false; }
+
+  const tk = todayKeyLocal();
+  const now = Date.now();
+  const dayStart = new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate()).getTime();
+  const bad = [], missed = [], pending = [];
+  for (const t of tasks) {
+    const agg = heat?.[t.id]?.[tk];
+    const hasRunToday = agg && (agg.ok || agg.bad || agg.warn || agg.stop || agg.missed);
+    if (agg && (agg.bad > 0)) { bad.push(t); continue; }
+    if (agg && (agg.missed > 0)) { missed.push(t); continue; }
+    // 到点未跑：nextDue 在「今天 00:00 ~ 现在」之间，且今天完全没跑过
+    const nd = nextDue[t.id];
+    if (!hasRunToday && typeof nd === "number" && nd > 0 && nd >= dayStart && nd <= now) pending.push(t);
+  }
+
+  // 无异常 → 回落「N 个启用」
+  if (!bad.length && !missed.length && !pending.length) { base(); return; }
+  // 有异常 → 标题栏 [data-extra] 显示内联警告胶囊（含启用数做前缀，保留总量信息）
+  const name = (t) => esc(t.name || t.title || "未命名任务");
+  const tip = [...bad, ...missed, ...pending].map(name).join("、");
+  const cnt = (n, cls, label) => `<span class="sw-item ${cls}" title="${label}：${n.map(name).join("、")}">${label}${n.length}</span>`;
+  const parts = [];
+  if (bad.length) parts.push(cnt(bad, "sw-bad", "失败"));
+  if (missed.length) parts.push(cnt(missed, "sw-missed", "漏跑"));
+  if (pending.length) parts.push(cnt(pending, "sw-pending", "到点未跑"));
+  extraEl.innerHTML = `<span class="sw-extra" title="今日异常：${tip}"><span class="sw-icon">${ICON_BELL}</span>${parts.join("")}</span>`;
+}
+
+// 本地日期 YYYY-MM-DD（不能用 toISOString，东八区凌晨会落到前一天）
+function todayKeyLocal() {
+  const x = new Date();
+  const p = (n) => String(n).padStart(2, "0");
+  return `${x.getFullYear()}-${p(x.getMonth() + 1)}-${p(x.getDate())}`;
 }
 
 // 快捷访问：state.quickAccess，点击直接 open_path。
@@ -645,7 +871,26 @@ function renderSchedCard() {
 // 用户不知道还剩多少，也避免第 16 格挤出滚动条。
 const QUICK_TYPE = { folder: "文件夹", url: "网址", file: "文件" };
 const QUICK_ICON = { folder: ICON_FOLDER, url: ICON_GLOBE, file: ICON_DOC };
-const QUICK_SLOTS = 15;
+
+// ── 快捷访问卡：按分组分块（2 列区块）────────────────────────────────────
+//
+// 旧版是「5 列 × 3 行 = 15 格」的一维网格，超出压成「还有 N 项」。
+// 三个问题（2026-11-10 实测，1280 视口下 quick 卡 828×150、正文区 794×89px）：
+//   ① 容量写死 15：本机 17 项，第 16/17 项看不见；
+//   ② 完全没用 qaGroups —— 用户在模块里分的组，卡片上毫无体现；
+//   ③ 条目等宽拉伸，「豆包」和「json格式化」一样宽，行内留白碎。
+//
+// 新版：**每组一个区块，区块排成 2 列**，块内条目 flex-wrap 自动换行。
+// 为什么是 2 列而不是「每组一整行」：实测后者每行只用掉 18~50% 宽度
+// （4 组各占一行，右侧全空）；2 列区块能把利用率提到 34~95%，同一高度
+// 装下更多、也更像「分块」。
+//
+// 容量随尺寸自然伸缩：1 行高约 20 项，放大到 2 行高约 40 项（旧版恒为 15）。
+//
+// ⛔ 保留 .qa-item / .qa-title / .qa-more 类名：tools/quick-check.mjs 依赖它们。
+
+/// 单组最多渲染多少项。超过折叠成 +N，避免一组膨胀到把别的组挤没。
+const QUICK_GROUP_MAX = 24;
 
 function renderQuickCard() {
   const el = cardEl("quick");
@@ -653,30 +898,61 @@ function renderQuickCard() {
   const body = el.querySelector("[data-body]");
   const extra = el.querySelector("[data-extra]");
   const items = state.quickAccess || [];
-  if (extra) extra.textContent = items.length ? `${items.length} 项` : "";
-  if (!items.length) { body.innerHTML = emptyHTML("还没有快捷项，去「快捷访问」加一个"); return; }
+  const groups = Array.isArray(state.qaGroups) ? state.qaGroups : [];
 
-  // 超过 15 项：前 14 项 + 1 个汇总格，正好铺满 5×3
-  const hasMore = items.length > QUICK_SLOTS;
-  const shown = hasMore ? items.slice(0, QUICK_SLOTS - 1) : items;
-  const rest = items.length - shown.length;
-  body.innerHTML = `<div class="qa-grid">${shown.map((q) => {
+  if (!items.length) {
+    if (extra) extra.textContent = "";
+    body.innerHTML = emptyHTML("还没有快捷项，去「快捷访问」加一个");
+    return;
+  }
+
+  // 按分组归集；顺序沿用 qaGroups（用户拖出来的顺序即显示顺序）。
+  // 没有 groupId 的老数据归到第一组，保证一条都不丢。
+  const firstGid = groups[0]?.id || "";
+  const buckets = groups
+    .map((g) => ({ g, list: items.filter((q) => (q.groupId || firstGid) === g.id) }))
+    .filter((b) => b.list.length);
+  // 兜底：qaGroups 为空 / 所有项都指向不存在的组 ⇒ 退化成单块平铺，
+  // 宁可少一层分组，也不能让卡片空白。
+  if (!buckets.length) buckets.push({ g: { id: "", name: "" }, list: items });
+
+  if (extra) {
+    extra.textContent = buckets.length > 1
+      ? `${items.length} 项 · ${buckets.length} 组`
+      : `${items.length} 项`;
+  }
+
+  const itemHTML = (q) => {
     const type = QUICK_TYPE[q.type] || "链接";
     const icon = QUICK_ICON[q.type] || ICON_GLOBE;
-    return `<button class="qa-item" data-qa="${esc(q.id)}" data-type="${esc(q.type || "")}" title="${esc(q.target || "")}">
+    return `<button class="qa-item" data-qa="${esc(q.id)}" data-type="${esc(q.type || "")}"
+      title="${esc(q.title || q.target || "未命名")} · ${esc(type)}"
+      aria-label="${esc(q.title || q.target || "未命名")}">
       <span class="qa-icon">${icon}</span>
-      <span class="qa-text">
-        <span class="qa-title">${esc(q.title || q.target || "未命名")}</span>
-        <span class="qa-sub">${esc(type)}</span>
-      </span>
+      <span class="qa-text"><span class="qa-title">${esc(q.title || q.target || "未命名")}</span></span>
     </button>`;
-  }).join("")}${rest > 0 ? `<button class="qa-item qa-more" data-more="1" title="还有 ${rest} 项，点开看全部">
-      <span class="qa-icon">${ICON_GRID}</span>
-      <span class="qa-text">
-        <span class="qa-title">还有 ${rest} 项</span>
-        <span class="qa-sub">点开看全部</span>
-      </span>
-    </button>` : ""}</div>`;
+  };
+
+  body.innerHTML = `<div class="qa-blocks">${buckets.map(({ g, list }) => {
+    const cap = list.length > QUICK_GROUP_MAX ? QUICK_GROUP_MAX - 1 : list.length;
+    const shown = list.slice(0, cap);
+    const rest = list.length - shown.length;
+    // 组名做成**行内标签**，与条目在同一行流里。
+    // ⛔ 不能给每组一个独立标题行：4 组就是 4 行标题，把正文区（89px）
+    //    挤掉一半，条目字号只能压到 9px —— 比设计规范下限 10px 还小。
+    //    实测改成行内后，17 项只用 2 行（47/89px），字号可回到 11~13px。
+    return `<span class="qa-blk">
+        <span class="qa-blk__tag" title="${esc(g.name || "全部")}（${list.length} 项）">
+          <span class="qa-blk__nm">${esc(g.name || "全部")}</span>
+        </span>${shown.map(itemHTML).join("")}${
+        rest > 0
+          ? `<button class="qa-item qa-more" data-more="1" aria-label="还有 ${rest} 项，点开看全部">
+              <span class="qa-icon">${ICON_GRID}</span>
+              <span class="qa-text"><span class="qa-title">+${rest}</span></span>
+            </button>`
+          : ""
+      }</span>`;
+  }).join("")}</div>`;
 
   body.querySelectorAll("[data-qa]").forEach((b) => {
     b.addEventListener("click", (e) => {
@@ -686,7 +962,7 @@ function renderQuickCard() {
       invoke("open_path", { target: q.target }).catch(() => toastQuiet("打开失败"));
     });
   });
-  // 「还有 N 项」不打开具体路径，而是直接进快捷访问模块看全部
+  // 「+N」不打开具体路径，而是直接进快捷访问模块看全部
   body.querySelectorAll("[data-more]").forEach((b) => {
     b.addEventListener("click", (e) => { e.stopPropagation(); openModule("quickaccess"); });
   });
@@ -1014,7 +1290,7 @@ function creditsCol(title, item) {
   const tip = item
     ? `${title}：${val} 积分\n${item.detail || note}${item.time ? `\n更新于 ${hhmm(new Date(item.time))}` : ""}`
     : `${title}：还没有签到记录`;
-  return `<div class="cr-col${cls}" title="${esc(tip)}">
+  return `<div class="cr-col${cls}" aria-label="${esc(tip.replace(/\n/g, " "))}">
     <div class="cr-head">
       <span class="cr-dot${item && item.signedToday ? " is-on" : ""}"></span>
       <span class="cr-name">${esc(title)}</span>
@@ -1033,7 +1309,7 @@ function renderCreditsCard() {
   // 右上角：读取时间 + 刷新按钮。签到是外部脚本写的文件，卡片不会自己知道文件变了，
   // 所以必须给一个手动入口 —— 否则只能等 60s TTL 过期，或者去 AI 面板里签到回来再看。
   if (extra) {
-    extra.innerHTML = `<button class="cr-refresh${creditsLoading ? " is-busy" : ""}" data-credits-refresh title="重新读取签到结果（签到后点这里）">${
+    extra.innerHTML = `<button class="cr-refresh${creditsLoading ? " is-busy" : ""}" data-credits-refresh aria-label="重新读取签到结果（签到后点这里）">${
       ICON_REFRESH
     }<span class="cr-refresh-label">${creditsLoading ? "读取中" : (c.at ? esc(hhmm(new Date(c.at))) : "刷新")}</span></button>`;
     const btn = extra.querySelector("[data-credits-refresh]");
@@ -1111,7 +1387,7 @@ function renderIdeasCard() {
     const op = (0.38 + (size - 10) / 11 * 0.5 + starRnd(i, 3) * 0.12).toFixed(2);
     return `<span class="idea-star" style="left:${x.toFixed(2)}%;top:${y.toFixed(2)}%;--s:${size.toFixed(1)}px;--h:${hue};--o:${op}">${ICON_SPARK}</span>`;
   }).join("");
-  body.innerHTML = `<div class="idea-sky" title="共 ${n} 条灵感">${stars}${
+  body.innerHTML = `<div class="idea-sky" aria-label="共 ${n} 条灵感">${stars}${
     rest > 0 ? `<span class="idea-star-more">+${rest}</span>` : ""
   }</div>`;
 }
@@ -1146,7 +1422,7 @@ function renderEmsCard() {
   if (extra) {
     const label = s?.error ? "抓取失败" : (at ? hhmm(new Date(at)) : "刷新");
     extra.innerHTML = `<button class="cr-refresh${s?.error ? " is-stale" : ""}" data-ems-refresh${
-      s?.error ? ` title="${esc(s.error)}"` : ' title="重新读取统计快照"'
+      s?.error ? ` aria-label="${esc(s.error)}"` : ' aria-label="重新读取统计快照"'
     }>${ICON_REFRESH}<span class="cr-refresh-label">${esc(label)}</span></button>`;
     const btn = extra.querySelector("[data-ems-refresh]");
     if (btn) {
@@ -1273,7 +1549,9 @@ function bindTaskbarSystem() {
     diskVal.parentElement?.parentElement?.setAttribute("data-ready", "1");
     // 高占用转警示色：和 CPU/内存保持同一套「越满越警示」的语义
     if (diskEl) diskEl.classList.toggle("warn", pct >= 85);
-    if (diskEl) diskEl.title = `磁盘占用 ${pct.toFixed(1)}%\n${parts.join("\n")}`;
+    // ⛔ 用 aria-label 而不是 title：用户明确要求底部栏不要原生 tooltip。
+    //    明细（各盘符占用）仍然保留在这里，供读屏与检查脚本读取。
+    if (diskEl) diskEl.setAttribute("aria-label", `磁盘占用 ${pct.toFixed(1)}%\n${parts.join("\n")}`);
   };
 
   Bus.on("provider-emit", ({ config_hash, output }) => {
@@ -1346,22 +1624,72 @@ function periphInputCounts(data) {
   const mList = Array.isArray(data?.mouseDevices) ? data.mouseDevices : [];
   const kList = Array.isArray(data?.keyboardDevices) ? data.keyboardDevices : [];
 
-  // 没有明细（旧数据 / dev mock）时无法过滤，直接用原始数量
+  // 没有明细（旧数据 / dev mock）时无法过滤，直接用原始数量。
+  // 明细为空 → 胶囊那边取不到电量，自然不画环（有线设备本来也没电量）。
   if (!mList.length && !kList.length) {
-    return { mouse: rawMouse, keyboard: rawKeyboard, ignoredCount: 0, hubCount: 0 };
+    return { mouse: rawMouse, keyboard: rawKeyboard, ignoredCount: 0, hubCount: 0, mouseReady: [], keyboardReady: [] };
   }
-  // 计入条件：没被忽略，且（不经扩展坞 或 用户手动计入过）
+  // 蓝牙设备：**按设备如实呈现**，不猜它是键盘还是鼠标。
+  //
+  // 为什么放弃判定主属性（2026-11-11 实测，这是本模块最绕的一处）：
+  //   本机同时连着两把蓝牙设备，它们的 HID 报告描述符**逐字段完全相同**：
+  //     MCHOSE G87 V2-1（键盘）  usage=0x06 Keyboard ×2 / usage=0x02 Mouse ×1
+  //     Professor 1（鼠标）      usage=0x06 Keyboard ×2 / usage=0x02 Mouse ×1
+  //   btnCaps / valCaps 也一样，类归属（Keyboard 类 + Mouse 类）也一样。
+  //   试过的三种判据都会在某台上翻车：
+  //     「键盘优先」→ 蓝牙鼠标被吞（用户反馈过）；
+  //     「鼠标优先」→ 蓝牙键盘被吞；
+  //     「按设备名关键词」→ "MCHOSE G87 V2-1" 里没有 keyboard 字样，判错。
+  //   所以不再猜。每台设备按 MAC 独立成条（Rust 侧已改为 bluetooth:<MAC>），
+  //   同时具备哪种能力就进哪个列表，两个列表都进也无妨 —— 它们 id 相同，
+  //   计数时按 id 去重，不会重复累加。
+  const isBt = (d) => !!d?.bluetooth;
   const count = (list) =>
-    list.filter((d) => !ignored.has(d?.id) && (!d?.viaHub || included.has(d?.id))).length;
+    list.filter((d) => {
+      if (ignored.has(d?.id)) return false;
+      if (d?.viaHub && !included.has(d?.id)) return false;
+      return true;
+    }).length;
   const hubOf = (list) =>
     list.filter((d) => !ignored.has(d?.id) && d?.viaHub && !included.has(d?.id)).length;
 
-  const m = count(mList);
-  const k = count(kList);
-  const ignoredCount = mList.filter((d) => ignored.has(d?.id)).length
-    + kList.filter((d) => ignored.has(d?.id)).length;
+  // ⛔ 按 **id 去重**而不是按列表长度：
+  //    同一台蓝牙设备会同时出现在 mouseDevices 与 keyboardDevices 里（同一条、同 id），
+  //    len() 会把它数两遍（实测变「鼠标 2 / 键盘 2」，而桌上只有两台设备）。
+  const uniqBy = (list) => {
+    const seen = new Set();
+    return list.filter((d) => {
+      const id = d?.id;
+      if (!id) return true;
+      if (seen.has(id)) return false;
+      seen.add(id);
+      return true;
+    });
+  };
+  const mListU = uniqBy(mList.filter((d) => !ignored.has(d?.id) && (!d?.viaHub || included.has(d?.id))));
+  const kListU = uniqBy(kList.filter((d) => !ignored.has(d?.id) && (!d?.viaHub || included.has(d?.id))));
+  const m = mListU.length;
+  const k = kListU.length;
+
+  // 忽略数只按设备算一次（同一台蓝牙设备在两个列表里是重复的）
+  const ignoredIds = new Set();
+  for (const d of [...mList, ...kList]) {
+    if (d?.id && ignored.has(d.id)) ignoredIds.add(d.id);
+  }
   const hubCount = hubOf(mList) + hubOf(kList);
-  return { mouse: m, keyboard: k, ignoredCount, hubCount };
+  // btDevices：蓝牙设备去重后的完整清单，供浮层「按设备列一条」渲染
+  const btMap = new Map();
+  for (const d of [...mList, ...kList]) {
+    if (isBt(d) && d?.id && !btMap.has(d.id)) btMap.set(d.id, d);
+  }
+  // 胶囊要按类取「最低电量」的设备，所以把**过滤后**的明细也带出去。
+  // 注意是过滤后的列表（mListU/kListU），不能返回原始列表 ——
+  // 否则被忽略/经扩展坞排除的设备会参与取最低值，环显示一台它压根没计入的设备。
+  return {
+    mouse: m, keyboard: k, ignoredCount: ignoredIds.size, hubCount,
+    btDevices: [...btMap.values()],
+    mouseReady: mListU, keyboardReady: kListU,
+  };
 }
 
 function paintPeriph(data) {
@@ -1370,29 +1698,75 @@ function paintPeriph(data) {
   if (!pill) return;
 
   const slots = periphSlots(periphData.audio);
-  const { mouse, keyboard, hubCount } = periphInputCounts(periphData);
+  const { mouse, keyboard, hubCount, mouseReady, keyboardReady } = periphInputCounts(periphData);
 
   const setSlot = (kind, on) => {
     const el = pill.querySelector(`.pi[data-kind="${kind}"]`);
     if (!el) return;
     el.dataset.on = on ? "1" : "0";
   };
+  // 电量：取该类设备里**电量最低**的那台（用户选择）。
+  // 理由：这是一圈告警性质的指示 —— 哪台快没电就先看见哪台；
+  // 取平均会掩盖「某台只剩 8%」，取第一台则取决于列表顺序（不稳定）。
+  // 拿不到电量（null）就**不画环**，不能当成 0% —— 有线设备本就没有电池。
+  // 返回 { pct, name }：环只画百分比，但提示里要能说清是哪台设备的电量。
+  const lowest = (list) => {
+    let best = null;
+    for (const d of Array.isArray(list) ? list : []) {
+      const b = d?.battery;
+      if (typeof b !== "number" || !Number.isFinite(b)) continue;
+      if (best == null || b < best.pct) best = { pct: b, name: d?.name || d?.type || "" };
+    }
+    return best;
+  };
+  const battLevel = (p) => (p <= 10 ? "crit" : p <= 20 ? "low" : p <= 50 ? "mid" : "hi");
+
+  const setBatt = (kind, info) => {
+    const el = pill.querySelector(`.pi[data-kind="${kind}"]`);
+    if (!el) return;
+    if (info == null) {
+      // 没有电量：撤掉环，回到原样（不能留一个灰环冒充 0%）
+      el.removeAttribute("data-batt");
+      el.removeAttribute("data-lv");
+      el.style.removeProperty("--p");
+      return;
+    }
+    const p = Math.max(0, Math.min(100, Math.round(info.pct)));
+    el.dataset.batt = "1";
+    el.dataset.lv = battLevel(p);
+    el.style.setProperty("--p", String(p));
+  };
+
   setSlot("headphone", !!slots.headphone);
   setSlot("mouse", mouse > 0);
   setSlot("keyboard", keyboard > 0);
 
+  // 耳机槽只有一台（音频端点里第一个 headphone/headset）
+  const hBatt = lowest([slots.headphone]);
+  const mBatt = lowest(mouseReady);
+  const kBatt = lowest(keyboardReady);
+  setBatt("headphone", hBatt);
+  setBatt("mouse", mBatt);
+  setBatt("keyboard", kBatt);
+
   pill.dataset.ready = "1";
 
-  // 悬停提示：没连时说"未连接"，连了就给设备名/数量
-  const hpTip = slots.headphone ? `耳机：${slots.headphone.name || slots.headphone.type}` : "耳机：未连接";
+  // 悬停提示：没连时说"未连接"，连了就给设备名/数量，有电量再补「xx%」。
+  // 环只表达大概程度，具体数字在这里给（读屏可读，不弹原生 tooltip）。
+  const withBatt = (base, info) => (info ? `${base} · 电量 ${Math.round(info.pct)}%` : base);
+  const hpTip = slots.headphone
+    ? withBatt(`耳机：${slots.headphone.name || slots.headphone.type}`, hBatt)
+    : "耳机：未连接";
   const tips = [
     hpTip,
-    `鼠标：${mouse > 0 ? `已连接 ${mouse} 个` : "未连接"}`,
-    `键盘：${keyboard > 0 ? `已连接 ${keyboard} 个` : "未连接"}`,
+    withBatt(`鼠标：${mouse > 0 ? `已连接 ${mouse} 个` : "未连接"}`, mBatt),
+    withBatt(`键盘：${keyboard > 0 ? `已连接 ${keyboard} 个` : "未连接"}`, kBatt),
   ];
   // 有经扩展坞的设备未计入时，提示里说清楚，避免用户以为漏检
   if (hubCount > 0) tips.push(`（另有 ${hubCount} 个经扩展坞的设备未计入）`);
-  pill.title = tips.join("\n") + "\n\n点击查看详情";
+  // ⛔ 用 aria-label 而不是 title：用户明确要求底部栏不要原生 tooltip。
+  //    设备明细仍然保留在这里（读屏 + 检查脚本用），可见详情走点击后的 #periph-pop。
+  pill.setAttribute("aria-label", tips.join("\n"));
 
   // 浮层开着时同步刷新内容（否则展开后要等 3 秒才有数据）
   if (periphPopOpen) renderPeriphPop();
@@ -1432,6 +1806,7 @@ function renderPeriphPop() {
 
   // ignoreId 存在时渲染「忽略」按钮（仅输入设备有）；
   // includeId 存在时渲染「计入」按钮（经扩展坞、默认不计入的设备）
+  // ⛔ 这里**不显示电量**：电量环在首页胶囊上（#tb-periph），浮层只管设备明细。
   const row = (kind, name, meta, stateText, on, ignoreId, includeId) => `
     <div class="periph-row${on ? " is-on" : ""}">
       <span class="periph-row__icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${icon(kind)}</svg></span>
@@ -1440,19 +1815,25 @@ function renderPeriphPop() {
         <div class="periph-row__meta">${esc(meta)}</div>
       </div>
       <span class="periph-row__state${on ? "" : " is-off"}">${esc(stateText)}</span>
-      ${ignoreId ? `<button class="periph-row__ignore" data-ignore="${esc(ignoreId)}" title="以后不再计入这个设备">忽略</button>` : ""}
-      ${includeId ? `<button class="periph-row__ignore periph-row__include" data-include="${esc(includeId)}" title="这个确实是真实设备，计入它">计入</button>` : ""}
+      ${ignoreId ? `<button class="periph-row__ignore" data-ignore="${esc(ignoreId)}" aria-label="以后不再计入这个设备">忽略</button>` : ""}
+      ${includeId ? `<button class="periph-row__ignore periph-row__include" data-include="${esc(includeId)}" aria-label="这个确实是真实设备，计入它">计入</button>` : ""}
     </div>`;
 
   const parts = [];
 
   // 音频：逐个列（耳机/扬声器/麦克风都有真实名字）
   for (const a of outs) {
-    parts.push(row(a.kind || "speaker", a.name || a.type || "音频设备", `${a.type || "音频"} · 输出`, "已连接", true));
+    parts.push(row(
+      a.kind || "speaker", a.name || a.type || "音频设备",
+      `${a.type || "音频"} · 输出`, "已连接", true, "", "",
+    ));
   }
   for (const a of ins) {
     // 麦克风：有端点就算存在，但未必被应用启用 —— 标"可用"而非"已连接"更准确
-    parts.push(row(a.kind || "microphone", a.name || a.type || "麦克风", `${a.type || "麦克风"} · 输入`, "可用", true));
+    parts.push(row(
+      a.kind || "microphone", a.name || a.type || "麦克风",
+      `${a.type || "麦克风"} · 输入`, "可用", true, "", "",
+    ));
   }
   if (!outs.length && !ins.length) {
     parts.push(`<div class="periph-empty">未检测到音频设备</div>`);
@@ -1469,6 +1850,13 @@ function renderPeriphPop() {
 
   const devRows = (kind, devs, label) => {
     if (!devs.length) {
+      // ⛔ 不要因为「这个类目下没有有线设备」就写「未接入」：
+      //    蓝牙设备已经单独列在下面了，它同样提供该能力。
+      //    此时再标一个「鼠标 未连接」会和下面「Professor 1 已连接」自相矛盾。
+      const btProvides = [...mDevs, ...kDevs].some(
+        (d) => d?.bluetooth && (kind === "mouse" ? d?.hasMouse : d?.hasKeyboard),
+      );
+      if (btProvides) return; // 由下面的蓝牙条目代表，不重复占一行
       parts.push(row(kind, label, "未接入", "未连接", false));
       return;
     }
@@ -1491,17 +1879,54 @@ function renderPeriphPop() {
       } else {
         // 没有 VID/PID 的设备不给忽略按钮：忽略了会退化成 ":" 把所有同类都屏蔽
         const canIgnore = !!(d?.vid && d?.pid && d?.id);
-        parts.push(row(kind, label, `${vidPid} · ${src}`, "已连接", true, canIgnore ? d.id : ""));
+        // 蓝牙设备用真实型号名（Rust 侧取到上游节点的 FriendlyName，
+        // 实测 "MCHOSE G87 V2-1"）；取不到再回退到通用标签
+        const name = isBt && d?.name ? `${d.name}（${label}）` : label;
+        parts.push(row(kind, name, `${vidPid} · ${src}`, "已连接", true, canIgnore ? d.id : ""));
       }
     }
   };
-  devRows("mouse", mDevs, "鼠标");
-  devRows("keyboard", kDevs, "键盘");
+  // 蓝牙设备**单独按设备列**，不塞进「鼠标 / 键盘」两个列表里各列一遍。
+  //
+  // 原因：同一台蓝牙设备的 HID 描述符同时声明键鼠能力（实测两台的描述符
+  // 逐字段相同），塞进两个列表就会在浮层里出现两行同名设备，用户会以为
+  // 插了两台。按设备列一条、在副标题里写明它具备哪些能力，才是如实的。
+  const btSeen = new Set();
+  const btDevs = [];
+  for (const d of [...mDevs, ...kDevs]) {
+    if (d?.bluetooth && d?.id && !btSeen.has(d.id)) {
+      btSeen.add(d.id);
+      btDevs.push(d);
+    }
+  }
+  // 非蓝牙设备仍按原来的鼠标 / 键盘分列
+  devRows("mouse", mDevs.filter((d) => !d?.bluetooth), "鼠标");
+  devRows("keyboard", kDevs.filter((d) => !d?.bluetooth), "键盘");
+
+  // 蓝牙设备逐台一条
+  for (const d of btDevs) {
+    const isIgnored = ignored.has(d?.id);
+    const name = d?.name || "蓝牙设备";
+    const caps = [];
+    if (d?.hasKeyboard) caps.push("键盘");
+    if (d?.hasMouse) caps.push("鼠标");
+    const meta = `蓝牙连接${caps.length ? " · 支持" + caps.join("+") : ""}`;
+    // 电量不在这里画：首页胶囊的图标外圈才是电量环，浮层只列设备明细。
+    const stateText = "已连接";
+    // 图标按**这台设备实际具备的能力**取，不能一律画键盘：
+    // 只有鼠标能力的设备（实测 MX Master 3S）画成键盘图标是错的。
+    const kind = d?.hasMouse && !d?.hasKeyboard ? "mouse" : "keyboard";
+    if (isIgnored) {
+      parts.push(row(kind, `${name}（已忽略）`, `${meta} · 不计入`, "已忽略", false));
+    } else {
+      parts.push(row(kind, name, meta, stateText, true, d?.id || "", ""));
+    }
+  }
 
   // 有输入设备时给一句说明：为什么这里会出现「没插却显示已连接」的设备。
   // 这不是 bug，是扩展坞/接收器的 HID 芯片在冒充键鼠 —— 让用户知道能用「忽略」处理。
   if (mDevs.length || kDevs.length) {
-    parts.push(`<div class="periph-tip">经扩展坞的设备默认不计入（其 HID 芯片常冒充键鼠）。真把键鼠插扩展坞上时，点「计入」恢复。</div>`);
+    parts.push(`<div class="periph-tip">经扩展坞的设备默认不计入（其 HID 芯片常冒充键鼠）。真把键鼠插扩展坞上时，点「计入」恢复。蓝牙设备按台列出并标注其支持的能力。</div>`);
   }
 
   // 有被忽略的设备时，底部给一个恢复入口
@@ -1661,6 +2086,7 @@ function bindTaskbarInset() {
 // 「今日盈利」已移除 —— 底部栏只留指数走势，盈亏明细进基金管家浮层看。
 function bindTaskbarFund() {
   const idxEl = document.getElementById("tb-fund-idx");
+  const deltaEl = document.getElementById("tb-fund-delta");
   const chgEl = document.getElementById("tb-fund-chg");
   const paint = (valEl, v, suffix = "", isPct = false) => {
     if (!valEl) return;
@@ -1680,6 +2106,8 @@ function bindTaskbarFund() {
     try { await fetchIndexQuotes(); } catch (_) { /* 失败保留上一帧，不弹错 */ }
     finally { fetching = false; }
   };
+  // 涨跌额和涨跌幅都不该显示涨跌色时，把 .up/.down 摘掉（回到中性灰）。
+  const neutral = (el) => { if (el) { el.classList.remove("up", "down"); } };
   const refresh = () => {
     // 指数：读模块级缓存（fetchIndexQuotes 写入 state.fund.cache.index.idx）
     const cache = state.fund?.cache?.index;
@@ -1687,8 +2115,18 @@ function bindTaskbarFund() {
     const list = rec && rec.data ? rec.data : null;
     if (list && list.length) {
       const sh = list.find((x) => /上证/.test(String(x.name || ""))) || list[0];
+      // 点位：无数据回退「--」，并清掉涨跌色
       if (idxEl) idxEl.textContent = sh.price ? sh.price.toFixed(2) : "--";
-      if (chgEl && sh.pct !== null && sh.pct !== undefined) paint(chgEl, Number(sh.pct), "", true);
+      // 涨跌额（点数变化）：数量维度，和百分比并列展示
+      if (deltaEl) {
+        if (sh.chg !== null && sh.chg !== undefined && sh.price) paint(deltaEl, Number(sh.chg), "", false);
+        else { deltaEl.textContent = "--"; neutral(deltaEl); }
+      }
+      // 涨跌幅：百分比维度
+      if (chgEl) {
+        if (sh.pct !== null && sh.pct !== undefined && sh.price) paint(chgEl, Number(sh.pct), "", true);
+        else { chgEl.textContent = "--"; neutral(chgEl); }
+      }
     }
   };
   pullIndex();
@@ -2010,8 +2448,23 @@ export function initWorkspace() {
       const pb = state.playback || {};
       return `${pb.playing}|${pb.song?.title || ""}|${pb.song?.artist || ""}|${pb.song?.artwork || ""}|${Math.round(pb.duration || 0)}`;
     }, renderMusicCard);
-    watch("sched", () => (state.scheduler?.tasks || []).map((t) => `${t.id}:${t.enabled}:${t.name}`).join("|"), renderSchedCard);
-    watch("quick", () => (state.quickAccess || []).map((q) => `${q.id}:${q.title}`).join("|"), renderQuickCard);
+    // 定时任务卡：签名除任务列表外还要含 nextDue（下次到期时刻）——
+    // 否则 refreshSchedWarnings 首次拉到 nextDue 后列表不重画，时刻会一直停在「—」。
+    // 定时任务卡：签名 = 任务列表 + nextDue（下次时刻）+ 今天各任务运行状态（heat.last）。
+    // ⛔ 必须含运行状态：任务跑完/到点后 heat.last 变了，签名不变就不会重画，状态点会卡旧的。
+    watch("sched", () => (state.scheduler?.tasks || []).map((t) => {
+      const agg = schedHeat?.[t.id]?.[todayKeyLocal()];
+      return `${t.id}:${t.enabled}:${t.name}:${agg?.last || "-"}:${schedNextDue[t.id] || "-"}`;
+    }).join("|"), renderSchedCard);
+    // 快捷访问：签名必须含**分组**信息。
+    // 卡片按 qaGroups 分块渲染，只盯 quickAccess 的话，用户改组名 / 把条目挪组
+    // 都不会触发重画（列表字段一个没变），卡片会一直显示旧分组。
+    watch(
+      "quick",
+      () => (state.quickAccess || []).map((q) => `${q.id}:${q.title}:${q.groupId || ""}`).join("|")
+        + "#" + (state.qaGroups || []).map((g) => `${g.id}:${g.name}`).join("|"),
+      renderQuickCard,
+    );
     // 木鱼：签名用 total + 今日日期。跨天时 date 变 → 今日数归零并重画。
     // 不用把 today 放进签名：今天数变了必然 total 也变了，total 已经覆盖。
     watch("muyu", () => `${state.muyu?.total ?? 0}|${state.muyu?.date ?? ""}`, renderMuyuCard);
@@ -2039,4 +2492,13 @@ export function initWorkspace() {
 
   // 系统采样：首页任务栏要指标，所以常开（离开系统健康页也不停，任务栏还在用）
   invoke("start_system_sampling").catch(() => {});
+
+  // 定时任务「今日异常」警告：运行结果由后端推进（跑完/漏跑/到点），
+  // 不体现在 state.scheduler.tasks 签名里，心跳不会触发 → 独立 60s 轮询刷新。
+  // 轻量：scheduler_status + scheduler_heat 都不带 output，开销可忽略。
+  setInterval(() => {
+    if (document.hidden) return;               // 页面不可见跳过，回到前台下一轮补
+    if (isModuleOpen()) return;                // 浮层打开时不刷首页卡（省 IPC）
+    refreshSchedWarnings();
+  }, 60000);
 }

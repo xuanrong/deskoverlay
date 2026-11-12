@@ -64,7 +64,7 @@ function buildOverlay() {
   ov.className = "lock-overlay";
   ov.innerHTML = `
     <canvas class="lock-fb-sky"></canvas>
-    <div class="lock-fb-sun" role="button" aria-label="解锁" title="解锁"></div>
+    <div class="lock-fb-sun" role="button" aria-label="解锁"></div>
     <div class="lock-fb-hint">
       <h1>离开一会儿，马上回来</h1>
     </div>`;

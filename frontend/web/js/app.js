@@ -14,8 +14,9 @@ import { initEyeCare } from "./eyeCare.js";
 import { initEyeCareCapsule } from "./eyeCareCapsule.js";
 import { Theme } from "./theme.js";
 import { toast } from "./toast.js";
-import { pillFor, lunarText, lunarShort, getDayEvents, holidayOf, workdayOf } from "./festivals.js";
+import { pillFor, lunarText, lunarShort, getDayEvents, holidayOf, workdayOf, setLegalOverride, fetchLegalYear } from "./festivals.js";
 import { initWorkspace, openModule, setQuietToast, toggleEditMode } from "./workspace.js";
+import { esc } from "./utils.js";
 
 // -------------------- 启动 Provider --------------------
 Providers.startAll();
@@ -26,6 +27,10 @@ const mcDate = document.getElementById("mc-date");
 const mcFest = document.getElementById("mc-fest");
 
 // 节日/节气/假期药丸：仅当天信息变化时更新；点击弹出详情面板
+// 启动时恢复用户自定义的法定假期覆盖层（state.settings.legalOverride），
+// 让「更新节假日」粘贴的年度安排在重启后依然生效。
+setLegalOverride(state.settings?.legalOverride || null);
+
 function refreshFestival() {
   if (!mcFest) return;
   const p = pillFor(new Date());
@@ -33,7 +38,7 @@ function refreshFestival() {
     mcFest.dataset.key = p.text;
     mcFest.textContent = p.text;
     mcFest.className = ("mc-fest " + (p.cls || "")).trim();
-    mcFest.title = p.tip || "";
+    mcFest.setAttribute("aria-label", p.tip || "");
     mcFest.hidden = !p.text;
   }
 }
@@ -52,9 +57,9 @@ function showFestivalPanel() {
   ov.innerHTML = `
     <div class="task-modal festival-modal">
       <h3 class="cal-head">
-        <button class="cal-nav" id="cal-prev" title="上个月">‹</button>
+        <button class="cal-nav" id="cal-prev" aria-label="上个月">‹</button>
         <span id="cal-title"></span>
-        <button class="cal-nav" id="cal-next" title="下个月">›</button>
+        <button class="cal-nav" id="cal-next" aria-label="下个月">›</button>
       </h3>
       <div class="cal-week">${["日", "一", "二", "三", "四", "五", "六"].map((w) => `<span>${w}</span>`).join("")}</div>
       <div class="cal-grid" id="cal-grid"></div>
@@ -64,7 +69,10 @@ function showFestivalPanel() {
         <span><i class="lg-dot lg-fest"></i>节日</span>
         <span><i class="lg-dot lg-term"></i>节气</span>
       </div>
-      <div class="tm-actions"><button class="btn-primary cm-ok">关闭</button></div>
+      <div class="tm-actions">
+        <button class="btn-ghost" id="cal-upd-hol">更新节假日</button>
+        <button class="btn-primary cm-ok">关闭</button>
+      </div>
     </div>`;
   document.body.appendChild(ov);
   const draw = () => {
@@ -100,11 +108,107 @@ function showFestivalPanel() {
   };
   ov.querySelector("#cal-prev").addEventListener("click", () => { festView = new Date(festView.getFullYear(), festView.getMonth() - 1, 1); draw(); });
   ov.querySelector("#cal-next").addEventListener("click", () => { festView = new Date(festView.getFullYear(), festView.getMonth() + 1, 1); draw(); });
+  ov.querySelector("#cal-upd-hol").addEventListener("click", () => openHolidayEditor(() => draw()));
   const close = () => { ov.remove(); festPanelEl = null; };
   ov.querySelector(".cm-ok").addEventListener("click", close);
   ov.addEventListener("click", (e) => { if (e.target === ov) close(); });
   ov.addEventListener("keydown", (e) => { if (e.key === "Escape") close(); });
   draw();
+}
+
+// 更新节假日：弹出 JSON 编辑框，用户粘贴国务院年度安排（与内置 LEGAL 表同结构）。
+// 保存到 state.settings.legalOverride 并立即生效（setLegalOverride 清缓存重算）。
+// 无网络依赖 —— 每年 11 月新安排公布后，从中国政府网复制对应 JSON 粘进来即可。
+function openHolidayEditor(onSaved) {
+  const cur = state.settings?.legalOverride || {};
+  const ov = document.createElement("div");
+  ov.className = "task-modal-overlay";
+  const sampleYear = new Date().getFullYear() + 1;
+  ov.innerHTML = `
+    <div class="task-modal holiday-editor">
+      <h3>更新法定节假日</h3>
+      <div class="he-fetch">
+        <span class="he-fetch-label">联网获取</span>
+        <input type="number" id="he-year" min="2000" max="2100" value="${new Date().getFullYear() + 1}" />
+        <button class="btn-primary he-fetch-btn" id="he-fetch">拉取</button>
+        <span class="he-fetch-status" id="he-fetch-status">输入年份点「拉取」，自动填充下方 JSON，再保存</span>
+      </div>
+      <div class="he-tip">
+        数据源 timor.tech（国务院年度安排，含调休补班）。拉取后可再手动微调下方 JSON，点保存生效（覆盖同年内置表；留空 <code>{}</code> = 用内置表）。
+      </div>
+      <textarea id="he-json" spellcheck="false" placeholder='点上方「拉取」自动填充；或手动粘贴：\n{\n  "${sampleYear}": [\n    { "name": "元旦", "start": [1,1], "end": [1,1], "workdays": [] }\n  ]\n}'>${esc(JSON.stringify(cur, null, 2))}</textarea>
+      <div class="he-err" id="he-err"></div>
+      <div class="tm-actions">
+        <button class="btn-ghost he-clear">清空（用内置表）</button>
+        <button class="btn-ghost he-cancel">取消</button>
+        <button class="btn-primary he-save">保存</button>
+      </div>
+    </div>`;
+  document.body.appendChild(ov);
+  const ta = ov.querySelector("#he-json");
+  const errEl = ov.querySelector("#he-err");
+  const yearEl = ov.querySelector("#he-year");
+  const fetchStatus = ov.querySelector("#he-fetch-status");
+  const shut = () => ov.remove();
+  // 联网获取：拉取 → 填充 JSON（不自动保存，让用户确认后再点保存）
+  ov.querySelector("#he-fetch").addEventListener("click", async () => {
+    const y = Math.round(+yearEl.value);
+    if (!y) { errEl.textContent = "请输入有效年份。"; return; }
+    const btn = ov.querySelector("#he-fetch");
+    btn.disabled = true;
+    fetchStatus.textContent = "拉取中…";
+    errEl.textContent = "";
+    try {
+      const data = await fetchLegalYear(y);
+      // 合并进当前 JSON（覆盖该年，保留其他年）
+      let merged = {};
+      try { merged = JSON.parse(ta.value) || {}; } catch (_) { merged = {}; }
+      merged[y] = data[y];
+      ta.value = JSON.stringify(merged, null, 2);
+      const cnt = data[y].length;
+      fetchStatus.textContent = `已获取 ${y} 年 ${cnt} 段假期，点「保存」生效`;
+    } catch (e) {
+      fetchStatus.textContent = "拉取失败";
+      errEl.textContent = "联网失败：" + (typeof e === "string" ? e : e.message || String(e)) + "（可检查网络，或手动粘贴 JSON）";
+    } finally {
+      btn.disabled = false;
+    }
+  });
+  ov.querySelector(".he-cancel").addEventListener("click", shut);
+  ov.querySelector(".he-clear").addEventListener("click", () => {
+    ta.value = "{}";
+    errEl.textContent = "";
+  });
+  ov.querySelector(".he-save").addEventListener("click", () => {
+    const txt = ta.value.trim();
+    if (!txt) { errEl.textContent = "内容为空，请粘贴 JSON 或点「清空」。"; return; }
+    let obj;
+    try { obj = JSON.parse(txt); }
+    catch (e) { errEl.textContent = "JSON 解析失败：" + e.message; return; }
+    if (typeof obj !== "object" || obj === null || Array.isArray(obj)) {
+      errEl.textContent = "顶层必须是对象 { 年份: [...] }。"; return;
+    }
+    // 轻校验：每个年份是数组，每项有 name/start/end
+    for (const [y, list] of Object.entries(obj)) {
+      if (!/^\d{4}$/.test(y) || !Array.isArray(list)) {
+        errEl.textContent = `键「${y}」应为 4 位年份，值应为数组。`; return;
+      }
+      for (const h of list) {
+        if (!h || typeof h.name !== "string" || !Array.isArray(h.start) || !Array.isArray(h.end)) {
+          errEl.textContent = `${y} 年有一条缺少 name / start / end。`; return;
+        }
+      }
+    }
+    if (!state.settings) state.settings = {};
+    state.settings.legalOverride = obj;
+    setLegalOverride(obj);
+    saveState();
+    toast("节假日已更新");
+    shut();
+    if (typeof onSaved === "function") onSaved();
+  });
+  ov.addEventListener("click", (e) => { if (e.target === ov) shut(); });
+  setTimeout(() => { ov.addEventListener("keydown", (e) => { if (e.key === "Escape") shut(); }); ta.focus(); }, 0);
 }
 
 Bus.on("provider-emit", ({ config_hash, output }) => {

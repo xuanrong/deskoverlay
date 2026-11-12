@@ -192,9 +192,9 @@ function setLocked(v) {
 function syncLockBtn() {
   if (!btnLock) return;
   btnLock.textContent = locked ? "解锁" : "锁定";
-  btnLock.title = locked
+  btnLock.setAttribute("aria-label", locked
     ? "解锁：鼠标可操作歌词条（保持解锁，不自动锁回）"
-    : "锁定：穿透鼠标，可点到底下的窗口/图标";
+    : "锁定：穿透鼠标，可点到底下的窗口/图标");
   // 常驻解锁时高亮，一眼看出「现在不会被自动锁回」
   btnLock.classList.toggle("active", !locked && sticky);
 }

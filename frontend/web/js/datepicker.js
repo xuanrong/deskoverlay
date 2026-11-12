@@ -80,9 +80,9 @@ export function createDatePicker({ el, value = "", onChange = null }) {
       }
       pop.innerHTML = `
         <div class="dp-pop-head">
-          <button type="button" class="dp-nav" data-nav="-1" title="上个月">${ICON_PREV}</button>
+          <button type="button" class="dp-nav" data-nav="-1" aria-label="上个月">${ICON_PREV}</button>
           <span class="dp-pop-title">${viewY}年${viewM + 1}月</span>
-          <button type="button" class="dp-nav" data-nav="1" title="下个月">${ICON_NEXT}</button>
+          <button type="button" class="dp-nav" data-nav="1" aria-label="下个月">${ICON_NEXT}</button>
         </div>
         <div class="dp-week">${WEEK.map((w) => `<span>${w}</span>`).join("")}</div>
         <div class="dp-grid">${cells.join("")}</div>

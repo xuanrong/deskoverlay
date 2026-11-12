@@ -65,6 +65,186 @@ function fmtDuration(ms) {
   return `${m}m${Math.round((ms % 60_000) / 1000)}s`;
 }
 
+// ============================ 运行日志着色 ============================
+//
+// 定时任务的输出是脚本原样 stdout。签到脚本的形态高度一致：
+//
+//   [2026-11-09 10:00:16] ==================================================
+//   [2026-11-09 10:00:16] [Trae] 开始每日积分领取
+//   [2026-11-09 10:00:17] [Trae CN] (API) 签到成功，可用积分 2269.3
+//
+// 或者带步骤号的：
+//
+//   [22:38:50] ① refresh（用 refresh_token 换 access_token）…
+//   [22:38:51]   HTTP 200 code=0 success
+//   [22:38:51] 结论：failed｜未续期：…｜余额 7217
+//
+// 整块塞进一个 <pre> 时全部同色同权重 —— 「跑成没跑成、卡在哪一步、哪条是警告」
+// 要逐行读完才知道。下面按行做**纯展示层**分类：只决定颜色/缩进/分隔线，
+// 文本一个字节都不改（照旧全量 esc 转义），所以复制出去仍是原始日志。
+//
+// 分类顺序有讲究：必须先剥时间戳再判类型，否则 `[10:00:16] ✓ …` 会先命中时间戳。
+const LOG_TS_FULL = /^\[(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})\]\s?/;
+const LOG_TS_TIME = /^\[(\d{2}:\d{2}:\d{2})\]\s?/;
+/// 只有分隔符的行（`====`、`----`、`────`、`____`）：整行没有可读信息。
+/// 这类行在日志里常常成对出现包住标题，正是「横幅」的视觉来源。
+const LOG_RULE = /^[=\-─_]{8,}$/;
+/// `── 微信读书 自动阅读 ──` / `==== 标题 ====`：以分隔符开头的标题行。
+///
+/// ⛔ 只认 `=` 与 `─`，**不能**认 `-` 和 `_`：
+///    `--verbose 输出`、`__pycache__ 已清理` 这类正常行都以它们开头，
+///    实测会被误判成横幅（加粗 + 左边线），凭空造出一堆假标题。
+const LOG_BANNER = /^[=─]{2,}\s*\S/;
+/// 圈号步骤：①②③…（签到脚本用得很重，是整份日志的骨架）
+const LOG_STEP = /^\s*[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮]/;
+/// 结论行：每份脚本的最后一行，成败只看这一行
+const LOG_CONCL = /^\s*(结论|结果|小结)\s*[:：]/;
+
+/// 结论行的成败。先判失败 —— `结论：failed｜未续期` 里同时出现「未续期」这类
+/// 中性词，顺序反了会把失败读成成功。
+function conclTone(text) {
+  if (/failed|失败|未续期|不可用|错误|异常|error/i.test(text)) return "bad";
+  if (/partial|warn|部分|警告|跳过|未完成/i.test(text)) return "warn";
+  if (/success|成功|完成|已签到|已领取/i.test(text)) return "ok";
+  return "note";
+}
+
+/// 行首标记：只有**行首**的符号才代表「这一行的结论」。
+///
+/// 为什么必须限定行首：`· read 跳 #4 … ⚠ 位置没动` 这类进度行会在行尾挂一个警告，
+/// 实测一份日志里能有 29 条。若整行染色，面板会被重复的琥珀行淹没，
+/// 真正需要注意的「行首 ⚠」反而被淹掉。行尾标记只高亮符号本身（见 logHTML）。
+const LOG_MARK_LEAD = /^\s*([✓√✔]|[✗✘]|⚠)/;
+/// 行内标记：只染色符号，不改整行。
+const LOG_MARK_ANY = /([✓√✔]|[✗✘]|⚠)/;
+
+/// 单行分类。判断顺序：
+///   行首标记 → 结论 → 步骤号 → 关键词兜底。
+/// 行首标记优先于关键词：脚本作者显式打的符号比中文措辞可靠
+/// （`结论：failed｜未续期` 里也有「未续期」这类中性词）。
+function logLineKind(text) {
+  if (!text.trim()) return "blank";
+  if (LOG_RULE.test(text)) return "rule";
+  if (LOG_BANNER.test(text)) return "banner";
+  if (LOG_CONCL.test(text)) return "concl";
+  const lead = LOG_MARK_LEAD.exec(text);
+  if (lead) {
+    if (/[✗✘]/.test(lead[1])) return "bad";
+    if (lead[1] === "⚠") return "warn";
+    return "ok";
+  }
+  if (LOG_STEP.test(text)) return "step";
+  // `⇒ …` / `→ …` 是「所以你得做什么」的动作提示，不是结果。
+  // 必须排在成功关键词之前：`⇒ 手动开一次桌面端（登录成功即续期）` 里含「成功」，
+  // 顺序反了会把一条待办事项染成绿色，读起来像「已经好了」。
+  if (/^\s*[⇒→]/.test(text)) return "note";
+  // 失败优先于成功：`存在失败账号：凭证失效…` 里也可能出现「成功」字样
+  if (/失败|错误|不可用|已失效|超时|未续期|Traceback|error|Error|ERROR|failed|FAILED/.test(text)) {
+    return "bad";
+  }
+  if (/警告|注意|跳过|未找到|没找到|WARN|warn/.test(text)) return "warn";
+  if (/成功|已就绪|OK\b|HTTP 2\d\d/.test(text)) return "ok";
+  if (/[⇒→]/.test(text)) return "note";
+  return "plain";
+}
+
+/// 行内标记 → 带色调的 <i>。传入的必须是**已转义**的文本
+/// （✓⚠✗ 都不在 esc 的替换表里，先转义再包标签不会破坏已有的 &lt; 实体）。
+function markHTML(escaped) {
+  return escaped.replace(LOG_MARK_ANY, (ch) => {
+    const tone = ch === "⚠" ? "warn" : /[✗✘]/.test(ch) ? "bad" : "ok";
+    return `<i class="slg-mk ${tone}">${ch}</i>`;
+  });
+}
+
+/// 步骤行：把行首的圈号单独包起来，交给 UI 字体渲染。
+///
+/// ⛔ 圈号 ①②③ 是东亚字符，等宽拉丁字体栈（Cascadia Mono / Consolas / Courier New）
+/// 没有它们的字形，10px 粗体下会回退成难辨的替代字形（实测糊成「带斜线的圆圈」）。
+/// 这里只换字体不改字符，日志复制出去仍是原始的 ①②③。
+function stepHTML(escaped) {
+  return escaped.replace(/^(\s*)([①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮])/, (_, pad, ch) => `${pad}<i class="slg-n">${ch}</i>`);
+}
+
+/// 结构化日志 → HTML。返回空字符串表示「没有可展示内容」。
+///
+/// 时间戳单独成列（右对齐、等宽数字）而不是留在正文里：签到日志逐行重复同一个
+/// 秒级时间戳，留在正文会把每行有效信息推到 10 个字符之后，长句还要折行。
+function logHTML(text) {
+  const src = String(text == null ? "" : text).replace(/\r\n?/g, "\n");
+  if (!src.trim()) return "";
+
+  const rows = src.split("\n").map((raw) => {
+    let s = raw;
+    let time = "";
+    let date = "";
+    const mf = LOG_TS_FULL.exec(s);
+    if (mf) {
+      date = mf[1];
+      time = mf[2];
+      s = s.slice(mf[0].length);
+    } else {
+      const mt = LOG_TS_TIME.exec(s);
+      if (mt) {
+        time = mt[1];
+        s = s.slice(mt[0].length);
+      }
+    }
+    return { s, time, date, kind: logLineKind(s) };
+  });
+
+  // 没有时间戳的日志（如微信读书那类）留一列空白纯属浪费，整行让给正文。
+  const timed = rows.filter((r) => r.time).length;
+  const withTime = timed >= 3 && timed >= rows.length * 0.3;
+
+  // 只有跨天日志才插日期分隔行。
+  // 单日日志里它是纯噪声 —— 运行历史的卡片头已经写了完整日期时间，
+  // 再顶一行 2026-11-09 只是把内容往下推一行。
+  const dates = new Set(rows.map((r) => r.date).filter(Boolean));
+  const showDate = dates.size > 1;
+
+  let out = "";
+  let lastDate = "";
+  // 首尾的纯分隔线要丢掉：签到脚本的横幅通常被一对 `=====` 包住，
+  // 而表头下方已经有 1px 边框线，再加一条就是「双线 + 上下各 6px 留白」，
+  // 白白吃掉十几像素（弹窗高度固定时这些都要从可见行数里扣）。
+  let firstContent = -1;
+  let lastContent = -1;
+  for (let i = 0; i < rows.length; i++) {
+    if (rows[i].kind === "rule" || rows[i].kind === "blank") continue;
+    if (firstContent < 0) firstContent = i;
+    lastContent = i;
+  }
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i];
+    // 跨天时插一条日期分隔：连续多天的日志里，单看 HH:MM 分不清是哪天
+    if (showDate && r.date && r.date !== lastDate) {
+      lastDate = r.date;
+      out += `<div class="slg-date"><span>${esc(r.date)}</span></div>`;
+    }
+    if (r.kind === "blank") {
+      out += `<div class="slg-l is-blank"></div>`;
+      continue;
+    }
+    if (r.kind === "rule") {
+      // 首尾（内容之前 / 之后）的分隔线不画
+      if (i < firstContent || i > lastContent) continue;
+      out += `<div class="slg-rule"></div>`;
+      continue;
+    }
+    if (r.kind === "banner") {
+      out += `<div class="slg-banner">${esc(r.s.trim())}</div>`;
+      continue;
+    }
+    const t = withTime ? `<span class="slg-t">${esc(r.time)}</span>` : "";
+    const tone = r.kind === "concl" ? ` data-s="${conclTone(r.s)}"` : "";
+    // 步骤行要把圈号换成 UI 字体（等宽拉丁字体没有 ①②③ 字形）
+    const body = r.kind === "step" ? stepHTML(esc(r.s)) : markHTML(esc(r.s));
+    out += `<div class="slg-l is-${r.kind}"${tone}>${t}<span class="slg-x">${body}</span></div>`;
+  }
+  return out;
+}
+
 // ============================ cron ⇄ 人话 / 表单 ============================
 //
 // 本模块对外的表达式统一是 **Unix 5 段**：分 时 日 月 周（例：0 10 * * * = 每天 10:00）。
@@ -198,8 +378,8 @@ export function taskRowHtml(t, ctx) {
             : `<button class="btn-ghost btn-xs" data-act="run">运行</button>`}
           <button class="btn-ghost btn-xs" data-act="logs">日志</button>
           <button class="btn-ghost btn-xs" data-act="edit">编辑</button>
-          <button class="btn-icon" data-act="toggle" title="${t.enabled ? "停用" : "启用"}">${t.enabled ? ICON_DOT_ON : ICON_DOT_OFF}</button>
-          <button class="btn-icon" data-act="del" title="删除">${ICON_TRASH}</button>
+          <button class="btn-icon" data-act="toggle" aria-label="${t.enabled ? '停用' : '启用'}">${t.enabled ? ICON_DOT_ON : ICON_DOT_OFF}</button>
+          <button class="btn-icon" data-act="del" aria-label="删除">${ICON_TRASH}</button>
         </div>
         ${monthHeatHtml(c.monthHeat, c.exported)}
       </div>
@@ -1104,7 +1284,7 @@ export function renderScheduler(view) {
           <button class="sch-tab" data-t="os">系统计划任务</button>
           <button class="btn-ghost btn-xs" id="sf-clear" style="margin-left:auto">清空</button>
         </div>
-        <div class="sch-logbody" id="sf-logbody"></div>
+        <div class="sch-logbody" id="sf-logbody" data-tab="panel"></div>
         <div class="tm-actions"><button class="tm-cancel" id="sf-lclose">关闭</button></div>
       </div>`;
     document.body.appendChild(ov);
@@ -1122,7 +1302,8 @@ export function renderScheduler(view) {
           body.innerHTML = `<div class="empty-state">还没有由系统计划任务触发的记录。先在上方「注册」。</div>`;
           return;
         }
-        body.innerHTML = `<div class="sch-logpath">${esc(r.path || "")}</div><pre class="sch-logtext">${esc(r.text || "（空）")}</pre>`;
+        body.innerHTML = `<div class="sch-logpath">${esc(r.path || "")}</div>
+          <div class="sch-log slg">${logHTML(r.text) || '<div class="slg-empty">（空）</div>'}</div>`;
         return;
       }
       const runs = runsCache.filter((x) => x.taskId === t.id);
@@ -1139,18 +1320,29 @@ export function renderScheduler(view) {
           ? `未执行 · ${tg}`
           : `${fmtDuration(r.durationMs)} · ${tg}${r.exitCode != null ? ` · 退出码 ${r.exitCode}` : ""}`;
         return `
-          <div class="sch-run" data-open="${i === 0 ? "1" : "0"}">
+          <div class="sch-run" data-open="${i === 0 ? "1" : "0"}" data-tone="${r.status === "failed" ? "bad" : r.status === "timeout" ? "warn" : r.status === "missed" ? "missed" : ""}">
             <div class="sch-run-head">
               <span class="badge ${m.cls}">${m.text}</span>
               <span class="sch-run-time">${esc(new Date(r.startedAt).toLocaleString("zh-CN"))}</span>
               <span class="sch-run-meta">${meta}</span>
             </div>
-            <pre class="sch-logtext">${esc(r.output || "（无输出）")}</pre>
+            <div class="sch-log slg">${logHTML(r.output) || '<div class="slg-empty">（无输出）</div>'}</div>
           </div>`;
       }).join("");
       body.querySelectorAll(".sch-run").forEach((n) => {
         n.querySelector(".sch-run-head").addEventListener("click", () => {
-          n.dataset.open = n.dataset.open === "1" ? "0" : "1";
+          const open = n.dataset.open !== "1";
+          // 手风琴：展开一条就收起其它条。
+          // 日志不限高（见 CSS），长日志会占满整个列表区；不同时收别的，
+          // 用户展开第二条时第一条会把它顶到屏幕外，看起来像「点了没反应」。
+          if (open) {
+            body.querySelectorAll('.sch-run[data-open="1"]').forEach((o) => {
+              if (o !== n) o.dataset.open = "0";
+            });
+          }
+          n.dataset.open = open ? "1" : "0";
+          // 展开后把这行滚进视野（长列表里点下面的记录，展开内容可能在视区外）
+          if (open) n.scrollIntoView({ block: "nearest" });
         });
       });
     }
@@ -1159,6 +1351,8 @@ export function renderScheduler(view) {
       b.addEventListener("click", () => {
         ov.querySelectorAll(".sch-tab").forEach((x) => x.classList.toggle("on", x === b));
         tab = b.dataset.t;
+        // 两个页签的内容形态不同（列表 vs 单块日志），面板样式跟着切
+        body.dataset.tab = tab;
         paint();
       });
     });

@@ -45,11 +45,11 @@ function renderCapsule() {
   capsuleEl.dataset.inactive = (ec?.enabled && status && status.active === false) ? "1" : "0";
   const timeEl = capsuleEl.querySelector(".eye-time");
   if (timeEl) timeEl.textContent = capsuleTitle(ec, status);
-  capsuleEl.title = ec?.enabled
+  capsuleEl.setAttribute("aria-label", ec?.enabled
     ? (status && status.active === false)
       ? "护眼已开启但未生效 · 驱动屏蔽 / HDR / 远程桌面 · 点击查看"
       : "护眼已开启 · 点击查看"
-    : "护眼未开启 · 点击开启（调节整机屏幕色温）";
+    : "护眼未开启 · 点击开启（调节整机屏幕色温）");
 }
 
 function renderPopover() {

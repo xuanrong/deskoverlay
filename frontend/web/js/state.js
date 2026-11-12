@@ -470,6 +470,14 @@ export async function loadState() {
   const isLyColor = (v) => typeof v === "string" && (v === "" || /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(v));
   if (!isLyColor(ly.colorText)) ly.colorText = "";
   if (!isLyColor(ly.colorFill)) ly.colorFill = "";
+  // 首页音乐卡歌词配色（区别于桌面歌词 ly.fontSize/colorText —— 那套管独立歌词窗口）。
+  //   homePalette —— 当前歌词行配色：LYRIC_PALETTES 里的 id（落日晖/晴空/…，见 theme.js），
+  //                  或特殊值 cover=跟随封面主色、off=正文灰（不染色）。
+  // 字号/间距是固定值（.wm-lyric CSS 变量默认），不暴露配置。
+  // ⚠ 这里内联合法 id，不 import theme.js（theme.js 已 import 本文件，会循环依赖）。
+  //    新增配色时 theme.js 的 LYRIC_PALETTES 和这里要同步加。
+  const HOME_PALETTE_IDS = ["sunset", "sky", "forest", "lavender", "amber", "mint", "rose", "steel"];
+  if (!["cover", "off"].includes(ly.homePalette) && !HOME_PALETTE_IDS.includes(ly.homePalette)) ly.homePalette = "cover";
   if (!ly.pos || typeof ly.pos !== "object" || Array.isArray(ly.pos)) ly.pos = {};
   const num = (v, d) => (typeof v === "number" && isFinite(v) ? v : d);
   ly.pos.xRatio = Math.max(0, Math.min(1, num(ly.pos.xRatio, 0.5)));

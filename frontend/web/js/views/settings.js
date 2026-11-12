@@ -7,8 +7,9 @@ import { esc } from "../utils.js";
 import { pushLockEnabled } from "../lock.js";
 import { Theme, ACCENT_PRESETS, BUILTIN_SKINS, computeAccent } from "../theme.js";
 import { toast } from "../toast.js";
-import { ICON_GEAR, ICON_PALETTE, ICON_LOCK, ICON_EYE, ICON_ARCHIVE, ICON_INFO, ICON_TICK } from "../icons.js";
+import { ICON_GEAR, ICON_PALETTE, ICON_LOCK, ICON_EYE, ICON_ARCHIVE, ICON_INFO, ICON_TICK, ICON_MUSIC } from "../icons.js";
 import { setEyeCare, restoreNativeColor, getEyeCareStatus, onEyeCareChange } from "../eyeCare.js";
+import { LYRIC_PALETTES } from "../theme.js";
 
 // hex(#rrggbb) → [h, s, l]（s/l 0-100），供自定义主题色取色器使用
 function hexToHsl(hex) {
@@ -131,6 +132,7 @@ export function renderSettings(view) {
     const panes = [
       { id: "general", name: "通用", icon: ICON_GEAR },
       { id: "appearance", name: "外观", icon: ICON_PALETTE },
+      { id: "music", name: "音乐", icon: ICON_MUSIC },
       { id: "privacy", name: "隐私", icon: ICON_LOCK },
       { id: "eyecare", name: "护眼", icon: ICON_EYE },
       { id: "backup", name: "备份", icon: ICON_ARCHIVE },
@@ -175,6 +177,7 @@ export function renderSettings(view) {
       switch (id) {
         case "general": return paneGeneral();
         case "appearance": return paneAppearance();
+        case "music": return paneMusic();
         case "privacy": return panePrivacy();
         case "eyecare": return paneEyeCare();
         case "backup": return paneBackup();
@@ -217,7 +220,7 @@ export function renderSettings(view) {
             <div class="set-info"><div class="set-name">皮肤</div><div class="set-desc">一键应用整套视觉（方案 + 主题色 + 背景 + 玻璃质感）</div></div>
             <div class="th-skins" id="th-skins">
               ${BUILTIN_SKINS.map((s) => `
-                <div class="th-skin${t.skinId === s.id ? " active" : ""}" data-id="${s.id}" title="${esc(s.name)}">
+                <div class="th-skin${t.skinId === s.id ? " active" : ""}" data-id="${s.id}" aria-label="${esc(s.name)}">
                   <div class="ts-preview" style="background:${skinPreviewBg(s)}">
                     <span class="ts-dot" style="background:${skinPreviewAccent(s)}"></span>
                   </div>
@@ -231,9 +234,9 @@ export function renderSettings(view) {
             <div class="th-swatches" id="th-swatches">
               ${ACCENT_PRESETS.map((p) => {
                 const active = t.accent.mode === "preset" && t.accent.presetId === p.id;
-                return `<div class="th-swatch${active ? " active" : ""}" data-id="${p.id}" title="${p.name}" style="background:hsl(${p.hsl[0]},${p.hsl[1]}%,${p.hsl[2]}%)"></div>`;
+                return `<div class="th-swatch${active ? " active" : ""}" data-id="${p.id}" aria-label="${p.name}" style="background:hsl(${p.hsl[0]},${p.hsl[1]}%,${p.hsl[2]}%)"></div>`;
               }).join("")}
-              <input type="color" class="th-swatch-custom" id="th-accent-custom" title="自定义" value="${currentAccentHex()}" />
+              <input type="color" class="th-swatch-custom" id="th-accent-custom" aria-label="自定义" value="${currentAccentHex()}" />
             </div>
             <div class="th-preview">
               <button class="tp-btn" tabindex="-1">按钮</button>
@@ -281,6 +284,27 @@ export function renderSettings(view) {
             </div>
             <button class="btn-ghost" id="th-reset">重置</button>
           </div>
+        </div>`;
+    }
+
+    function paneMusic() {
+      const cur = state.lyric?.homePalette ?? "cover";
+      // 色卡：两个特殊项（跟随封面 / 关闭）+ LYRIC_PALETTES 命名配色，结构照皮肤色卡 .th-skins。
+      const swatch = (id, name, style) => `
+        <div class="th-skin ly-pal${cur === id ? " active" : ""}" data-pal="${id}" aria-label="${esc(name)}">
+          <div class="ts-preview" style="${style}"></div>
+          <div class="ts-name"><span>${esc(name)}</span><span class="ts-check">${ICON_TICK}</span></div>
+        </div>`;
+      const cards = [
+        swatch("cover", "跟随封面", "background:linear-gradient(135deg,var(--accent),var(--text-faint))"),
+        swatch("off", "关闭", "background:repeating-linear-gradient(45deg,var(--soft-bg),var(--soft-bg) 6px,transparent 6px,transparent 12px)"),
+        ...LYRIC_PALETTES.map((p) => swatch(p.id, p.name, `background:linear-gradient(135deg,${p.c1},${p.c2})`)),
+      ].join("");
+      return `
+        <div class="set-panel">
+          <div class="sec-title">歌词配色</div>
+          <div class="set-desc" style="margin-bottom:10px">工作台首页音乐卡当前歌词行的配色（与「桌面歌词」浮层互不影响）。「跟随封面」自动取专辑封面主色。</div>
+          <div class="th-skins" id="ly-palettes">${cards}</div>
         </div>`;
     }
 
@@ -862,6 +886,20 @@ export function renderSettings(view) {
         renderBody();
       });
     }
+
+    // 音乐分区：歌词配色色卡。点一张 → 写 state.lyric.homePalette 落盘，
+    // 首页音乐卡的 paintMusicTick（每秒跑）自动拾取重绘，无需手动刷新。
+    body.querySelectorAll("#ly-palettes .ly-pal").forEach((card) => {
+      card.addEventListener("click", () => {
+        if (!state.lyric || typeof state.lyric !== "object") state.lyric = {};
+        const pal = card.dataset.pal;
+        if (!pal || state.lyric.homePalette === pal) return;
+        state.lyric.homePalette = pal;
+        // 高亮切到点中的那张，其余取消
+        body.querySelectorAll("#ly-palettes .ly-pal").forEach((c) => c.classList.toggle("active", c === card));
+        saveState();
+      });
+    });
     }
   }
 }

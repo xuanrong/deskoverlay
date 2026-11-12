@@ -959,6 +959,59 @@ body::after {
   border-radius: 50%;
   background: var(--accent);
 }
+/* 定时任务卡：右侧显示「下次运行时刻」，比别的卡的次要时间字更醒目（关键信息）。
+   ⛔ 作用域限定 [data-card="sched"]，不碰多卡共用的 .w-li-time。 */
+[data-card="sched"] .w-li-time {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: 0.2px;
+}
+/* 每行左侧圆点用强调色描个光晕，和右侧时刻呼应，行更有「任务」的实体感 */
+[data-card="sched"] .w-li-dot {
+  width: 7px; height: 7px;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+/* 「跑了没跑」状态点 —— 覆盖默认 accent 色 + 光晕随状态变色。
+   ok=已跑成绿 / bad=失败红 / warn=超时琥珀 / stop=已停灰 / missed=漏跑红 / pending=未到中性。 */
+[data-card="sched"] .w-li-dot.sch-st-ok     { background: var(--green);  box-shadow: 0 0 0 3px color-mix(in srgb, var(--green)  20%, transparent); }
+[data-card="sched"] .w-li-dot.sch-st-bad    { background: var(--danger); box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 22%, transparent); }
+[data-card="sched"] .w-li-dot.sch-st-warn   { background: var(--amber);  box-shadow: 0 0 0 3px color-mix(in srgb, var(--amber)  20%, transparent); }
+[data-card="sched"] .w-li-dot.sch-st-stop   { background: var(--text-faint); box-shadow: 0 0 0 3px color-mix(in srgb, var(--text-faint) 18%, transparent); }
+[data-card="sched"] .w-li-dot.sch-st-missed { background: var(--danger); box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 22%, transparent); opacity: 0.65; }
+/* pending：今天还没跑 —— 空心环（描边不填充），和「有结果」的实心点一眼区分 */
+[data-card="sched"] .w-li-dot.sch-st-pending {
+  background: transparent;
+  border: 1.5px solid var(--text-faint);
+  box-shadow: none;
+}
+/* 定时任务卡「今日异常」警告 —— 放在标题栏 [data-extra]（不占正文独立行） */
+.sw-extra {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sw-icon { flex: 0 0 auto; color: var(--danger); line-height: 1; }
+.sw-icon svg { width: 13px; height: 13px; display: block; fill: none; stroke: currentColor; stroke-width: 2; }
+.sw-item {
+  flex: 0 0 auto;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 1.5;
+  color: #fff;
+  cursor: default;
+}
+.sw-bad { background: var(--danger); }
+.sw-missed { background: color-mix(in srgb, var(--danger) 70%, var(--text-faint)); }
+.sw-pending { background: var(--warning, #c77d1f); }
 
 /* ---- 缂備焦绋掗崕鎶藉春瀹€鈧划鏃堫敍濮橆剛鈧鏌?---- */
 /* 閻庡綊娼荤粻鎴ｃ亹閸涘﹦鈻旈柕鍫濇閸╁鏌ㄥ☉妯绘瀯orkBuddy | Trae闂佹寧绋戦¨鈧紒杈ㄧ箓琚欓煫鍥ㄦ⒒閸╁绱掓ィ鍐╂锭闁诡喗绮嶇粙澶嬪緞鐎ｉ潧鏂€闂佹寧绋掗懝楣冩煢閳哄懎鐭楅柡澶嬪閸?闂?婵炶揪绲鹃悷鈺吢烽崒娑樼窞鐟滃秹鎮?闂?闂佺粯顭堥崺鏍焵椤戣法顦︽い锔诲墮閳绘棃濡搁敐鍌氫壕?
@@ -1290,11 +1343,11 @@ body::after {
    ⚠ 仍然只显示**当前行**，`min-height` 不设 —— 没有歌词时整块 `hidden`，
      不占高度，否则空歌时歌名会被顶上去。 */
 .wm-lyric {
-  margin-top: 3px;
+  margin-top: var(--wm-ly-gap, 7px);
   min-width: 0;
   display: flex; align-items: center; gap: 5px;
   line-height: 1.3;
-  height: 16px;
+  height: 18px;
   overflow: hidden;
 }
 .wm-lyric[hidden] { display: none; }
@@ -1311,8 +1364,8 @@ body::after {
 .wm-lyric-cur {
   display: block;
   min-width: 0;
-  font-size: 12.5px;
-  color: var(--text-dim);
+  font-size: var(--wm-ly-size, 14px);
+  color: var(--wm-ly-color, var(--text-dim));
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1324,104 +1377,141 @@ body::after {
    闂佸憡鍔曢幊搴敊閹版澘绀岄柛婵嗗濞懷囨煛?89px闂佹寧绋戦張顒佹櫠瀹ュ棛顩烽柕澶涘濡层劑鏌″鍥у付缂佺儵鍋撴俊鐐€涢褏鏁崶顒€绀?26px闂?89 - 2*4gap) / 3 = 27闂佹寧绋戦懟顖濄亹?26 闂佷紮绲鹃悷銈囩礊閹达附鐓傞煫鍥ュ劤缁€鍡涙煥?
    闂佹悶鍎抽崑鎾绘偉?18px + 闂佸憡鍔曢幊鎾剁博閻旂儤宕?2px*2 + 婵炴垶鎸堕崐娑€侀幋锕€妫橀柛銉戝懏鎲婚梺?2 + 10闂? 26px闂?
    濠殿噯绲鹃弻銊ф暜椤愶箑绾ч柕澹嫮鏆犻梺鐓庣枃濞夋稑鈻旈鐏昏鎷呴幖鐐蹭缓闂侀潻瀵岄悡澶屾閹殿喒鍋撶涵鍛棄閻庣懓纾埀顒勬涧缂嶅﹦绱為崼銉︽櫖闁割偅绮庨悷婵嬫煕閹邦剛孝鐎殿噮鍓欓蹇涱敊閼姐倗鎲规慨鎺旂帛閸斞呮濮樿泛违濞达綀妫勯崢鎾煟椤忓嫷鍎忛柛銈庡弮瀵即顢涘☉娆戔偓顔济归悩鐑樼【闁靛洦鐟﹀璇参熺紒妯烇妇绱撻崘鈺佺仴婵炵厧鍟存俊?*/
-.qa-grid {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 4px;
-  /* 闂佸湱鍋撻崹璺侯嚕瑜斿畷銉︽償閿涘嫧鍋撻銏″剮闁哄鍨瑰﹢宄扳槈閹垮啫寮跨紒閬嶄憾閹?safe center 闂佸吋婢樻總鏃傜箔婢舵劕鍙?center闂佹寧绋掗惌顔剧博閻愵剛鈻旈柍褜鍓涙禍鎼佸幢濡妾烽梺鍝勭Ф閸樠囨偤濞嗘挸鐭楁俊顖欒濡绻濊閸ㄥ綊宕甸銏℃櫖?
-     婵炴垶姊婚崰鎰ｇ粙娆惧殫闁逞屽墯缁嬪鈧綆鍋勯銏ゆ煕閹达妇绱伴柍褜鍓欐總鏃傜箔婢舵劕鍙婃い鏍ㄧ☉鎯熸俊鐐€曢悥濂稿磿鐎靛憡鍟戝ù锝囨嚀缁旀挳鏌ㄥ☉妯荤秶enter 婵炴潙鍚嬮惌顔炬偖鏉堛劌绶為悗娑櫭銏ゆ煕閹寸姴鐨戠紒杈ㄧ箖閵囧嫰宕奸弴鐐插Г闁荤偞鍑归崑鍕垂韫囨稒鏅璺虹墐閸?*/
-  height: 100%;
-  align-content: safe center;
-}
-.qa-item {
+/* ---------- 快捷访问卡：按分组分块 ----------
+   旧版是 5 列 × 3 行的一维网格，容量写死 15 格，超出压成「还有 N 项」，
+   且完全没用 qaGroups —— 用户分的组在卡片上看不到。
+   新版每组一个区块，组内按可用宽度 flex-wrap 自动换行：
+     · 容量不再是常数：1 行高约 20 项，放大到 2 行高约 40 项（旧版恒为 15）；
+     · 组名 + 条数做成区块标题，配左侧色条，一眼看出归属；
+     · 卡片变高/变宽时区块自动多排，不需要改代码。
+   ⛔ 保留 .qa-item / .qa-title / .qa-more 类名：tools/quick-check.mjs 依赖它们。 */
+/* 区块容器：**整宽连续流**（不再是 2 列网格）。
+   实测对比（真实 17 项 / 4 组，正文 794×89px）：
+     · 2 列网格：用 5 行 / 70px，各行右端利用率 55/88/22/57/78%，右列常留大片空白；
+     · 整宽连续流：只用 2 行 / 47px，利用率 92/86%，装完还剩 42px 可用来放大字号。
+   组与组之间靠「行内标签」分隔，不靠列宽断行，所以不会出现列高不平衡。 */
+.qa-blocks {
   display: flex;
-  align-items: center;
-  gap: 5px;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  /* 组间横向 gap 比组内大（6 vs 3），不画线也能看出「这里换了一组」 */
+  gap: 3px 6px;
+  height: 100%;
+  overflow: hidden;
+}
+/* 一个组 = 一段不可拆的行内流。
+   display: contents 会让标签与条目直接参与外层 wrap，
+   这样组内条目能跨行续排（组名仍只出现一次）。 */
+/* 组 = 原子块。两层约束缺一不可：
+   ① flex: 0 0 auto —— **不许收缩**。默认 flex-shrink:1 时，装不下不会换行，
+      而是把自己压窄 + 内部折行 ⇒ 实测「开发工具」的 2 项被拆到第 2/3 行，
+      组名在第 2 行而「文本比对」单独掉到第 3 行，分组边界直接断掉。
+   ② max-width: 100% —— 兜底。只有整组比一整行还宽（条目特别多）时，
+      才允许它内部折行，否则会溢出卡片。
+   ③ 不能用 display:contents：那会让条目直接参与外层换行，组名同样会和条目分离。 */
+.qa-blk {
+  flex: 0 0 auto;
+  max-width: 100%;
   min-width: 0;
-  /* 闁诲氦顫夌喊宥夘敆?26px闂佹寧绋掑畝绋款焽?padding / line-height 缂備線纭搁崹鐗堟叏閻愬搫鍌ㄩ悹鍥ㄥ絻濞?26 婵炴垶鎸哥粔纾嬨亹閺屻儱绠?闂佺偨鍎查弻锟犲焵?
-     闁诲骸婀遍崑鐐电矈?padding 2px + 闂佹悶鍎抽崑鎾绘偉?18 + 婵炴垶鎸堕崐娑€侀幋锕€妫橀柛銉戝懏鎲绘繛鏉戝悑濮樸劑鎮炬繝姘?29px闂? 闁荤偞绋戦懟顖氼潩閵娾晛鍙?95px闂?
-     濠?89px 闂佹眹鍔岀€氼剟宕€电硶鍋撻崷顓熷殌閻忓浚鍨遍〃?6px闂佹寧绋戦惉濂割敄?3 闁荤偞绋戦惌渚€锝為敂鐐晳濞达絿顣介崑鎾诲磼濮橆剚娅㈠┑顔界箓椤兘鎮甸鑺ュ劅闁挎洍鍋撻柟?3 闁?= 26*3+8 = 86px 缂備礁顑呴悿鍥╂崲閸愵喖违?*/
-  height: 26px;
-  padding: 0 5px;
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  background: transparent;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 3px;
+}
+/* 组名：**弱化成纯文字 + 一条左色条**，不做胶囊、不带条数。
+   ⛔ 为什么砍掉胶囊底和条数：实测同样是 4 组 17 项，
+      带胶囊+条数时正文要塞下更多视觉块，字号只能到 11px（还空 46px 用不上）；
+      纯文字时 13px 仍只用 79/89px。用户反馈的「字很小」就是这些装饰挤出来的。
+      条数在「快捷访问」模块里有，卡片上不必重复。 */
+.qa-blk__tag {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  align-self: center;
+  padding-left: 4px;
+  border-left: 2px solid rgba(var(--accent-rgb), 0.55);
+  line-height: 1;
+  cursor: default;
+  user-select: none;
+}
+.qa-blk__nm {
+  min-width: 0;
+  font-size: var(--text-xs);       /* 10px：比条目小一档，层次清楚 */
+  font-weight: 600;
   color: var(--text-dim);
-  font: inherit;
-  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* 单条按内容取宽（flex: 0 1 auto，不是 1 1 0）：
+   拉满等宽会让「豆包」和「json格式化」一样宽，行内留白碎成一地。 */
+.qa-item {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 172px;
+  display: inline-flex;
+  align-items: center;
+  /* gap / 高度 / 内边距随字号联动（13px 字 → 15px 图标、24px 行高）：
+     字变大而图标、行高不变会显得挤。 */
+  gap: 4px;
+  height: 25px;
+  padding: 0 7px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  background: var(--soft-bg);
   cursor: pointer;
-  transition: background var(--t-fast), border-color var(--t-fast), color var(--t-fast);
+  transition: background var(--t-fast), border-color var(--t-fast);
 }
 .qa-item:hover {
-  background: var(--soft-bg);
+  background: var(--soft-bg-strong);
   border-color: var(--border);
-  color: var(--text);
 }
-/* 闂佹悶鍎抽崑鎾绘偉閿濆鏅慨妯跨簿椤箓鏌涢妸銉創濠?闂佺偨鍎查弻锟犲焵?闂佸搫鍊稿ú锝呪枎閵忊€崇窞?闂佽崵鍋戦崕鍐差嚕?/ 缂傚倸鍟崹闈涱焽?闂?/ 闂佸搫鍊稿ú锝呪枎?闂佽绻戞刊浠嬪箺閹达附鏅悘鐐跺亹椤忛亶鏌ｉ鍡楀付闁搞劌楠搁妴?*/
 .qa-icon {
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 18px; height: 18px;
-  border-radius: var(--radius-xs);
-  background: var(--soft-bg);
-  color: var(--text-faint);
+  width: 15px;
+  height: 15px;
 }
 .qa-icon svg {
-  width: 12px; height: 12px; display: block;
+  width: 15px; height: 15px; display: block;
   fill: none; stroke: currentColor; stroke-width: 1.8;
   stroke-linecap: round; stroke-linejoin: round;
 }
-.qa-item[data-type="folder"] .qa-icon { color: var(--amber); background: rgba(var(--amber-rgb), 0.1); }
-.qa-item[data-type="url"] .qa-icon { color: var(--accent); background: rgba(var(--accent-rgb), 0.1); }
-.qa-item[data-type="file"] .qa-icon { color: var(--text-dim); background: var(--soft-bg); }
-.qa-item:hover .qa-icon { background: var(--soft-bg-strong); }
-.qa-item[data-type="folder"]:hover .qa-icon { background: rgba(var(--amber-rgb), 0.16); }
-.qa-item[data-type="url"]:hover .qa-icon { background: rgba(var(--accent-rgb), 0.16); }
-
-/* 闂佸搫鍊稿ú銈夋偤瑜斿畷绋课旂€ｎ剛鐛ラ梺鍛婅壘缁夋儼鈪锋繛鎴炴尨閸嬫捇鎮跺☉妯肩効缂佽鲸绻勯悮鍓ф嫚閼碱兘鍋撴搴濈剨闊洦鎸鹃幗鐔封槈閹绢垰浜鹃柣鐐寸☉鐞氼偊鍩€?
-   闁荤偞绋戦惌鍌炴偟椤曗偓瀹曘垻鈧綆浜滈悡?1.15 / 1.1 闂佺偨鍎查弻锟犲焵?5 闂?3 闁荤偞绋戦懟顖滅博妞嬪簼娌柍褜鍓氱粙澶屸偓锝庡亞濡层劑鏌″鍥у付鐟滄妸鍥у珘?26px闂?
-   闂?1.25/1.2 缂備胶濮甸妵鐐垫閻楀牆绶炴慨姗嗗墮濮?3px闂佹寧绋戦惉濂割敄?3 闁荤偞绋戦惌渚€锝為敂鐐晳濞达絿顣介崑?*/
-.qa-text { display: flex; flex-direction: column; gap: 0; min-width: 0; }
+.qa-item[data-type="folder"] .qa-icon { color: var(--amber); }
+.qa-item[data-type="url"] .qa-icon { color: var(--accent); }
+.qa-item[data-type="file"] .qa-icon { color: var(--text-dim); }
+.qa-text { display: flex; min-width: 0; }
 .qa-title {
-  font-size: 11px;
-  font-weight: var(--fw-medium);
-  color: var(--text);
-  line-height: 1.15;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.qa-sub {
-  font-size: 9px;
-  color: var(--text-faint);
+  /* 12px（字面值：token 阶梯只有 10/11/13，没有 12）。
+     改造前是 11px，中间一度掉到 9px（组名独占一行挤出来的）。
+     ⛔ 别再往上加到 13：组是原子块（flex:0 0 auto），字号一大组就变宽，
+        794px 一行只放得下 1~2 组 ⇒ 实测 13px 时 4 组占 6 行、反而更挤。 */
+  font-size: 13px;
+  font-weight: var(--fw-regular);
+  color: var(--text-dim);
   line-height: 1.1;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-/* 闂侀潧妫楅惌浣烘崲閺囥垹瀚?N 婵＄偑鍊曠粻宥夊焵椤掆偓缁嬪嫮妲愭导瀛樻優婵ê宕▓鐘绘煙鐠囪尙绠虹紒鏃傚枛閺佸秶浠﹂懞銉ヮ伅闂佹椿浜為崰搴ㄦ偪閸曨垰绾ч柨娑樺缁愭鏌涢弽褎鎯堥柛銊ラ椤曪綁鍩€?*/
+.qa-item:hover .qa-title { color: var(--text); }
+/* 「+N」汇总格：虚线、无底色，与真实条目在视觉上区分开 */
 .qa-more {
   border-style: dashed;
   border-color: var(--border);
-  color: var(--text-faint);
+  background: transparent;
 }
-.qa-more:hover { color: var(--accent); border-color: rgba(var(--accent-rgb), 0.4); }
-.qa-more .qa-icon { color: var(--text-faint); background: transparent; }
+.qa-more .qa-title { color: var(--text-faint); font-variant-numeric: tabular-nums; }
+.qa-more:hover { border-color: rgba(var(--accent-rgb), 0.4); }
+.qa-more:hover .qa-title { color: var(--accent); }
+.qa-more .qa-icon { color: var(--text-faint); }
 
-/* 缂備焦鍔曠€氼剟鎯堥崱娑欑劵闁逞屽墴瀹曞爼鎮滈崶鈺冪崶5 闂佸憡甯楅〃鍛耿椤忓牆纭€闁挎稑瀚。濠氭煕濞嗘劦鐒介柣娑橀叄瀹曘儲鎯斿┑鍫㈢崶闂佽鎮堕崐鏍垂濮橆厾鈻旈柍褜鍓熷畷鍫曪綖椤斿墽顦梺鍦焾椤︻垰鐣烽柆宥嗗亱闁搞儜鍛緰闂傚倸瀚幊搴敊閺冣偓閹棃鏁冮崒妤€浜鹃柟閭﹀櫍閻涙捇鏌涢幋婵堢闁活煈鍨跺畷姘旀担瑙勵啀闂?
-   闂?180px 闂佸搫鍟晶搴ｇ礊婢舵劕鍐€濠靛倸鎲￠鏍煕?4 闂佸憡甯楅〃鎰濠曠an-4 闂佹眹鍔岀€氼剙鐣烽柆宥呯煑妞ゅ繐瀚埛?4 闂佸憡甯楅〃鍡涘焵椤掑喚鍤欐い鏃€妫冮幆?2/3闂佹寧绋戦惉濂稿极?4 闂佸憡甯楅〃鍡椕虹捄銊х煓缂佹稑婀遍獮?
-   闂?60px 闂?span-4 闂備緡鍋€閸嬫捇鏌涢弽銊у闁?2 闂佸憡甯楅〃鍡涘焵椤掑喚鍤欐い鏃€妫冮弫宥呯暆閳ь剟寮?3 闂佸憡甯楅〃鎰?
-   闂?60px 闂佸搫鍟冲▔娑樼暦閻旂厧绀嗘俊鐐茬毞閸?*/
-@media (max-width: 1180px) {
-  .qa-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-}
+/* 窄屏：区块标题不换行、条目继续靠 flex-wrap 自然折行，
+   不需要像旧版那样逐档改列数（旧版 4/3/1 列的三段媒体查询已不需要）。 */
 @media (max-width: 860px) {
-  .qa-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-}
-@media (max-width: 560px) {
-  .qa-grid { grid-template-columns: minmax(0, 1fr); }
+  .qa-item { max-width: 108px; }
 }
 
 /* ---- 编辑模式（拖动卡片换位）---- */
@@ -1691,6 +1781,60 @@ body.is-editing .edit-banner {
 }
 .pi svg { width: 13px; height: 13px; }
 
+/* ---------- 胶囊里的电量环 --------------
+   弧长 = 电量百分比，环画在图标**外圈**（22px 图标位上留 20px 环），
+   中间镂空露出图标。这一圈是首页常驻的，不是点开浮层才有的。
+
+   用 conic-gradient 而不是 SVG stroke-dasharray：22px 的环上画弧要算
+   周长、还要处理 0%/100% 两个退化情形（dasharray 会露小缺口或整圈消失），
+   conic-gradient 一句话解决，0% 天然空白、100% 天然闭合。
+
+   ⛔ 不能画在 .pi::before / ::after 上 —— 那两个已被「断开斜杠」和
+      「已连接绿点」占用。这里用专门的子元素 .pi__ring。
+   ⛔ 环只在**该类设备有电量**时才显示（JS 侧给 --p 才生效）：
+      给没有电池的设备画一圈灰环，会被读成「0%」。
+   ⛔ 丝滑过渡：conic-gradient 的两个变量必须用 @property 注册出**类型**，
+      否则是离散 token、跳变不插值。--p 注册成 <number>、--ring-tone 注册成
+      <color>，配下面的 transition，电量每 3s 采样变化时弧长/颜色都平滑过渡，
+      跨档位（绿→蓝→琥珀→红）也不再瞬切。 */
+@property --p {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0;
+}
+@property --ring-tone {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: var(--green);
+}
+.pi__ring {
+  position: absolute;
+  inset: 1px;
+  border-radius: 50%;
+  display: none;
+  background: conic-gradient(var(--ring-tone) calc(var(--p) * 1%), var(--ring-track) 0);
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 2px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 2px));
+  transition: background 900ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+/* 有电量才显示：由 JS 设 --p（0~100） */
+.pi[data-batt="1"] .pi__ring { display: block; }
+/* 档位配色与浮层保持一致：≤10 红 / ≤20 琥珀 / ≤50 蓝 / 其余绿 */
+.pi[data-lv="hi"]   { --ring-tone: var(--green); }
+.pi[data-lv="mid"]  { --ring-tone: var(--accent); }
+.pi[data-lv="low"]  { --ring-tone: var(--amber); }
+.pi[data-lv="crit"] { --ring-tone: var(--danger); }
+/* 图标压在环之上 */
+.pi svg { position: relative; }
+
+/* 底槽色：胶囊底是 --soft-bg，比浮层更亮一点，需要略深的槽才看得出来。 */
+.periph-pill {
+  --ring-track: rgba(255, 255, 255, 0.26);
+}
+:root[data-scheme="light"] .periph-pill {
+  --ring-track: rgba(10, 20, 40, 0.22);
+}
+
 /* 閻庤鐡曠亸顏嗘崲濞戙垹绠抽柕澶樺灣缁愭鎮楅崷顓炰粶缂佽櫣鍋撶粋宥夘敊閸噮妫?+ 闂佸憡鐟ラ崢鏍箔閸涱垱鍠嗛柟鐑樻闂嗗綊鏌?*/
 .pi[data-on="1"] { color: var(--text); }
 .pi[data-on="1"][data-kind="headphone"] { color: var(--cyan); }
@@ -1705,6 +1849,12 @@ body.is-editing .edit-banner {
   background: var(--green);
   box-shadow: 0 0 4px var(--green);
 }
+/* 有电量环时**不再画绿点**：绿点定位在右下 2px/1px，正好压在环上 ——
+   实测绿环会被糊成一团，红/灰环像被咬掉一口。
+   语义不丢：环本身说明「这台在报状态」，图标仍是实色（对比断开态 0.42 + 红斜杠）。
+   ⛔ 必须写在 ::after 基础规则**之后**：两者同优先级，靠顺序取胜。
+   ⛔ 只隐藏 ::after（绿点），别连 data-on="0" 的 ::before 红斜杠一起隐藏。 */
+.pi[data-batt="1"]::after { display: none; }
 /* 闂佸搫鐗滄禍锝囨崲濞戙垹绠抽柕澶樺灣缁愭鏌涢妷褍浜鹃柣鏍电秮瀹曘垻鈧綆鍋呴?+ 婵炴垶鎸撮崑鎾绘⒑椤掍焦灏伴柡瀣ф櫊瀵爼鎮╅鐟颁壕?
    闂佸搫鍊圭划宥咁焽椤掑嫭鍋?::before 缂傚倷鐒︾换鍌烆敋椤旈敮鍋撶憴鍕叝缂傚秴鎳樺畷銏⑩偓锝傛櫈閸橆剟鐓崶褍鏋︾紒杈ㄧ箖缁嬪顓兼径妯绘緭婵犮垼鍩栭悧鏇€?SVG闂佹寧绋戦悧鍡涘箚娓氣偓瀹曟艾鈻庢惔锝囨啨婵炴垶鎼╂禍婊兠瑰鈧浠嬪炊瑜庨崐妤呮煕閺冨倸小缂佹梹鎸冲?path闂佹寧绋戦ˇ顓㈠焵?*/
 .pi[data-on="0"] { opacity: 0.42; }
@@ -1767,6 +1917,7 @@ body.is-editing .edit-banner {
 }
 .periph-row.is-on .periph-row__icon { color: var(--cyan); }
 .periph-row__icon svg { width: 13px; height: 13px; }
+
 .periph-row__body { min-width: 0; flex: 1 1 auto; }
 .periph-row__name {
   font-size: 12px;
@@ -1791,6 +1942,9 @@ body.is-editing .edit-banner {
   color: var(--green);
 }
 .periph-row__state.is-off { color: var(--text-faint); }
+/* 低电量（≤20%）：把「已连接 · N%」染成警示色，提醒换电池/充电。
+   只改颜色，不改文案 —— 数字仍是真实读数。 */
+.periph-row__state.is-lowbat { color: var(--amber); }
 
 /* 闂侀潧妫楅懟顖炲箯閻戣姤鍋╅柕澶涘瘜閸斿啴鎮规担鐟板姢妞わ富鍓熸俊鏉戭吋閸℃妯嗛梻浣虹摂閸ｎ垳妲愭导鏉戠煑妞ゅ繐瀚煬顒勫级閸喐灏柛娆忔閹峰骞嗚濡茬敻鎮跺☉妯垮闁搞値鍙冮幃鎶芥嚋椤戣棄浜?
    闂佸湱顣介弲娑㈡儓瀹ュ閿?/ 闂佸搫鍟版慨鐑藉吹鎼淬劌绠抽柕澶涢檮閺嗩亪鏌涢敐鍐ㄥ婵?HID 闂侀棿璀﹂崹铏櫠閺嶃劌顕辨慨妯哄暱濞堟壆绱掓径澶婂祮闁轰緡鍘借灇闁绘瑥鎳愮粈濉沬ndows 闁荤姳闄嶉崐鎾舵嫻閻旇　鍋撻悷鏉挎殨婵犲﹥鍨块幆鍥偄妞嬪孩婢栭柣搴㈢⊕閿氭繝鈧鍫熸櫖?
@@ -1901,10 +2055,13 @@ body.is-editing .edit-banner {
 }
 .taskbar-fund__label { color: var(--text-faint); }
 .taskbar-fund__value { font-family: var(--font-mono); color: var(--text); }
+.taskbar-fund__delta { font-family: var(--font-mono); font-weight: 500; color: var(--text-faint); }
 .taskbar-fund__chg { font-family: var(--font-mono); font-weight: 600; color: var(--text-faint); }
 /* 缂備椒鍕橀崹铏光偓瑙勬皑缁辨帡鎳楅婧炬晣闂佹寧绋戝﹢?闂佸吋绁撮埀顒€鍟跨紞鎾垛偓鍨緲鐎氬摜妲?*/
 .taskbar-fund__chg.up { color: var(--danger); }
 .taskbar-fund__chg.down { color: var(--green); }
+.taskbar-fund__delta.up { color: var(--danger); }
+.taskbar-fund__delta.down { color: var(--green); }
 
 /* ============================ 濠碘槅鍨埀顒冩珪閸嬨儵鏌涜箛瀣闁活偄妫楅湁妞ゆ棁鍋愬﹢?============================ */
 /* 濠电偞鎯岄崰鏍儑娴兼潙瑙﹂悘鐐插⒔婢瑰鎮规担鍙夋珔闁搞値鍙冨畷銏ゆ偄閻戞ɑ娅㈡繛瀵稿Ь椤曆勬叏閻旂厧鍐€闊洦鎸鹃弳鏃堟煕韫囧濡奸悘蹇ｅ灦閺佸秴顫㈤敃寮抏t 闁荤姾娅ｉ崰鏍р枔?--tb-inset-*闂?
@@ -2099,7 +2256,7 @@ body.is-editing .edit-banner {
 }
 .mc-fest.holiday:hover { background: rgba(var(--amber-rgb), 0.2); color: rgb(var(--amber-rgb)); }
 /* 闂佺厧鎼崐鐟拔?闂佺厧鎼崐褰掓儍?闂佺顑呭ú锕€锕㈤敓鐘茬睄闁靛鍎遍崸濠囨⒒閸稑鐏繝?*/
-.festival-modal { width: min(400px, 94vw); }
+.festival-modal { width: min(400px, 94vw); height: min(520px, 86vh); }
 .festival-modal .cal-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .festival-modal .cal-head span { flex: 1 1 auto; text-align: center; }
 .cal-nav {
@@ -2151,6 +2308,38 @@ body.is-editing .edit-banner {
 .lg-work { background: rgba(var(--danger-rgb), 0.8); }
 .lg-fest { background: var(--cyan); }
 .lg-term { background: var(--blue); }
+/* 更新节假日编辑弹窗：JSON 文本域 + 提示 + 错误行 */
+.holiday-editor { width: min(560px, 94vw); height: min(620px, 88vh); display: flex; flex-direction: column; }
+.holiday-editor h3 { margin: 0 0 8px; font-size: 16px; font-weight: 600; color: var(--text); }
+.holiday-editor .he-tip {
+  font-size: 12px; color: var(--text-dim); line-height: 1.6; margin-bottom: 10px;
+}
+.holiday-editor .he-tip code {
+  font-family: var(--font-mono, monospace); font-size: 11px;
+  background: var(--soft-bg); padding: 1px 5px; border-radius: 4px; color: var(--text);
+}
+.holiday-editor #he-json {
+  flex: 1 1 auto; min-height: 200px; width: 100%; resize: none;
+  font-family: var(--font-mono, monospace); font-size: 12px; line-height: 1.5;
+  color: var(--text); background: var(--soft-bg);
+  border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px;
+  outline: none;
+}
+.holiday-editor #he-json:focus { border-color: var(--accent); }
+.holiday-editor .he-err {
+  min-height: 18px; margin-top: 6px; font-size: 12px; color: var(--danger);
+}
+.holiday-editor .he-fetch {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap;
+}
+.holiday-editor .he-fetch-label { font-size: 12px; color: var(--text-dim); }
+.holiday-editor .he-fetch input[type="number"] {
+  width: 84px; padding: 5px 8px; font-size: 13px; color: var(--text);
+  background: var(--soft-bg); border: 1px solid var(--border); border-radius: 6px; outline: none;
+}
+.holiday-editor .he-fetch input[type="number"]:focus { border-color: var(--accent); }
+.holiday-editor .he-fetch-btn { padding: 5px 14px; }
+.holiday-editor .he-fetch-status { font-size: 11px; color: var(--text-faint); flex: 1 1 auto; }
 .mc-time {
   font-size: 32px; font-weight: 700; line-height: 1.1;
   font-variant-numeric: tabular-nums; letter-spacing: 1px;
@@ -2367,7 +2556,7 @@ body.is-editing .edit-banner {
 .remind-modal { width: min(480px, 94vw); }
 .rm-list {
   display: flex; flex-direction: column; gap: 8px;
-  margin-bottom: 12px; max-height: 52vh; overflow-y: auto;
+  margin-bottom: 12px; overflow-y: auto;
 }
 .rm-row { display: flex; align-items: center; gap: 8px; }
 .rm-icon {
@@ -2406,6 +2595,22 @@ body.is-editing .edit-banner {
 }
 .rm-del:hover { color: var(--danger); background: var(--bg-hover); }
 .rm-add { margin-bottom: 4px; }
+
+/* 提醒设置弹窗：固定整体高度，消除增删提醒时弹窗高度跳变。
+   做法：.remind-modal 定高，.rm-list 用 flex:1 吃掉「标题 + 久坐 + 喝水 + 添加 + 完成」
+   之外的剩余空间，内部滚动。这样无论 0 条还是 8 条提醒，弹窗外框高度恒定，
+   按钮不上下跳；列表区在 [min-height, max-height] 间稳定。 */
+/* 特异性用 .task-modal.remind-modal（0,2,0）压过 base .task-modal 的 width:520px，
+   否则同为 (0,1,0) 会被 base 覆盖，加宽不生效。 */
+.task-modal.remind-modal {
+  width: min(600px, 94vw);
+  height: min(680px, 88vh);
+}
+.remind-modal .rm-list {
+  flex: 1 1 auto;
+  min-height: 216px;   /* 空列表时也留出稳定区域，弹窗不被压成一小条 */
+  overflow-y: auto;    /* 弹窗定高，列表自滚动 */
+}
 
 /* 闂佸摜濮电换鍐箰婢舵劕绠甸柟鐗堟緲閺咁亪鎮规担绋库挃闁汇倕妫楅埢?*/
 .water-section {
@@ -3157,7 +3362,7 @@ html {
 .online-modal .online-hint { flex: 0 0 auto; }
 
 /* 闂佸湱铏庨崢浠嬪棘娓氣偓濮婂ジ鎮㈠畡鎵粴闂傚倸鐗勯崹鍝勵熆?*/
-.queue-modal { width: min(460px, 94vw); }
+.queue-modal { width: min(460px, 94vw); height: min(520px, 86vh); }
 .q-locate { display: inline-flex; align-items: center; gap: 6px; }
 .q-locate svg {
   width: 14px; height: 14px; flex: 0 0 14px;
@@ -3166,7 +3371,7 @@ html {
 }
 .queue-list {
   display: flex; flex-direction: column; gap: 2px;
-  max-height: 46vh; overflow-y: auto; margin-bottom: 12px;
+  flex: 1 1 auto; min-height: 0; overflow-y: auto; margin-bottom: 12px;
 }
 .queue-item {
   display: flex; align-items: center; gap: 10px;
@@ -3225,11 +3430,11 @@ html {
 .q-random-on { font-size: 11px; color: var(--blue); margin-left: 8px; }
 
 /* 闂傚倸锕ㄥ▍鏇犺姳椤斿墽涓嶉柨娑樺閸婄偟鈧鍠栧﹢閬嶆偘閵夆晜鏅慨姗嗗墮閽冪喖鏌涢弽褎鎯堢紒鏃堫棑娴狅箓鍩€椤掑嫭鏅柛顐ｇ箑缁狀垶鏌涢幒鎿冩畽闁?+ 闂佸憡鐟ㄥ▍鏇㈠锤婵犲洤绀夐柣妯肩帛濡椼劑鏌℃径濠傜殹缂?*/
-.source-modal { width: min(960px, 94vw); }
-.sm-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 14px; }
+.source-modal { width: min(960px, 94vw); height: min(680px, 88vh); }
+.sm-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 14px; flex: 0 0 auto; }
 .sm-head h3 { margin: 0; }
 .sm-count { font-size: 11.5px; color: var(--text-faint); }
-.sm-body { display: grid; grid-template-columns: 1fr 230px; gap: 18px; min-height: 0; }
+.sm-body { display: grid; grid-template-columns: 1fr 230px; gap: 18px; min-height: 0; flex: 1 1 auto; }
 .sm-sec-title {
   font-size: 11.5px; font-weight: 600; color: var(--text-dim);
   margin-bottom: 8px; letter-spacing: .3px;
@@ -3272,7 +3477,7 @@ html {
 .src-empty span { font-size: 11px; }
 .src-list {
   display: flex; flex-direction: column; gap: 6px;
-  max-height: 320px; overflow-y: auto;
+  flex: 1 1 auto; min-height: 0; overflow-y: auto;
 }
 .src-row {
   display: flex; align-items: center; gap: 8px;
@@ -3306,7 +3511,7 @@ html {
 }
 
 /* 婵炴垶鎸搁鍫澝归崶鈺冧笉闁挎稑瀚崐鐐碘偓娈垮枛濠€閬嶆偘閵夆晜鏅柛锔炬禌b 婵＄偑鍊楅。顔炬濠靛鐐婇柛婵嗗閺嗕即鎮樿箛鎾存儓妞ゆ洦鍙冮弫?*/
-.dl-modal { width: 960px; height: 560px; max-width: 94vw; max-height: 90vh; }
+.dl-modal { width: 960px; height: 560px; max-width: 94vw; }
 .dl-tabs {
   display: flex; gap: 4px; margin-bottom: 12px;
   border-bottom: 1px solid var(--border); flex: 0 0 auto;
@@ -3334,7 +3539,7 @@ html {
 .dl-tab-badge:empty { display: none; }
 .dl-tab-pane { display: none; flex: 1 1 auto; min-height: 0; }
 .dl-tab-pane.active { display: flex; flex-direction: column; }
-.dl-done-list { max-height: 320px; }
+.dl-done-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 .dl-item {
   display: flex; align-items: center; gap: 10px;
   padding: 9px 10px; background: var(--bg-panel);
@@ -3619,7 +3824,7 @@ html {
 }
 .task-modal {
   width: min(520px, 94vw);
-  max-height: 86vh;
+  height: min(640px, 86vh);
   display: flex;
   flex-direction: column;
   background: var(--bg-elevated);
@@ -3759,7 +3964,7 @@ input[type="number"]::-webkit-outer-spin-button {
 .cs-opt-check { display: inline-flex; color: var(--blue); flex: 0 0 auto; }
 .cs-empty { padding: 8px; text-align: center; font-size: 12px; color: var(--text-faint); }
 .tm-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.tm-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 16px; }
+.tm-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: auto; padding-top: 16px; }
 .tm-cancel {
   background: transparent; border: 1px solid var(--border-strong); color: var(--text-dim);
   padding: 9px 16px; border-radius: var(--radius-sm); cursor: pointer;
@@ -4070,7 +4275,9 @@ body.no-select { user-select: none; }
 @media (max-width: 820px) { .qa-groups { grid-template-columns: minmax(0, 1fr); } }
 
 /* 闂佸憡甯掑Λ娑氬垝瀹ュ洨涓嶉柨娑樺閸?*/
-.qa-glist { display: flex; flex-direction: column; gap: 4px; max-height: 40vh; overflow-y: auto; }
+.qa-groups-modal { height: min(520px, 82vh); }
+.qa-groups-modal #qa-glist { flex: 1 1 auto; min-height: 0; }
+.qa-glist { display: flex; flex-direction: column; gap: 4px; overflow-y: auto; }
 .qa-gitem {
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
   padding: 7px 9px; border-radius: 8px; background: var(--bg-panel-2); border: 1px solid var(--border);
@@ -4120,7 +4327,7 @@ body.no-select { user-select: none; }
 .file-menu button.danger:hover { background: rgba(var(--danger-rgb), 0.15); }
 
 /* 闂備緡鍋呭銊╁极閵堝拋鍤曢柛锔诲幘瀹曞爼鏌ㄥ☉妯煎ⅱ闁炽儲顭囬幏?/ 闁哄鐗婇幐鎼佸矗?/ 闂佸湱绮崝妤呭Φ濮樿埖鏅?*/
-.confirm-modal { width: min(420px, 92vw); }
+.confirm-modal { width: min(420px, 92vw); height: min(300px, 70vh); }
 .confirm-modal .cm-message {
   margin: 0 0 6px; font-size: 13.5px; line-height: 1.7;
   color: var(--text-dim); white-space: pre-line;
@@ -4497,7 +4704,7 @@ body.no-select { user-select: none; }
 .idea-empty { color: var(--text-faint); font-size: 13px; padding: 24px 2px; }
 
 /* 闂佽绻愰悘姘跺礉閸涱垳纾介柡宥庡墰鐢棛鈧鍠栧﹢閬嶆偘?*/
-.idea-edit-modal { width: min(560px, 92vw); }
+.idea-edit-modal { width: min(560px, 92vw); height: min(400px, 80vh); }
 .idea-edit-modal h3 { margin: 0 0 14px; font-size: 17px; }
 .idea-edit-modal .tm-field { margin: 0 0 14px; }
 .idea-edit-modal textarea {
@@ -5149,10 +5356,11 @@ input[type="time"]::-webkit-calendar-picker-indicator:hover {
 .search-row .input { flex: 1; }
 .btn-xs { padding: 4px 10px; font-size: var(--text-sm); }
 
-.fund-modal { width: min(480px, 94vw); }
+.fund-modal { width: min(480px, 94vw); height: min(420px, 76vh); }
 .fund-modal .tm-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .fund-modal-info { font-size: var(--text-sm); color: var(--text-dim); padding: 6px 0; }
 .fund-modal-info b { color: var(--text); }
+.fund-chart-modal { height: min(600px, 84vh); }
 .fund-chart-modal canvas { width: 100%; height: 180px; }
 .chart-sub { font-size: var(--text-sm); color: var(--text-faint); margin-bottom: 8px; }
 .chart-periods { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0 10px; }
@@ -5494,7 +5702,7 @@ grid-template-columns: minmax(200px, 2fr) 1fr auto;
 :root[data-scheme="light"] .shc.off    { background: rgba(10, 20, 40, .10); }
 
 /* ---------- 缂傚倸鍊归悧鐐垫椤愶箑闂?/ 闂佸搫鍟ㄩ崕杈╂崲閺傛鍤曢柛锔诲幘瀹?---------- */
-.sch-modal { width: min(680px, 94vw); max-height: 88vh; overflow-y: auto; }
+.sch-modal { width: min(680px, 94vw); height: min(720px, 88vh); overflow-y: auto; }
 .log-modal { width: min(760px, 94vw); }
 .sch-form { display: flex; flex-direction: column; gap: 12px; }
 .sch-inline { display: flex; gap: 10px; align-items: flex-start; }
@@ -5542,7 +5750,7 @@ grid-template-columns: minmax(200px, 2fr) 1fr auto;
 }
 .sch-osout:empty { display: none; }
 
-/* ---------- 闂佸搫鍟ㄩ崕杈╂崲閺傛鍤曢柛锔诲幘瀹?---------- */
+  /* ---------- 日志 ---------- */
 .sch-logtabs { display: flex; align-items: center; gap: 6px; border-bottom: 1px solid var(--border); padding-bottom: 8px; }
 .sch-tab {
   background: transparent; border: 1px solid var(--border); color: var(--text-dim);
@@ -5550,18 +5758,121 @@ grid-template-columns: minmax(200px, 2fr) 1fr auto;
 }
 .sch-tab:hover { background: var(--bg-hover); color: var(--text); }
 .sch-tab.on { background: rgba(var(--blue-rgb), .14); border-color: rgba(var(--blue-rgb), .4); color: var(--text); }
-.sch-logbody { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; min-height: 120px; }
+/* 运行日志弹窗：定高 + 只有列表区滚动。
+   ⛔ 这里踩过一个「看不出来但很致命」的坑：.sch-logbody 原是 flex 列容器，
+   flex 子项默认 flex-shrink:1 ⇒ 记录一多（实测 18 条）每条被压成 14px，
+   徽标和时间只剩半截；同时弹窗整体 overflow-y:auto 会把标题/标签页一起卷走。
+   现在的约束：
+     1. 弹窗定高（height 而非 max-height），内容增多不会把弹窗撑高；
+     2. 只有 .sch-logbody 滚动，标题行与标签页常驻；
+     3. 条目 flex:0 0 auto（不许压扁），条目再多也只是列表内滚动。 */
+.task-modal.log-modal {
+  width: min(760px, 94vw);
+  height: min(680px, 88vh);
+  overflow: hidden;
+}
+/* 列表本体：整块**一个**面板 + 行间分隔线，而不是每条一张卡片。
+   原先是 N 个各自带边框/圆角的卡片堆叠，一条 38px，10 条就要滚两屏；
+   改成行式列表后单行 31px，478px 的可用高度能放 15 条，十多个记录不用滚。
+   flex:1 + 定高弹窗 ⇒ 1 条记录和 18 条记录时弹窗高度完全一致。 */
+.log-modal .sch-logbody {
+  flex: 1 1 auto;
+  min-height: 0;       /* flex 子项要能小于内容高度，否则 overflow 不生效 */
+  margin-top: 10px;
+  gap: 0;
+  padding: 0;
+}
+/* 面板内调度：带边框的整块列表，只有它自己滚动 */
+.log-modal .sch-logbody[data-tab="panel"] {
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-panel-2);
+}
+/* 系统计划任务：内容是一段路径 + 一整块日志，不要包边框 ——
+   .sch-log 本身已有底色，再套一层会变成「框里套框」。 */
+.log-modal .sch-logbody[data-tab="os"] {
+  overflow-y: auto;
+  gap: 8px;
+}
+.log-modal .sch-logbody[data-tab="os"] .sch-log { max-height: none; }
+/* 列表内展开的日志：**不设高度上限**，由列表统一滚动。
+   实测 9 份签到日志的自然高度：中位数 197px，7 份 ≤ 260px，最长 663px。
+   给它单独设 max-height 会带来两个坏处：
+     ① 大多数短日志本可以完整显示，限高反而凭空造出滚动条；
+     ② 日志区 + 列表区两层都能滚，滚轮到底滚哪一层全看指针位置（体验很差）。
+   不限高后只有一个滚动容器（列表），结论行永远完整可见，
+   代价是长日志会把别的记录挤出视区 —— 由「一次只展开一条」来兜。 */
+.log-modal .sch-run .sch-log { max-height: none; }
+/* 空态不要把面板撑成一大块空白 */
+.log-modal .sch-logbody > .empty-state { margin: auto; border: none; background: none; }
+.sch-logbody { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; min-height: 120px; }
 .sch-logpath { font-size: var(--text-xs); color: var(--text-faint); word-break: break-all; }
-.sch-run { border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+/* ⛔ flex: 0 0 auto 不能省：.sch-logbody 是 flex 列容器，子项默认 flex-shrink:1，
+   记录一多就整排压扁（实测 18 条 → 每条 14px，徽标只剩半截）。
+   加了它之后条目保持自身高度，超出部分交给列表区滚动。 */
+.sch-run {
+  flex: 0 0 auto;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  overflow: hidden;
+  background: transparent;
+}
+.sch-run:last-child { border-bottom: none; }
+/* 单行 30px：徽标 16px + 上下各 7px 留白。行式列表的关键是**不换行**
+   （flex-wrap 会造成同一列里有的行两行高、有的行一行高，参差不齐）。 */
 .sch-run-head {
-  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
-  padding: 7px 10px; cursor: pointer; background: var(--bg-panel-2);
+  display: flex; align-items: center; gap: 8px;
+  min-height: 30px;
+  padding: 0 10px;
+  cursor: pointer;
+  background: transparent;
 }
 .sch-run-head:hover { background: var(--bg-hover); }
-.sch-run-time { font-size: var(--text-sm); color: var(--text-dim); }
-.sch-run-meta { font-size: var(--text-xs); color: var(--text-faint); margin-left: auto; }
-/* 闂佺鍩栭敋鐟滅増妫冮弫宥咁潩椤愩倗鐓傞柣蹇曞仦濞叉粓濡靛顓炵窞闁圭虎鍠栭崝銉╂煥濞戞瑧銆掗柛瀣剁秮瀹曟瑧鎷犻懠顒佺秾閻庢鍠掗崑鎾诲级閸喐灏柛?*/
-.sch-run[data-open="0"] .sch-logtext { display: none; }
+/* 徽标列固定宽度：状态徽标本身宽度随文案变（「失败」2字 / 「已停止」3字），
+   不固定的话每条的时间起点都不一样，整列看起来是锯齿状的。
+   ⛔ 用固定宽而不是 align-items:baseline —— 后者只对齐基线，列仍不齐。 */
+.sch-run-head > .badge {
+  flex: 0 0 auto;
+  width: 58px;
+  justify-content: center;
+  margin: 0;
+}
+/* 时间列给最小宽度：toLocaleString 的宽度随日期位数变化
+   （`2026/11/9` 比 `2026/11/10` 窄 7px），不定宽时右侧耗时列会左右浮动。
+   左边缘已由固定 58px 的徽标列锚定，这里只需保证右边界也稳定。 */
+.sch-run-time {
+  flex: 0 0 auto;
+  min-width: 124px;
+  font-size: var(--text-sm); color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.sch-run-meta {
+  font-size: var(--text-xs); color: var(--text-faint);
+  margin-left: auto; font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+/* 展开态：头部与下方日志连成一体，用左侧色条标出「当前看的是这条」 */
+.sch-run[data-open="1"] > .sch-run-head,
+.sch-run[data-open="0"] > .sch-run-head {
+  /* 左侧预留 3px 色条位，两种态下内容位置一致，切换时不横移 */
+  padding-left: 10px;
+  border-left: 3px solid transparent;
+  margin-left: 0;
+}
+.sch-run[data-open="1"] > .sch-run-head {
+  background: rgba(var(--blue-rgb), .07);
+  border-left-color: var(--blue);
+}
+/* 失败记录常驻左侧色条：一份签到日志里十几条记录，
+   要能一眼扫出「哪几天是红的」，而不是逐条读徽标文字。 */
+.sch-run[data-tone="bad"] > .sch-run-head { border-left-color: var(--danger); }
+.sch-run[data-tone="warn"] > .sch-run-head { border-left-color: var(--amber); }
+.sch-run[data-tone="missed"] > .sch-run-head { border-left-color: rgba(var(--danger-rgb), .45); }
+/* 折叠态隐藏日志正文：行内实时输出 / 历史共用同一语义 */
+.sch-run[data-open="0"] .sch-logtext,
+.sch-run[data-open="0"] .sch-log { display: none; }
 .sch-logtext {
   margin: 0; padding: 10px; max-height: 340px; overflow: auto;
   background: rgba(0, 0, 0, .28);
@@ -5569,4 +5880,138 @@ grid-template-columns: minmax(200px, 2fr) 1fr auto;
   font-size: var(--text-xs); line-height: 1.6; color: var(--text-dim);
   white-space: pre-wrap; word-break: break-all;
 }
+
+/* ---------- 结构化日志（签到脚本 stdout）----------
+   签到日志的骨架是固定的：横幅 → 步骤 ①②③ → 每步的输出 → 结论。
+   原先整块 <pre> 全同色，读一份日志等于逐行扫。
+   这里只做展示层增强：时间戳独立成列、分隔线收成细线、结论按成败染色。
+   文本本身一个字都不改（行内容仍整体 esc 转义），复制出去还是原始日志。 */
+.sch-log {
+  max-height: 340px; overflow: auto;
+  padding: 8px 10px;
+  background: rgba(0, 0, 0, .28);
+  font-family: var(--font-mono, ui-monospace, Consolas, monospace);
+  font-size: var(--text-xs); line-height: 1.65; color: var(--text-dim);
+}
+.slg-l {
+  display: flex; align-items: flex-start; gap: 8px;
+  padding: 1px 0;
+}
+/* 时间戳列：右对齐 + 等宽数字，避免 9/10/11 点位数不同导致正文左边缘跳动。
+   ⛔ 不能加 user-select: none —— 用户框选整段日志复制时会把时间戳丢掉，
+      粘到别处就成了「没有时刻的流水」，排查问题时反而更费劲。 */
+.slg-t {
+  flex: 0 0 auto; min-width: 52px;
+  color: var(--text-faint); opacity: .75;
+  font-variant-numeric: tabular-nums; text-align: right;
+}
+.slg-x { flex: 1 1 auto; min-width: 0; white-space: pre-wrap; word-break: break-word; }
+.slg-l.is-blank { height: 6px; padding: 0; }
+/* 分隔线：原日志里成对的 ===== 折成一条 1px 细线，不再占两整行 */
+.slg-rule { height: 1px; margin: 6px 0; background: var(--border); }
+/* 横幅：`── 微信读书 自动阅读 ──` 这类段落标题 */
+.slg-banner {
+  margin: 8px 0 2px; padding: 0 0 0 7px;
+  border-left: 2px solid var(--border-strong);
+  color: var(--text); font-weight: 600;
+}
+.slg-l.is-banner { color: var(--text); font-weight: 600; }
+/* 步骤号行：整份日志的骨架，给一点强调但不用正文色，否则和结论抢焦点 */
+.slg-l.is-step { color: var(--text); }
+.slg-l.is-step .slg-x { font-weight: 600; }
+/* 圈号 ①②③ 在等宽拉丁字体栈里没有字形，10px 加粗下会回退成难辨的替代字符
+   （实测看起来像「带斜线的圆圈」，认不出是数字）。
+   只给这几个字符换 UI 字体，周围正文仍是等宽 —— 字符本身不动，复制出去还是 ①②③。 */
+.slg-n {
+  font-family: var(--font);
+  font-style: normal;
+  font-weight: 600;
+  /* 圈号在 UI 字体里偏小，放大一档才能与等宽正文视觉齐高 */
+  font-size: 1.15em;
+  line-height: 1;
+}
+/* 结论行：每份脚本的最后一行，成败只看它 —— 做成一条色带 */
+.slg-l.is-concl {
+  /* padding + 等量负 margin：色带向外扩，正文与时间戳列回到原位。
+     ⛔ 少了负 margin，这一行的时间戳会比其它行右移 8px —— 实测离散度 [83, 91]，
+        整列看起来就是「最后一行缩进了一格」。is-bad / is-warn 同理。 */
+  margin: 5px -8px 1px;
+  padding: 5px 8px;
+  border-radius: var(--radius-xs);
+  background: var(--bg-panel-2);
+  color: var(--text);
+}
+.slg-l.is-concl .slg-x { font-weight: 600; }
+.slg-l.is-concl[data-s="ok"] { background: rgba(var(--green-rgb), .12); box-shadow: inset 2px 0 0 var(--green); }
+.slg-l.is-concl[data-s="bad"] { background: rgba(var(--danger-rgb), .12); box-shadow: inset 2px 0 0 var(--danger); }
+.slg-l.is-concl[data-s="warn"] { background: rgba(var(--amber-rgb), .12); box-shadow: inset 2px 0 0 var(--amber); }
+.slg-l.is-concl[data-s="ok"] .slg-x { color: var(--green); }
+.slg-l.is-concl[data-s="bad"] .slg-x { color: var(--danger); }
+.slg-l.is-concl[data-s="warn"] .slg-x { color: var(--amber); }
+/* 单行语义色：只给「行首标记」定调的行上色（见 logLineKind 的顺序）。
+   行尾挂 ⚠ 的进度行仍是正文色，否则一份日志 29 条警告行会把面板淹没。
+
+   ⛔ 失败/警告**不整行染文字色**，只用「底色带 + 左侧实线 + 符号染色」：
+      实测掘金那条 ERROR 有 800+ 字符，折行后占 5~6 行，整行染红会糊成一大块
+      红底，正文本身反而看不清（越是要读的行越读不动）。
+      改用淡色背景后，扫描时靠左侧竖条定位，阅读时文字仍是正文色。 */
+/* 成功行不加底色：签到脚本里成功是常态（书币兑换一次 7 条 ✓ 连排），
+   每条都铺一层绿底会变成斑马纹，反而抢走注意力。只有异常才需要底色带。 */
+.slg-l.is-ok { color: var(--text-dim); }
+.slg-l.is-bad,
+.slg-l.is-warn {
+  /* ⛔ 不能用 --text-dim：异常行正是最需要读清的那几行，
+     偏暗的文字叠在色带上对比度更低（实测长 ERROR 行几乎看不清）。
+     用正文色 --text，靠色带和左侧实线表达「这行有问题」。 */
+  color: var(--text);
+  /* ⛔ padding 必须用负 margin 抵消：.slg-l 是 flex 行，时间戳列在它内部，
+     只加 padding 会把这一行的时间戳整体右移 7px —— 长日志里断断续续的
+     红带会让时间戳列看起来参差不齐。负 margin 让色带向外溢、正文位置不动。 */
+  padding: 2px 7px;
+  margin: 1px -7px;
+  border-radius: 2px;
+}
+.slg-l.is-bad { background: rgba(var(--danger-rgb), .08); box-shadow: inset 2px 0 0 var(--danger); }
+.slg-l.is-warn { background: rgba(var(--amber-rgb), .08); box-shadow: inset 2px 0 0 rgba(var(--amber-rgb), .75); }
+.slg-l.is-note { color: var(--text-dim); }
+/* 被判定为失败/警告的那一行，行首标记保持高饱和（竖条之外再给一个落点） */
+.slg-l.is-bad .slg-mk { color: var(--danger); }
+.slg-l.is-warn .slg-mk { color: var(--amber); }
+/* 行内标记：✓ / ⚠ / ✗ 染色但不改字重，保持等宽对齐。
+   快速否定选择器把行首已整体染色的情况排除，避免同一符号叠两层色。 */
+.slg-mk { font-style: normal; font-weight: 700; }
+.slg-mk.ok { color: var(--green); }
+.slg-mk.warn { color: var(--amber); }
+.slg-mk.bad { color: var(--danger); }
+/* 跨天分隔：连续多天日志里，只看 HH:MM 分不清是哪天 */
+.slg-date {
+  display: flex; align-items: center; gap: 8px;
+  margin: 10px 0 4px; color: var(--text-faint); font-size: var(--text-xs);
+}
+.slg-date::before, .slg-date::after {
+  content: ""; flex: 1 1 auto; height: 1px; background: var(--border);
+}
+.slg-date:first-child { margin-top: 0; }
+.slg-empty { padding: 6px 0; color: var(--text-faint); }
+/* 浅色主题：日志底不能沿用深色的 rgba(0,0,0,.28) ——
+   实测中文正文在上面只有 3.37 对比度、时间戳 1.35、结论红字 2.13，全部低于可读线
+   （WCAG AA 正文 4.5）。浅底改用极淡的中性底，文字保持深色。 */
+:root[data-scheme="light"] .sch-log { background: rgba(10, 20, 40, .035); }
+:root[data-scheme="light"] .sch-logtext { background: rgba(10, 20, 40, .035); }
+/* 浅色下时间戳要压深而不是提亮：深色主题靠 --text-faint（比正文暗）区分，
+   浅色主题里「更淡」= 更接近白底 = 更看不清。这里改用中灰 + 去掉降透明。 */
+:root[data-scheme="light"] .slg-t { color: #5b6675; opacity: 1; }
+
+/* 浅色主题：语义色底纹在浅底上要抬高透明度才看得见。
+   ⛔ 不能改成 --bg-panel-2 —— 那等于把成败色完全抹掉，浅色主题下就分不出红绿了。 */
+:root[data-scheme="light"] .slg-l.is-concl[data-s="ok"] { background: rgba(var(--green-rgb), .10); }
+:root[data-scheme="light"] .slg-l.is-concl[data-s="bad"] { background: rgba(var(--danger-rgb), .10); }
+:root[data-scheme="light"] .slg-l.is-concl[data-s="warn"] { background: rgba(var(--amber-rgb), .12); }
+/* 浅色底上 --danger(#cf222e) 只有 3.79 对比度，压深一档到 4.6+ */
+:root[data-scheme="light"] .slg-l.is-concl[data-s="bad"] .slg-x { color: #a40e1b; }
+:root[data-scheme="light"] .slg-l.is-concl[data-s="ok"] .slg-x { color: #14682c; }
+:root[data-scheme="light"] .slg-l.is-concl[data-s="warn"] .slg-x { color: #7a5200; }
+:root[data-scheme="light"] .slg-l.is-bad { background: rgba(var(--danger-rgb), .07); }
+:root[data-scheme="light"] .slg-l.is-warn { background: rgba(var(--amber-rgb), .09); }
 .sch-set-modal .tm-field { margin-bottom: 12px; }
+.sch-set-modal { height: min(380px, 70vh); }

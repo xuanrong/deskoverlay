@@ -69,6 +69,11 @@ windows = { version = "0.61", features = [
   "Win32_Devices_DeviceAndDriverInstallation",
   # HID 描述符：读 UsagePage/Usage 判断鼠标接口是真外设还是厂商自定义集合
   "Win32_Devices_HumanInterfaceDevice",
+  # 外设电量：CM_Get_DevNode_PropertyW 读 DEVPKEY_Device_BatteryLevel，
+  # 它的 propertytype 参数类型 DEVPROPTYPE 由本 feature 门控。
+  # ⚠️ 这是**必需**功能依赖，不是随手加的（AGENTS-archive 里"别随手加 feature"
+  #    指的是为了一行代码塞进整个 Win32 模块；这里换来的是键鼠/耳机电量显示）。
+  "Win32_Devices_Properties",
   # 音频端点属性读取：IPropertyStore 在 UI::Shell::PropertiesSystem
   "Win32_UI_Shell_PropertiesSystem",
   # PROPVARIANT 的 vt/uintVal 字段受 Win32_System_Variant 门控
