@@ -16,7 +16,7 @@ import { Theme } from "./theme.js";
 import { toast } from "./toast.js";
 import { pillFor, lunarText, lunarShort, getDayEvents, holidayOf, workdayOf, setLegalOverride, fetchLegalYear } from "./festivals.js";
 import { initWorkspace, openModule, setQuietToast, toggleEditMode } from "./workspace.js";
-import { esc } from "./utils.js";
+import { esc, fmtMD } from "./utils.js";
 
 // -------------------- 启动 Provider --------------------
 Providers.startAll();
@@ -44,7 +44,6 @@ function refreshFestival() {
 }
 
 const WEEK_CN = "日一二三四五六";
-const fmtMD = (d) => `${d.getMonth() + 1}月${d.getDate()}日`;
 let festPanelEl = null;
 let festView = null; // 当前查看的月份（1 号）
 function showFestivalPanel() {
@@ -116,9 +115,8 @@ function showFestivalPanel() {
   draw();
 }
 
-// 更新节假日：弹出 JSON 编辑框，用户粘贴国务院年度安排（与内置 LEGAL 表同结构）。
+// 更新节假日：弹出编辑框，联网拉取国务院年度安排（与内置 LEGAL 表同结构），
 // 保存到 state.settings.legalOverride 并立即生效（setLegalOverride 清缓存重算）。
-// 无网络依赖 —— 每年 11 月新安排公布后，从中国政府网复制对应 JSON 粘进来即可。
 function openHolidayEditor(onSaved) {
   const cur = state.settings?.legalOverride || {};
   const ov = document.createElement("div");

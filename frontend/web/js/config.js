@@ -5,7 +5,7 @@
 // ⚠️ 注意：system（系统健康）**不在**这张表里 —— 它的浮层已整体移除，
 // CPU / 内存 / 磁盘改为底部任务栏常驻读数（见 workspace.js 的 bindTaskbarSystem）。
 // 因此不要把它加回来：一加回来，卡片补卡逻辑与指令条都会立刻多出这条入口。
-import { ICON_HOME, ICON_MUSIC, ICON_NOTES, ICON_LIST, ICON_IDEA, ICON_GEAR, ICON_EXTERNAL, ICON_FUND, ICON_AI, ICON_CLOCK, ICON_KANBAN, ICON_MUYU } from "./icons.js";
+import { ICON_HOME, ICON_MUSIC, ICON_NOTES, ICON_GEAR, ICON_EXTERNAL, ICON_FUND, ICON_CLOCK, ICON_KANBAN, ICON_MUYU, ICON_IDEA } from "./icons.js";
 
 export const MODULES = [
   { id: "dashboard", title: "今日概览", icon: ICON_HOME },
@@ -36,25 +36,16 @@ export const STATUS_LABEL = {
 // 优先级中文标签
 export const PRIORITY_LABEL = { P0: "紧急", P1: "高", P2: "中", P3: "低", P4: "较低" };
 
-// 提醒的默认内容已移除（2026-10-07）。
-// 这里原本有一份 `DEFAULT_REMINDERS`，预置两条示例提醒（"每日计划" 09:30 / "下班打卡" 18:00）。
-// 它与 state.js 里那份 SCHEDULER_SEED 是同一个模式 —— 把「用户数据」写进 git 跟踪的源码。
-// 虽然这两条只是通用示例、不含个人路径，但同一个模式迟早会再长出下一份带个人信息的预置，
-// 所以一并清掉。实测它当时已近乎死代码（state.reminders 默认就是 []，undefined 分支基本不命中），
-// 删除不改变任何现有行为。
-//
-// 只保留字段语义说明（写提醒功能时照此实现）：
+// 提醒无预置内容，完全由用户在时钟块的配置弹窗里增删 / 启停 / 配置。
+// 字段语义（写提醒功能时照此实现）：
 //   type: "daily"（每日固定时刻触发） | "interval"（每 N 分钟滚动触发）
 //   daily 用 time("HH:MM") + lastTriggeredDate（当日防重复）；interval 用 intervalMin + lastAt
-// 提醒现在完全由用户在时钟块的配置弹窗里增删 / 启停 / 配置。
 
 // ─── 签到结果目录 ───
 // 唯一真相在这里：state.js 的默认结构与老数据迁移、首页签到卡的读取，全部引用这个常量。
 // ⚠ **脚本侧另有一份对应物**：签到脚本目录下的 `checkin_paths.py`（其 RESULT_DIR 常量）。
-//    改路径必须两边同时改，只改一边会出现「脚本写了、面板读不到」的静默失配
-//    （面板刷新按钮读 resultDir\last_result.json 与 trae_last_result.json）。
+//    改路径必须两边同时改，只改一边会出现「脚本写了、面板读不到」的静默失配。
 // 放在仓库内的 .workbuddy/ 下：该目录已在 .gitignore 里，结果文件不会污染仓库。
-// （历史：这里曾是 C:\Users\<用户名>\workbuddy-checkin\logs —— 个人路径进了 git 跟踪的源码）
 export const CHECKIN_RESULT_DIR = "C:\\TraeProjects\\deskoverlay\\.workbuddy\\checkin-logs";
 
 // 旧路径的后缀。老 state.json 里存的是完整旧路径，**非空** ⇒ 只改默认值不会生效，

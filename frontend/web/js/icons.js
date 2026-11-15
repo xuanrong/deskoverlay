@@ -52,6 +52,8 @@ export const ICON_EYE = `<svg viewBox="0 0 24 24"><path d="M2.5 12S6 5.5 12 5.5 
 // 音乐播放模式
 export const ICON_SHUFFLE = `<svg viewBox="0 0 24 24"><path d="M16 3h5v5"/><path d="M4 20 20 4"/><path d="M21 15v6h-6"/><path d="M4 4l5 5"/></svg>`;
 export const ICON_REPEAT = `<svg viewBox="0 0 24 24"><path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></svg>`;
+// 单曲循环：循环箭头 + 中间数字 1（区别于列表循环 ICON_REPEAT）
+export const ICON_REPEAT_ONE = `<svg viewBox="0 0 24 24"><path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/><text x="12" y="15.5" text-anchor="middle" font-size="8" font-weight="700" fill="currentColor" stroke="none">1</text></svg>`;
 // 定位当前歌曲（准星：外圈 + 中心点 + 四向刻度）
 export const ICON_LOCATE = `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="1.6"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>`;
 

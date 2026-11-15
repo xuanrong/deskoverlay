@@ -5,13 +5,15 @@
 import { state, saveState } from "../state.js";
 import { invoke, listen } from "../bus.js";
 import { toast } from "../toast.js";
-import { esc, uid } from "../utils.js";
+import { esc, uid, ymd } from "../utils.js";
 // 估值核心（重仓股拟合 + 精度自校准）已抽成独立纯模块：不碰 DOM、不碰闭包、不碰 state。
 // 依赖全部由下方 createEstimator({…}) 的 ports 注入，因此可脱离应用单独跑单测。
 import { createEstimator } from "./fund-estimator.js";
 // AI 分析（纯模块）：组装持仓快照 → 组 OpenAI 兼容请求 → 解析报告（含 SSE 流式增量）。
 // 同样零 import / 零 DOM / 零全局时钟，网络与时钟由下面 createFundAi({…}) 注入。
 import { createFundAi, createStreamParser, extractContent, AI_DEFAULTS, AI_HISTORY_MAX } from "./fund-ai.js";
+import { createSelect } from "../selectbox.js";
+import { createDatePicker } from "../datepicker.js";
 
 const ID = "fund";
 const TITLE = "基金管家";
@@ -519,10 +521,9 @@ export function renderFund(view) {
       const list = arr
         .map((p) => {
           const d = new Date(num(p.x, 0));
-          // 用本地时区格式化日期（中国东八区），避免 toISOString 的 UTC 日期偏移
-          const y = d.getFullYear(), mo = String(d.getMonth() + 1).padStart(2, "0"), da = String(d.getDate()).padStart(2, "0");
           return {
-            date: isFinite(d.getTime()) ? y + "-" + mo + "-" + da : "",
+            // ymd 来自 utils.js（本地自然日，避免 toISOString 的 UTC 日期偏移）；无效日期留空
+            date: isFinite(d.getTime()) ? ymd(d) : "",
             nav: num(p.y, 0),
             dwjz: num(p.y, 0),
             pct: p.equityReturn === undefined || p.equityReturn === null || p.equityReturn === "" ? null : num(p.equityReturn, 0),
@@ -1014,10 +1015,7 @@ export function renderFund(view) {
   const WH_LIVE_SUBS = new Set(["watch", "hold", "look", "plans"]);
 
   // ---------- 定投计划：日期推算 / 按扣款日取净值 / 自动记账 / 收益统计 ----------
-  // 日期统一按「本地自然日」处理（不用 toISOString，避免 UTC 偏移把扣款日挪一天）
-  function ymd(d) {
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-  }
+  // 日期统一按「本地自然日」处理（ymd 来自 utils.js，不用 toISOString，避免 UTC 偏移把扣款日挪一天）
   function parseYmd(s) {
     const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s == null ? "" : s).trim());
     if (!m) return null;
@@ -3055,10 +3053,7 @@ export function renderFund(view) {
         <h3>${editing ? "编辑定投" : "新建定投"}</h3>
         <div class="tm-field">
           <label class="field-label">基金</label>
-          <select class="select" id="fund-p-code">
-            ${wk.length ? `` : `<option value="">（自选为空，请手动填写代码）</option>`}
-            ${wk.map((w) => `<option value="${esc(w.code)}"${editing && editing.code === w.code ? " selected" : ""}>${esc(w.name || w.code)} · ${esc(w.code)}</option>`).join("")}
-          </select>
+          <div class="select" id="fund-p-code"></div>
         </div>
         <div class="tm-row">
           <div class="tm-field">
@@ -3077,19 +3072,17 @@ export function renderFund(view) {
           </div>
           <div class="tm-field">
             <label class="field-label">周期</label>
-            <select class="select" id="fund-p-cycle">
-              ${PLAN_CYCLES.map((c) => `<option value="${c.id}"${editing && editing.cycle === c.id ? " selected" : (!editing && c.id === "month" ? " selected" : "")}>${c.label}</option>`).join("")}
-            </select>
+            <div class="select" id="fund-p-cycle"></div>
           </div>
         </div>
         <div class="tm-row">
           <div class="tm-field">
             <label class="field-label">扣款日</label>
-            <select class="select" id="fund-p-day"></select>
+            <div class="select" id="fund-p-day"></div>
           </div>
           <div class="tm-field">
             <label class="field-label">开始日期</label>
-            <input class="input" id="fund-p-start" type="date" value="${esc(editing ? editing.startDate : ymd(new Date()))}" />
+            <div class="input" id="fund-p-start"></div>
           </div>
         </div>
         <div class="field-hint" id="fund-p-hint"></div>
@@ -3104,6 +3097,21 @@ export function renderFund(view) {
     const amtEl = ov.querySelector("#fund-p-amount"), cycEl = ov.querySelector("#fund-p-cycle");
     const dayEl = ov.querySelector("#fund-p-day"), startEl = ov.querySelector("#fund-p-start");
     const hintEl = ov.querySelector("#fund-p-hint");
+
+    // 自定义下拉（与其它弹窗统一）：基金 / 周期 / 扣款日；开始日期用自绘日历
+    createSelect({
+      el: selEl,
+      value: editing ? editing.code : (wk[0]?.code || ""),
+      options: wk.map((w) => ({ value: w.code, label: `${w.name || w.code} · ${w.code}` })),
+      placeholder: wk.length ? "选择自选基金" : "（自选为空，请手动填写代码）",
+    });
+    createSelect({
+      el: cycEl,
+      value: editing ? editing.cycle : "month",
+      options: PLAN_CYCLES.map((c) => ({ value: c.id, label: c.label })),
+    });
+    createDatePicker({ el: startEl, value: editing ? editing.startDate : ymd(new Date()) });
+
     // 说明文案必须随周期变：日投与月/周投的**非交易日规则不同**
     // （日投每天都要扣，遇非交易日直接跳过；月/周投顺延到下一交易日、按该交易日净值补记）
     const fillHint = () => {
@@ -3115,17 +3123,17 @@ export function renderFund(view) {
     const fillDays = (keep) => {
       const want = keep !== undefined ? String(keep) : dayEl.value;
       if (cycEl.value === "day") {
-        dayEl.innerHTML = `<option value="1">每个交易日（周末与节假日不扣）</option>`;
+        dayEl._setOptions([{ value: "1", label: "每个交易日（周末与节假日不扣）" }]);
         dayEl.value = "1";
-        dayEl.disabled = true;
+        dayEl.classList.add("disabled"); // 日投无扣款日可选：置灰（值固定 1）
         return;
       }
-      dayEl.disabled = false;
+      dayEl.classList.remove("disabled");
       if (cycEl.value === "week") {
-        dayEl.innerHTML = PLAN_WEEKDAYS.map((w, i) => `<option value="${i + 1}">${w}</option>`).join("");
+        dayEl._setOptions(PLAN_WEEKDAYS.map((w, i) => ({ value: String(i + 1), label: w })));
         dayEl.value = /^[1-7]$/.test(want) ? want : "1";
       } else {
-        dayEl.innerHTML = Array.from({ length: 28 }, (_, i) => `<option value="${i + 1}">每月 ${i + 1} 日</option>`).join("");
+        dayEl._setOptions(Array.from({ length: 28 }, (_, i) => ({ value: String(i + 1), label: `每月 ${i + 1} 日` })));
         dayEl.value = /^\d{1,2}$/.test(want) && Number(want) >= 1 && Number(want) <= 28 ? want : "1";
       }
     };
@@ -3133,7 +3141,7 @@ export function renderFund(view) {
     fillHint();
     cycEl.addEventListener("change", () => { fillDays(undefined); fillHint(); });
     // 选自选自动带出代码与名称（仍可手动改）
-    if (selEl && selEl.options.length) {
+    if (wk.length) {
       selEl.addEventListener("change", () => {
         const w = wk.find((x) => x.code === selEl.value);
         if (!w) return;
@@ -3206,16 +3214,21 @@ export function renderFund(view) {
             ${RANK_SORTS.map((s) => `<button class="rank-sort${s.id === rankSort ? " active" : ""}" data-sort="${s.id}">${s.label}</button>`).join("")}
           </div>
           <div class="rank-types">
-            <select class="select" id="fund-rank-ftype">
-              ${FTYPES.map((f) => `<option value="${f.v}"${f.v === rankFtype ? " selected" : ""}>${f.label}</option>`).join("")}
-            </select>
+            <div class="select" id="fund-rank-ftype"></div>
           </div>
         </div>
         <div class="rank-result" id="fund-rank-result"><div class="fund-empty">加载中…</div></div>
       </div>`;
     panelRank.querySelectorAll(".rank-sort").forEach((b) =>
       b.addEventListener("click", () => { rankSort = b.dataset.sort; rankFtype = rankFtype || "all"; renderRankShell(); loadRank(); }));
-    panelRank.querySelector("#fund-rank-ftype").addEventListener("change", (e) => { rankFtype = e.target.value; renderRankShell(); loadRank(); });
+    // 类型下拉（自绘）：切换只刷新列表，不重建 shell（重建会丢掉下拉本身）
+    const rankFtypeEl = panelRank.querySelector("#fund-rank-ftype");
+    createSelect({
+      el: rankFtypeEl,
+      value: rankFtype || "all",
+      options: FTYPES.map((f) => ({ value: f.v, label: f.label })),
+      onChange: (v) => { rankFtype = v; loadRank(); },
+    });
   }
   async function loadRank() {
     if (currentTab !== "rank") return;
@@ -3459,7 +3472,7 @@ export function renderFund(view) {
         </div>` : ""}
         <div class="tm-field">
           <label class="field-label">交易日期</label>
-          <input class="input" id="fund-ft-date" type="date" value="${ymd(new Date())}" />
+          <div class="input" id="fund-ft-date"></div>
         </div>
         <div class="tm-actions">
           <button class="btn" id="fund-ft-cancel">取消</button>
@@ -3468,6 +3481,7 @@ export function renderFund(view) {
       </div>`;
     document.body.appendChild(ov);
     const amtEl = ov.querySelector("#fund-ft-amount"), sharesEl = ov.querySelector("#fund-ft-shares"), dateEl = ov.querySelector("#fund-ft-date");
+    createDatePicker({ el: dateEl, value: ymd(new Date()) }); // 自绘日历，与其它弹窗统一
     const close = () => ov.remove();
     ov.querySelector("#fund-ft-cancel").addEventListener("click", close);
     ov.addEventListener("click", (e) => { if (e.target === ov) close(); });

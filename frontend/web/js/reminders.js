@@ -4,6 +4,8 @@ import { state, saveState } from "./state.js";
 import { ICON_CLOCK, ICON_WATER, ICON_CLOSE } from "./icons.js";
 import { esc, ymd, hhmm, uid } from "./utils.js";
 import { holidayOf, workdayOf } from "./festivals.js";
+import { createSelect } from "./selectbox.js";
+import { createTimePicker } from "./timepicker.js";
 
 const mcReminders = document.getElementById("mc-reminders");
 
@@ -288,8 +290,10 @@ function openReminderSettings() {
         </div>
       </div>
       <div class="rm-list" id="rm-list"></div>
-      <div class="rm-add"><button class="tm-cancel" id="rm-add-btn">+ 添加提醒</button></div>
-      <div class="tm-actions"><button class="btn-primary cm-ok" id="rm-done">完成</button></div>
+      <div class="tm-actions">
+        <button class="tm-cancel" id="rm-add-btn">+ 添加提醒</button>
+        <button class="btn-primary cm-ok" id="rm-done">完成</button>
+      </div>
     </div>`;
   document.body.appendChild(ov);
   const list = ov.querySelector("#rm-list");
@@ -336,12 +340,8 @@ function openReminderSettings() {
       <div class="rm-row">
         <span class="rm-icon">${r.icon}</span>
         <input class="rm-name" data-i="${i}" value="${esc(r.label)}" placeholder="提醒名称" />
-        <input class="rm-time" type="time" data-i="${i}" value="${esc(r.time || "")}" aria-label="每日触发时刻" />
-        <select class="rm-type" data-i="${i}" aria-label="触发日">
-          <option value="all"${r.dayFilter === "all" || !r.dayFilter ? " selected" : ""}>每天</option>
-          <option value="workday"${r.dayFilter === "workday" ? " selected" : ""}>工作日</option>
-          <option value="rest"${r.dayFilter === "rest" ? " selected" : ""}>休息日</option>
-        </select>
+        <span class="rm-time" data-i="${i}" aria-label="每日触发时刻"></span>
+        <span class="rm-type" data-i="${i}" aria-label="触发日"></span>
         <label class="rm-toggle"><input type="checkbox" data-i="${i}" ${r.enabled ? "checked" : ""} /><span>启用</span></label>
         <button class="rm-del" data-i="${i}" aria-label="删除">${ICON_CLOSE}</button>
       </div>`;
@@ -355,25 +355,43 @@ function openReminderSettings() {
         renderReminders();
       });
     });
+    // 触发时刻：自绘时分面板（createTimePicker），选中回调写回 time
     list.querySelectorAll(".rm-time").forEach((el) => {
-      el.addEventListener("change", () => {
-        const r = state.reminders[el.dataset.i];
-        if (!r) return;
-        r.time = el.value || "";
-        // 改时间必须重置当日触发标记：否则当天改时间后区间匹配看到「今天已触发过」
-        // 直接跳过，新设置的时刻永远不弹（用户实测踩中：改到 10:52 仍不弹）
-        r.lastTriggeredDate = "";
-        saveState();
-        renderReminders();
+      const r = state.reminders[el.dataset.i];
+      createTimePicker({
+        el,
+        value: r?.time || "",
+        onChange: (v) => {
+          const rr = state.reminders[el.dataset.i];
+          if (!rr) return;
+          rr.time = v || "";
+          // 改时间必须重置当日触发标记：否则当天改时间后区间匹配看到「今天已触发过」
+          // 直接跳过，新设置的时刻永远不弹（用户实测踩中：改到 10:52 仍不弹）
+          rr.lastTriggeredDate = "";
+          saveState();
+          renderReminders();
+        },
       });
     });
+    // 触发日下拉：自绘面板（createSelect），选中回调写回 dayFilter
+    const DAY_OPTS = [
+      { value: "all", label: "每天" },
+      { value: "workday", label: "工作日" },
+      { value: "rest", label: "休息日" },
+    ];
     list.querySelectorAll(".rm-type").forEach((el) => {
-      el.addEventListener("change", () => {
-        const r = state.reminders[el.dataset.i];
-        if (!r) return;
-        r.dayFilter = el.value; // all / workday / rest
-        saveState();
-        renderReminders();
+      const r = state.reminders[el.dataset.i];
+      createSelect({
+        el,
+        value: r?.dayFilter || "all",
+        options: DAY_OPTS,
+        onChange: (v) => {
+          const rr = state.reminders[el.dataset.i];
+          if (!rr) return;
+          rr.dayFilter = v; // all / workday / rest
+          saveState();
+          renderReminders();
+        },
       });
     });
     list.querySelectorAll(".rm-toggle input").forEach((el) => {

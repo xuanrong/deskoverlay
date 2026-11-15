@@ -18,6 +18,8 @@ import { esc, uid } from "../utils.js";
 import { showDialog } from "./common.js";
 import { toast } from "../toast.js";
 import { ICON_TRASH, ICON_DOT_ON, ICON_DOT_OFF } from "../icons.js";
+import { createSelect } from "../selectbox.js";
+import { createTimePicker } from "../timepicker.js";
 
 const ID = "scheduler";
 const WEEK_LABEL = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
@@ -912,10 +914,7 @@ export function renderScheduler(view) {
 
           <div class="tm-field">
             <label>任务类型</label>
-            <select id="sf-kind">
-              <option value="command"${d.kind === "command" ? " selected" : ""}>本地命令 / 脚本</option>
-              <option value="http"${d.kind === "http" ? " selected" : ""}>HTTP 请求</option>
-            </select>
+            <div class="tm-select" id="sf-kind"></div>
           </div>
 
           <div data-kind="command">
@@ -934,9 +933,7 @@ export function renderScheduler(view) {
             <div class="sch-inline">
               <div class="tm-field" style="flex:0 0 110px">
                 <label>方法</label>
-                <select id="sf-method">
-                  ${["GET", "POST", "PUT", "DELETE", "HEAD"].map((m) => `<option value="${m}"${d.method === m ? " selected" : ""}>${m}</option>`).join("")}
-                </select>
+                <div class="tm-select" id="sf-method"></div>
               </div>
               <div class="tm-field" style="flex:1">
                 <label>URL</label>
@@ -961,18 +958,11 @@ export function renderScheduler(view) {
           <div class="sch-inline">
             <div class="tm-field" style="flex:0 0 150px">
               <label>方式</label>
-              <select id="sf-mode">
-                <option value="daily">每天</option>
-                <option value="weekly">每周</option>
-                <option value="monthly">每月</option>
-                <option value="minutes">每隔 N 分钟</option>
-                <option value="hours">每隔 N 小时</option>
-                <option value="custom">自定义 cron</option>
-              </select>
+              <div class="tm-select" id="sf-mode"></div>
             </div>
             <div class="tm-field" id="sf-slot-time">
               <label>时间</label>
-              <input id="sf-time" type="time" value="${pad2(f.hh)}:${pad2(f.mm)}" />
+              <span id="sf-time"></span>
             </div>
             <div class="tm-field" id="sf-slot-n" style="flex:0 0 130px">
               <label>间隔</label>
@@ -1016,11 +1006,7 @@ export function renderScheduler(view) {
             </div>
             <div class="tm-field" style="flex:1">
               <label>输出编码</label>
-              <select id="sf-enc">
-                <option value="auto"${d.outputEncoding === "auto" || !d.outputEncoding ? " selected" : ""}>自动识别</option>
-                <option value="utf8"${d.outputEncoding === "utf8" ? " selected" : ""}>UTF-8</option>
-                <option value="gbk"${d.outputEncoding === "gbk" ? " selected" : ""}>GBK（系统默认）</option>
-              </select>
+              <div class="tm-select" id="sf-enc"></div>
             </div>
           </div>
           <div class="sch-hint">
@@ -1066,6 +1052,29 @@ export function renderScheduler(view) {
     const $ = (sel) => ov.querySelector(sel);
     const form = { ...f };
     let days = f.days.slice();
+
+    // ---- 自定义下拉框（替代原生 select，弹出面板与深色主题统一；el.value 可读，联动代码不用改）----
+    createSelect({ el: $("#sf-kind"), value: d.kind || "command", options: [
+      { value: "command", label: "本地命令 / 脚本" },
+      { value: "http", label: "HTTP 请求" },
+    ] });
+    createSelect({ el: $("#sf-method"), value: d.method || "GET", options:
+      ["GET", "POST", "PUT", "DELETE", "HEAD"].map((m) => ({ value: m, label: m })) });
+    createSelect({ el: $("#sf-mode"), value: f.mode, options: [
+      { value: "daily", label: "每天" },
+      { value: "weekly", label: "每周" },
+      { value: "monthly", label: "每月" },
+      { value: "minutes", label: "每隔 N 分钟" },
+      { value: "hours", label: "每隔 N 小时" },
+      { value: "custom", label: "自定义 cron" },
+    ] });
+    createSelect({ el: $("#sf-enc"), value: d.outputEncoding || "auto", options: [
+      { value: "auto", label: "自动识别" },
+      { value: "utf8", label: "UTF-8" },
+      { value: "gbk", label: "GBK（系统默认）" },
+    ] });
+    // 时间选择：自绘时分面板（createTimePicker），el.value 承载 HH:MM，syncCron 读 .value 不用改
+    createTimePicker({ el: $("#sf-time"), value: `${pad2(f.hh)}:${pad2(f.mm)}` });
 
     function syncKind() {
       const kind = $("#sf-kind").value;

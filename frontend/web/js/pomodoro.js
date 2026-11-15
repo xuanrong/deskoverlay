@@ -16,7 +16,6 @@ const ICON_PLAY = `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.2v
 const ICON_PAUSE = `<svg viewBox="0 0 24 24" fill="currentColor"><rect x="7.2" y="5.4" width="3.4" height="13.2" rx="1.1" fill="currentColor"/><rect x="13.4" y="5.4" width="3.4" height="13.2" rx="1.1" fill="currentColor"/></svg>`;
 const ICON_TOMATO = `<svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="14.5" r="7" fill="#ff7b72" stroke="none"/><path d="M12 7.5C10.6 5.6 8.3 5 6.5 5.4c.9 2.6 3.2 3.6 5.5 3.6s4.6-1 5.5-3.6c-1.8-.4-4.1.2-5.5 2.1z" fill="#3fb950" stroke="none"/></svg>`;
 const ICON_GEAR = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="3.1"/><path d="M12 2.9v2.3M12 18.8v2.3M2.9 12h2.3M18.8 12h2.3M5.7 5.7l1.6 1.6M16.7 16.7l1.6 1.6M18.3 5.7l-1.6 1.6M7.3 16.7l-1.6 1.6"/></svg>`;
-export { ICON_TOMATO };
 
 // 配置项：范围与步进（时长分钟 / 目标轮数）
 const CFG = {
@@ -310,14 +309,6 @@ function tick() {
 function togglePopup() {
   if (opened) { closePopup(); return; }
   openPopup(pomoEl);
-}
-
-// 供指令条等外部入口「一键开始/继续」；已在运行则忽略。
-export function startPomodoroNow() {
-  const p = state.pomodoro;
-  if (p.running) return false;
-  start();
-  return true;
 }
 
 // ---------- 初始化 ----------

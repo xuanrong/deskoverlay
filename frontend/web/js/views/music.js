@@ -2,7 +2,7 @@
 // 全局播放器（音乐页 / 在线音乐页共享）：音频由 musicAudio 单例承载，UI 由各视图自行渲染。
 import { Bus, invoke } from "../bus.js";
 import { state, saveState } from "../state.js";
-import { ICON_MUSIC, ICON_SHUFFLE, ICON_REPEAT, ICON_HEART, ICON_PREV, ICON_NEXT, ICON_PLAY, ICON_PAUSE, ICON_LIST, ICON_MORE, ICON_VOLUME, ICON_VOLUME_MUTE, ICON_LOCATE, ICON_CLOSE, ICON_BACK, ICON_ALBUM, ICON_LYRICS, ICON_DOWNLOAD, ICON_TRASH, ICON_CLOUD, ICON_UPLOAD, ICON_REFRESH } from "../icons.js";
+import { ICON_MUSIC, ICON_SHUFFLE, ICON_REPEAT, ICON_REPEAT_ONE, ICON_HEART, ICON_PREV, ICON_NEXT, ICON_PLAY, ICON_PAUSE, ICON_LIST, ICON_MORE, ICON_VOLUME, ICON_VOLUME_MUTE, ICON_LOCATE, ICON_CLOSE, ICON_BACK, ICON_ALBUM, ICON_LYRICS, ICON_DOWNLOAD, ICON_TRASH, ICON_CLOUD, ICON_UPLOAD, ICON_REFRESH } from "../icons.js";
 import { normalizeSongs } from "./common.js";
 import { toast } from "../toast.js";
 import { createSelect } from "../selectbox.js";
@@ -340,9 +340,15 @@ function renderLyric() {
 let playQueue = [];    // [{ meta:{title,artist,artwork}, song, srcId, url, type }]
 let queueIndex = -1;
 let randomMode = false;
+let singleLoop = false;   // 单曲循环：当前曲播完重播自身（优先级高于 randomMode）
 let queueModalEl = null;
 
-musicAudio.addEventListener("ended", () => { if (playQueue.length) playNext(); });
+musicAudio.addEventListener("ended", () => {
+  if (!playQueue.length) return;
+  // 单曲循环：重播当前曲（不动 queueIndex）
+  if (singleLoop) { const i = queueIndex; loadQueueItem(i, true); return; }
+  playNext();
+});
 
 // 持久化播放状态（队列/索引/当前歌曲/播放中/进度），重启后恢复
 function savePlayback() {
@@ -470,15 +476,24 @@ async function loadQueueItem(i, forceReload) {
   }
   // 云盘项：直链带时效不可缓存，每次播放现取（在 item.url 缓存检查之前拦截）
   if (item.type === "云盘" && item.song?.fileId) {
+    // 乐观更新：与在线分支同口径 —— 立即切到目标曲目信息（取流期间 UI 不停留上一首）
+    currentSong = { ...item.meta, url: null, type: item.type, song: item.song, srcId: null, lyric: null };
+    currentLyric = [];
+    if (lyricEl) renderLyric();
+    syncPlayerButtons?.();
+    syncMusicUI?.();
     try {
       const url = await invoke("ad_play_url", { fileId: item.song.fileId, ext: item.song.ext || null });
       item.url = url;
       loadMeta({ ...item.meta, url, type: item.type, song: item.song });
       bindAdExpiryRetry();
       fetchAdTrackMeta(item.song); // 异步补全内嵌歌词/封面
+      prefetchAdNext(); // 下一首直链预热（错峰在函数内处理）
       return;
     } catch (e) {
-      if (onlineResultsEl) onlineResultsEl.innerHTML = `<div class="dash-empty">云盘播放失败：${esc(String(e && e.message || e))}</div>`;
+      const msg = String(e && e.message || e);
+      toast("云盘播放失败：" + msg); // 行内错误只在在线浮层开着时可见，toast 保证任何页面都能看到
+      if (onlineResultsEl) onlineResultsEl.innerHTML = `<div class="dash-empty">云盘播放失败：${esc(msg)}</div>`;
       return;
     }
   }
@@ -526,10 +541,15 @@ function playPrev() {
   loadQueueItem(pi);
 }
 
-function toggleRandom() {
-  randomMode = !randomMode;
+// 播放模式三态循环：顺序 → 单曲循环 → 随机 → 顺序
+function cyclePlayMode() {
+  if (!singleLoop && !randomMode) { singleLoop = true; }          // 顺序 → 单曲循环
+  else if (singleLoop) { singleLoop = false; randomMode = true; } // 单曲循环 → 随机
+  else { randomMode = false; }                                     // 随机 → 顺序
   syncPlayerButtons?.();
 }
+// 兼容旧调用（若有别处引用 toggleRandom）
+const toggleRandom = cyclePlayMode;
 
 // 收藏 key：插件歌曲按「源+歌曲标识」稳定去重（明细收藏时还没有播放地址）；
 // 本地/无 song 数据回退 url。songIdentity 用插件歌曲的唯一字段，缺失时退化为标题+歌手。
@@ -954,7 +974,7 @@ function showQueue() {
   queueModalEl = ov;
   ov.innerHTML = `
     <div class="task-modal queue-modal">
-      <h3>播放队列 <span class="dash-count">${playQueue.length}</span>${randomMode ? ' <span class="q-random-on">${ICON_SHUFFLE} 随机</span>' : ""}</h3>
+      <h3>播放队列 <span class="dash-count">${playQueue.length}</span>${randomMode ? ` <span class="q-random-on">${ICON_SHUFFLE} 随机</span>` : ""}</h3>
       <div class="queue-list">
         ${playQueue.length ? playQueue.map((it, i) => {
           const favKey = it.song && (it.srcId || it.song.fileId)
@@ -1900,8 +1920,10 @@ export function renderMusic(view) {
   syncPlayerButtons = () => {
     const fav = !!(currentSong && currentSong.url && (state.favorites || []).some((f) => favKeyOf(f) === favKeyOf({ url: currentSong.url, song: currentSong.song, srcId: currentSong.srcId })));
     likeBtn.classList.toggle("active", fav);
-    shuffleBtn.innerHTML = randomMode ? ICON_SHUFFLE : ICON_REPEAT;
-    shuffleBtn.classList.toggle("active", randomMode);
+    // 播放模式按钮三态：顺序(REPEAT) / 单曲循环(REPEAT_ONE) / 随机(SHUFFLE)，后两态高亮
+    shuffleBtn.innerHTML = singleLoop ? ICON_REPEAT_ONE : randomMode ? ICON_SHUFFLE : ICON_REPEAT;
+    shuffleBtn.classList.toggle("active", singleLoop || randomMode);
+    shuffleBtn.setAttribute("aria-label", singleLoop ? "单曲循环" : randomMode ? "随机播放" : "顺序播放");
     const hasQueue = playQueue.length > 0;
     prevBtn.disabled = !hasQueue;
     nextBtn.disabled = !hasQueue;
@@ -1953,7 +1975,12 @@ export function renderMusic(view) {
 // 社区授权（AList/OpenList 扫码页拿 refresh_token）→ 粘贴绑定 → 官方 OpenAPI 直调。
 // 音频文件类型过滤（云盘列表/搜索共用）
 const AD_AUDIO_EXT = new Set(["mp3", "flac", "m4a", "wav", "ape", "ogg", "wma", "aac"]);
-const AD_AUTH_URL = "https://alistgo.com/zh/guide/drivers/aliyundrive.html"; // 社区授权页入口（文档页含跳转）
+// ⛔ 必须用「阿里云盘 Open」的 token 工具页（/tool/aliyundrive/request），
+//    不是驱动文档页（/guide/drivers/aliyundrive.html = 「阿里云盘/分享」share 版，
+//    那个讲的是旧分享链路，页面拿到的 token 与 openapi.alipan.com 不通用）。
+//    后端 aliyundrive.rs 走的是官方 OpenAPI + alistgo ali_open 续期代理，
+//    授权页必须发同一体系（ali_open）的 refresh_token。
+const AD_AUTH_URL = "https://alistgo.com/zh/tool/aliyundrive/request.html"; // 社区授权页（扫码直接出 refresh_token）
 
 // 云盘文件 → 播放队列歌曲结构（title 去扩展名，artist 固定「云盘」）
 function adSongOf(f) {
@@ -1994,20 +2021,54 @@ function playCloudList(list, index) {
   loadQueueItem(queueIndex);
 }
 
-// 云盘直链过期兜底：播放中触发媒体错误时，重签直链续播一次（仅云盘来源）。
-function bindAdExpiryRetry() {
+// 云盘播放兜底：播放中媒体错误时续播（保断点），最多 tries 次、连锁重挂。
+// 直链过期由 Rust 流服务上游 4xx 自动重签；这里兜的是网络瞬断 / 重签后仍失败等场景。
+// ⛔ 重试成功换 src 后必须重挂监听（媒体错误是换源后的新事件，旧 once 监听已消费）。
+// ⛔ 代际守卫：重放同一首时旧链的 once 监听器仍挂着（未被消费），error 会同时触发
+//    新旧两条链 → ad_play_url 双发。每次挂载递增代数，旧代触发时直接退出。
+let adRetryGen = 0;
+function bindAdExpiryRetry(tries = 2) {
   if (currentSong?.type !== "云盘" || !currentSong.song?.fileId) return;
   const fileId = currentSong.song.fileId;
+  const gen = ++adRetryGen;
   const onErr = () => {
-    if (currentSong?.song?.fileId !== fileId) return;
+    if (gen !== adRetryGen) return; // 旧链：已被新一次挂载取代（切歌/重放/上一轮重挂）
+    if (currentSong?.song?.fileId !== fileId) return; // 已切歌：过期监听不动作
+    if (tries <= 0) return;
+    const at = musicAudio.currentTime || 0; // 断点：续播不从头开始
     invoke("ad_play_url", { fileId })
       .then((fresh) => {
+        if (currentSong?.song?.fileId !== fileId) return;
         musicAudio.src = fresh;
+        // 续播到断点：元数据就绪才能 seek（<0.5s 的断点直接从头，无意义）
+        const resume = () => { try { if (at > 0.5) musicAudio.currentTime = at; } catch (_) {} };
+        if (musicAudio.readyState >= 1) resume();
+        else musicAudio.addEventListener("loadedmetadata", resume, { once: true });
         musicAudio.play().catch(() => {});
+        bindAdExpiryRetry(tries - 1); // 换源后重挂：连续失败也能继续兜
       })
-      .catch(() => {});
+      .catch(() => {
+        // 取流失败（网络抖动）：延迟后再给一次机会
+        if (tries > 1) setTimeout(() => bindAdExpiryRetry(tries - 1), 1500);
+      });
   };
   musicAudio.addEventListener("error", onErr, { once: true });
+}
+
+// 云盘下一首直链预热：后台把下一首的直链签进 Rust 侧 URL 缓存（25min TTL，仅一次
+// getDownloadUrl 调用、不拉音频数据），到点自动切歌/手动下一首时流式服务命中缓存
+// 即刻回首块。错峰 1.5s：先让当前曲首窗（4MB 并行拉取）完成，不抢启动带宽。
+let adPrefetchedId = null; // 最近已预热的 file_id（防快速切歌时重复 IPC；URL 缓存 25min）
+function prefetchAdNext() {
+  setTimeout(() => {
+    if (randomMode || playQueue.length < 2) return; // 随机模式无法预测；单曲队列无下一首
+    const next = playQueue[(queueIndex + 1) % playQueue.length];
+    if (next?.type !== "云盘" || !next.song?.fileId) return; // 非云盘项走各源自己的取流
+    if (next.song.fileId === playQueue[queueIndex]?.song?.fileId) return; // 重复曲目已暖
+    if (next.song.fileId === adPrefetchedId) return; // 已预热过（快速切歌的重复调度）
+    adPrefetchedId = next.song.fileId;
+    invoke("ad_play_url", { fileId: next.song.fileId, ext: next.song.ext || null }).catch(() => {});
+  }, 1500);
 }
 
 // 云盘歌曲下载到本地：OSS 直链 → 内嵌歌词 → download_start（文件保持原始格式）
@@ -2078,26 +2139,45 @@ function showMoreMenu(anchor) {
 // 拉取失败/无内嵌时静默降级（无词无封面），不影响播放。
 // 延迟 3 秒执行：上游 OSS 单连接限速（~500KB/s），播放启动阶段音频流优先，
 // 元数据的头尾拉取错峰，避免抢带宽造成开头卡顿。
+//
+// 会话内缓存：同一首重放/来回切时零网络（头尾各拉 512KB 不便宜），且命中时
+// 免 3s 错峰延迟立即上词。封面是 ≤3MB 的 data URL，条数限 24 防内存膨胀（LRU 逐出）。
+// 「解析过但无内嵌」也缓存（null 结果防重复拉）；拉取失败不缓存（可能是瞬时网络问题）。
+const adMetaCache = new Map(); // fileId -> { lyric, cover }
+const AD_META_CACHE_CAP = 24;
+
+function applyAdMeta(fileId, m) {
+  if (!currentSong || currentSong.song?.fileId !== fileId) return; // 已切歌
+  if (m?.lyric && !currentSong.lyric) {
+    currentSong.lyric = m.lyric;
+    currentLyric = parseLrc(m.lyric);
+    if (lyricEl) renderLyric();
+    lastPushedIdx = -2;
+    pushLyric(true);
+  }
+  if (m?.cover && !currentSong.artwork) {
+    currentSong.artwork = m.cover;
+    syncMusicUI?.();
+  }
+}
+
 async function fetchAdTrackMeta(song) {
   if (!song?.fileId) return;
+  const hit = adMetaCache.get(song.fileId);
+  if (hit !== undefined) { applyAdMeta(song.fileId, hit); return; } // 命中：立即补词/封面
   await new Promise((r) => setTimeout(r, 3000));
   if (!currentSong || currentSong.song?.fileId !== song.fileId) return; // 延迟期间已切歌
   try {
     const meta = await invoke("ad_track_meta", { fileId: song.fileId, ext: song.ext || "" });
     if (!currentSong || currentSong.song?.fileId !== song.fileId) return; // 已切歌
-    if (meta?.lyric && currentSong && !currentSong.lyric) {
-      currentSong.lyric = meta.lyric;
-      currentLyric = parseLrc(meta.lyric);
-      if (lyricEl) renderLyric();
-      lastPushedIdx = -2;
-      pushLyric(true);
+    const m = { lyric: meta?.lyric || null, cover: meta?.cover || null };
+    adMetaCache.set(song.fileId, m);
+    if (adMetaCache.size > AD_META_CACHE_CAP) {
+      adMetaCache.delete(adMetaCache.keys().next().value); // 淘汰最旧（Map 迭代序 = 写入序）
     }
-    if (meta?.cover && currentSong && !currentSong.artwork) {
-      currentSong.artwork = meta.cover;
-      syncMusicUI?.();
-    }
+    applyAdMeta(song.fileId, m);
   } catch (e) {
-    console.warn("[ad-meta] 获取失败:", String(e && e.message || e));
+    console.warn("[ad-meta] 获取失败:", String(e && e.message || e)); // 失败不缓存，下次重试
   }
 }
 
@@ -2113,7 +2193,7 @@ async function renderAdDriveTab(resultsEl, panelEl, modeTabsEl) {
       <div class="ad-auth-guide">
         <div class="dash-empty">尚未绑定阿里云盘</div>
         <div class="ad-auth-steps">
-          <p>1. 点下方按钮打开社区授权页，用<b>阿里云盘 App 扫码</b>登录</p>
+          <p>1. 点下方按钮打开授权页，点「<b>前往登录</b>」出现二维码，用<b>阿里云盘 App 扫码</b></p>
           <p>2. 授权成功后页面会显示一串 <b>refresh_token</b>，复制它</p>
           <p>3. 粘贴到下面并点「绑定」</p>
         </div>

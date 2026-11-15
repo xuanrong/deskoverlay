@@ -386,8 +386,7 @@ export async function loadState() {
     if (typeof m.today !== "number" || !isFinite(m.today) || m.today < 0) m.today = 0;
     if (typeof m.date !== "string") m.date = "";
     // 跨天：上次记录的日期不是今天 ⇒ 今日数归零（累计数不动）
-    const today = new Date();
-    const stamp = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+    const stamp = ymd();
     if (m.date !== stamp) {
       m.date = stamp;
       m.today = 0;

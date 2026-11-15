@@ -5,8 +5,9 @@
 //   3) 公历节日：固定月日规则
 //   4) 法定假期 + 调休补班：国务院年度通知，无法算法推导，按年内置 LEGAL 表
 // 数据更新：日历面板「更新节假日」联网拉最新年度安排（见 fetchLegalYear），
-//           拉不到时可回退手动粘贴（见 app.js openHolidayEditor）。
+//           覆盖同年内置 LEGAL 表；留空则用内置表。
 import { invoke } from "./bus.js";
+import { fmtMD } from "./utils.js";
 
 const LUNAR_INFO = [
   0x04bd8, 0x04ae0, 0x0a570, 0x054d5, 0x0d260, 0x0d950, 0x16554, 0x056a0, 0x09ad0, 0x055d2, // 1900-1909
@@ -384,8 +385,6 @@ function getUpcoming(from, maxDays = 60, limit = 12) {
   }
   return out;
 }
-
-const fmtMD = (d) => `${d.getMonth() + 1}月${d.getDate()}日`;
 
 // 日期栏药丸：{ text, cls, tip }。cls: "" | "today" | "today holiday" | "term"
 export function pillFor(now) {

@@ -260,6 +260,8 @@ html.theme-transition * {
 
 .th-range { display: flex; align-items: center; gap: 8px; }
 .th-range input[type="range"] { width: 130px; accent-color: var(--accent); }
+/* 显示模式下拉（自绘 createSelect）：div 无内在宽度，flex 行里会被压成 0 宽看不见，补个固定宽 */
+.th-range .set-select.cs { width: 130px; flex: 0 0 auto; }
 .th-range .th-range-val { font-size: var(--text-xs); color: var(--text-dim); min-width: 38px; text-align: right; font-variant-numeric: tabular-nums; }
 
 /* 闂佺缈伴崐妤€鈹?閻?闂佸搫鍟抽崺鏍敊瀹€鈧幏瀣礈瑜忛弸鍌炴煥濞戞瑧顣查柣鏍电悼缁?+ 闂佺鐭囬崒娑卞仺婵炴垶鎸堕崐鏇㈠垂椤忓棌鍋撻棃娑氱Ш缂傚秴鐗撻弫宥囦沪閼测晝鎲?.th-range 闁荤喐鐟ュΛ婊堬綖鎼淬劌瑙﹂悘鐐靛亾椤?*/
@@ -1542,12 +1544,6 @@ body::after {
 }
 .widget-grid.edit-mode .widget:active { cursor: grabbing; transform: none; }
 
-/* 拖拽中的卡：半透明 + 轻微缩小，明确「它正被拎起来」 */
-.widget.dragging {
-  opacity: 0.45;
-  transform: scale(0.98);
-  transition: opacity 120ms ease, transform 120ms ease;
-}
 /* 落点提示：实线 + 光晕 + 轻微放大，比原来的 2px outline 显眼得多 */
 .widget.drop-target {
   outline: 2px solid var(--accent);
@@ -1558,6 +1554,18 @@ body::after {
     inset 0 0 30px rgba(var(--accent-rgb), 0.14);
   transform: scale(1.012);
   transition: outline-color var(--t), box-shadow var(--t), transform var(--t);
+}
+/* 拖拽中的卡：半透明（本体留在原位视觉上「抬起来」） */
+.widget.dragging { opacity: 0.35; }
+/* 落点预览（手机桌面式）：跟随鼠标的半透明虚线框，用 grid-column/row 定位到目标格。
+   它是 .widget-grid 的直接子元素，所以能精确落在任意格（含空格）。 */
+.drag-ghost {
+  border: 2px dashed var(--accent);
+  border-radius: 16px;
+  background: rgba(var(--accent-rgb), 0.12);
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.18), 0 0 20px rgba(var(--accent-rgb), 0.28);
+  pointer-events: none;
+  z-index: 5;
 }
 
 /* 编辑态横幅：明确告诉用户「现在在编辑」，以及怎么退出。
@@ -2566,14 +2574,15 @@ body.is-editing .edit-banner {
 }
 .rm-icon svg { display: block; }
 .rm-name { flex: 1 1 auto; min-width: 0; }
-.rm-type {
-  flex: 0 0 auto; width: 84px;
-  background: var(--bg-input); border: 1px solid var(--border-input); color: var(--text);
-  padding: 7px 6px; border-radius: var(--radius-sm); font-size: 12px;
-  outline: none; font-family: var(--font);
+/* 触发日下拉：用 createSelect（.cs 自绘面板）。这里只调宽度和紧凑高度贴合行内布局，
+   其余外观（底色/边框/箭头/弹出面板）由 .cs 统一，和新建待办/定时任务的下拉一致。 */
+.rm-type.cs {
+  flex: 0 0 auto; width: 84px; height: 30px;
+  padding: 0 8px; font-size: 12px;
 }
-.rm-type:focus { border-color: var(--blue); }
 .rm-time { width: 100px; flex: 0 0 auto; }
+/* 时间输入和下拉框同高，行内对齐 */
+.rm-row input.rm-time { height: 30px; padding: 0 8px; }
 .rm-int-wrap { display: inline-flex; align-items: center; gap: 4px; flex: 0 0 auto; }
 .rm-int { width: 56px; }
 .rm-row input {
@@ -2594,7 +2603,6 @@ body.is-editing .edit-banner {
   border-radius: var(--radius-xs);
 }
 .rm-del:hover { color: var(--danger); background: var(--bg-hover); }
-.rm-add { margin-bottom: 4px; }
 
 /* 提醒设置弹窗：固定整体高度，消除增删提醒时弹窗高度跳变。
    做法：.remind-modal 定高，.rm-list 用 flex:1 吃掉「标题 + 久坐 + 喝水 + 添加 + 完成」
@@ -2842,11 +2850,13 @@ html {
 }
 
 .btn-primary {
-  background: linear-gradient(135deg, #2ea043, #238636);
-  border-color: rgba(var(--green-rgb), 0.45); color: #fff; font-weight: var(--fw-semibold);
-  box-shadow: 0 2px 8px rgba(var(--green-rgb), 0.25);
+  /* ⛔ 不要写死色值 —— 跟随主题 accent（用户换主题色时主按钮要跟着变）。
+     渐变用 accent → accent-deep，文字用 accent-contrast（主题算好的对比色）。 */
+  background: linear-gradient(135deg, var(--accent), var(--accent-deep));
+  border-color: rgba(var(--accent-rgb), 0.45); color: var(--accent-contrast); font-weight: var(--fw-semibold);
+  box-shadow: 0 2px 8px rgba(var(--accent-rgb), 0.25);
 }
-.btn-primary:hover { filter: brightness(1.12); background: linear-gradient(135deg, #2ea043, #238636); }
+.btn-primary:hover { filter: brightness(1.12); background: linear-gradient(135deg, var(--accent), var(--accent-deep)); }
 .btn-primary:active { filter: brightness(0.95); }
 
 .btn-danger {
@@ -3824,10 +3834,15 @@ html {
 }
 .task-modal {
   width: min(520px, 94vw);
-  height: min(640px, 86vh);
+  /* 高度自适应内容：内容少的添加弹窗不再固定 640px 撑高（下面留大片空白）。
+     max-height 兜底 —— 内容多时仍受限并可滚动（.tm-body/overflow 负责）。 */
+  height: auto;
+  max-height: min(640px, 86vh);
   display: flex;
   flex-direction: column;
-  background: var(--bg-elevated);
+  /* 弹窗不透明度与桌面卡片（--panel-alpha）脱钩：桌面调多透，弹窗至少 0.88，
+     否则弹窗太透、字体和下面的页面内容重叠（用户实测踩中）。max() 取「用户值」和「下限」的较大者。 */
+  background: rgba(var(--panel-tint), max(var(--panel-alpha-elevated), 0.88));
   border: 1px solid var(--border-strong);
   border-radius: 18px;
   padding: 26px 28px;
@@ -3922,6 +3937,33 @@ input[type="number"]::-webkit-outer-spin-button {
 .dp-pop-foot button:hover { background: var(--bg-hover); color: var(--text); }
 .dp-pop-foot .dp-clear:hover { color: var(--danger); border-color: rgba(var(--danger-rgb),  0.4); }
 
+/* ===== 时间选择面板（createTimePicker，复用 .dp / .dp-pop 基础样式，这里是时分面板独有部分）===== */
+.tp-pop { width: 224px; }
+.tp-cols { display: flex; gap: 8px; }
+.tp-col { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; }
+.tp-col-title { font-size: 11px; color: var(--text-faint); text-align: center; margin-bottom: 4px; }
+.tp-list {
+  position: relative;   /* 让 .tp-cell 的 offsetTop 相对本列表，打开时才能按 scrollTop 精确定位到选中项 */
+  max-height: 188px; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 2px;
+  padding-right: 2px;
+}
+.tp-cell {
+  height: 28px; line-height: 28px; padding: 0; text-align: center;
+  font-size: 13px; color: var(--text); background: transparent; border: none;
+  border-radius: 6px; cursor: pointer; font-family: var(--font);
+}
+.tp-cell:hover { background: var(--bg-hover); }
+.tp-cell.sel { background: var(--accent); color: var(--accent-contrast); font-weight: 600; }
+.tp-confirm {
+  width: 100%; margin-top: 8px; padding: 7px 0;
+  font-size: 13px; font-weight: 600; font-family: var(--font);
+  background: var(--accent); color: var(--accent-contrast);
+  border: none; border-radius: 6px; cursor: pointer;
+  font-variant-numeric: tabular-nums;
+}
+.tp-confirm:hover { filter: brightness(1.1); }
+
 /* ====================== 闂佺厧顨庢禍婊堟偩閻愵剛鈻曞璺侯槺閻熸捇鏌熷畡閭︽█闁逞屽墮椤︽壆鈧哎鍔戦獮鎺曨槺婵?====================== */
 .cs {
   display: flex; align-items: center; gap: 6px;
@@ -3941,6 +3983,8 @@ input[type="number"]::-webkit-outer-spin-button {
 .cs-ph { color: var(--text-faint); }
 .cs-arrow { flex: 0 0 auto; display: inline-flex; color: var(--text-faint); transition: transform var(--t-fast); }
 .cs.open .cs-arrow { transform: rotate(180deg); }
+/* 置灰态（如定投「每日」时扣款日无可选，固定值）：不可点、降透明度 */
+.cs.disabled { opacity: 0.5; pointer-events: none; cursor: not-allowed; }
 
 .cs-pop {
   position: fixed; z-index: 16000;
@@ -5703,6 +5747,28 @@ grid-template-columns: minmax(200px, 2fr) 1fr auto;
 
 /* ---------- 缂傚倸鍊归悧鐐垫椤愶箑闂?/ 闂佸搫鍟ㄩ崕杈╂崲閺傛鍤曢柛锔诲幘瀹?---------- */
 .sch-modal { width: min(680px, 94vw); height: min(720px, 88vh); overflow-y: auto; }
+/* 新建/编辑任务弹窗的下拉框：原生 select 太素，做自定义箭头 + hover/focus 反馈 + 深色 option。
+   ⛔ 作用域限定 .sch-modal，不碰多弹窗共用的 .tm-field select。 */
+.sch-modal select {
+  appearance: none; -webkit-appearance: none;
+  padding-right: 34px;
+  cursor: pointer;
+  /* 自定义下拉箭头（chevron，替掉原生丑箭头）；SVG data URI 里的 stroke 是箭头色，
+     ⛔ data URI 是独立文档、读不到外部 CSS 变量，所以亮色主题单独换一张浅色箭头（见下）。 */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238b949e' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-size: 14px;
+  transition: border-color 140ms ease, background-color 140ms ease;
+}
+/* 亮色主题：暗灰箭头在浅底上看不清，换成深灰箭头 */
+:root[data-scheme="light"] .sch-modal select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%235b6675' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+}
+.sch-modal select:hover { border-color: var(--text-faint); }
+.sch-modal select:focus { border-color: var(--blue); box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue) 18%, transparent); }
+.sch-modal select option,
+.sch-modal select optgroup { background: var(--bg-elevated); color: var(--text); }
 .log-modal { width: min(760px, 94vw); }
 .sch-form { display: flex; flex-direction: column; gap: 12px; }
 .sch-inline { display: flex; gap: 10px; align-items: flex-start; }

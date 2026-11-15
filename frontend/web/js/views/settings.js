@@ -10,6 +10,8 @@ import { toast } from "../toast.js";
 import { ICON_GEAR, ICON_PALETTE, ICON_LOCK, ICON_EYE, ICON_ARCHIVE, ICON_INFO, ICON_TICK, ICON_MUSIC } from "../icons.js";
 import { setEyeCare, restoreNativeColor, getEyeCareStatus, onEyeCareChange } from "../eyeCare.js";
 import { LYRIC_PALETTES } from "../theme.js";
+import { createTimePicker } from "../timepicker.js";
+import { createSelect } from "../selectbox.js";
 
 // hex(#rrggbb) → [h, s, l]（s/l 0-100），供自定义主题色取色器使用
 function hexToHsl(hex) {
@@ -93,11 +95,7 @@ export function renderSettings(view) {
           </div>
           <div class="set-row" style="padding:4px 0">
             <div class="th-range"><span style="font-size:var(--text-xs);color:var(--text-dim);min-width:64px">显示模式</span>
-              <select id="th-bg-fit" class="set-select">
-                <option value="cover" ${b.fit === "cover" ? "selected" : ""}>填充裁切</option>
-                <option value="contain" ${b.fit === "contain" ? "selected" : ""}>完整显示</option>
-                <option value="fill" ${b.fit === "fill" ? "selected" : ""}>拉伸</option>
-              </select>
+              <div id="th-bg-fit" class="set-select"></div>
             </div>
           </div>
           <div class="set-row" style="padding:4px 0">
@@ -389,9 +387,9 @@ export function renderSettings(view) {
             <div class="ec-sched">
               <div class="ec-sched-row">
                 <span class="ec-sched-label">夜间时段</span>
-                <input type="time" id="ec-from" value="${esc(state.eyeCare?.from ?? "22:00")}" />
+                <span class="ec-time" id="ec-from"></span>
                 <span class="ec-sched-sep">→</span>
-                <input type="time" id="ec-to" value="${esc(state.eyeCare?.to ?? "07:00")}" />
+                <span class="ec-time" id="ec-to"></span>
               </div>
               <div class="ec-sched-row">
                 <span class="ec-sched-label">白天色温</span>
@@ -721,9 +719,11 @@ export function renderSettings(view) {
       });
     });
 
-    // 时段起止时刻：time 输入 change 才落盘（拖动时间选择器会连续触发 input）
+    // 时段起止时刻：自绘时分面板（createTimePicker），change 落盘（选完才触发，不会连续 input）
     const ecFrom = body.querySelector("#ec-from");
     const ecTo = body.querySelector("#ec-to");
+    if (ecFrom) createTimePicker({ el: ecFrom, value: state.eyeCare?.from ?? "22:00" });
+    if (ecTo) createTimePicker({ el: ecTo, value: state.eyeCare?.to ?? "07:00" });
     if (ecFrom) ecFrom.addEventListener("change", () => setEyeCare({ from: ecFrom.value }, { immediate: true }));
     if (ecTo) ecTo.addEventListener("change", () => setEyeCare({ to: ecTo.value }, { immediate: true }));
 
@@ -815,6 +815,10 @@ export function renderSettings(view) {
       });
     });
     // 背景图片：选择 + 显示模式 + 暗化
+    // ⛔ 这里要用背景配置 b（b.fit / b.dim）。b 只在 bgExtraHtml() 里定义过，本作用域没有，
+    //    直接用 b.fit 会抛 ReferenceError: b is not defined → bindPaneEvents 中断，
+    //    显示模式下拉渲染不出来（空 div 被 flex 压成 0 宽 = 看不到控件）。补上定义。
+    const b = t.background;
     const bgPick = body.querySelector("#th-bg-pick");
     if (bgPick) {
       bgPick.addEventListener("click", async () => {
@@ -834,6 +838,17 @@ export function renderSettings(view) {
       });
     }
     const bgFit = body.querySelector("#th-bg-fit");
+    if (bgFit) {
+      createSelect({
+        el: bgFit,
+        value: b.fit || "cover",
+        options: [
+          { value: "cover", label: "填充裁切" },
+          { value: "contain", label: "完整显示" },
+          { value: "fill", label: "拉伸" },
+        ],
+      });
+    }
     if (bgFit) bgFit.addEventListener("change", () => Theme.setBackground({ fit: bgFit.value }));
     const bgDim = body.querySelector("#th-bg-dim");
     if (bgDim) {

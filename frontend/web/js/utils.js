@@ -11,5 +11,8 @@ export const ymd = (d = new Date()) =>
 export const hhmm = (d = new Date()) =>
   `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 
+// 本地「M月D日」：节日/假期提示用（app.js 与 festivals.js 共用，原各自定义一份）
+export const fmtMD = (d) => `${d.getMonth() + 1}月${d.getDate()}日`;
+
 // 本地唯一 id：前缀 + 时间基 36 + 6 位随机后缀（同毫秒内不碰撞）
 export const uid = (prefix) => `${prefix}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;

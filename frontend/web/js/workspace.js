@@ -17,11 +17,11 @@ import { LYRIC_PALETTES } from "./theme.js";
 import { showTaskModal } from "./views/dashboard.js";
 import { esc, ymd, hhmm } from "./utils.js";
 import {
-  ICON_HOME, ICON_EXTERNAL, ICON_LIST, ICON_IDEA, ICON_AI, ICON_CLOCK,
-  ICON_FUND, ICON_MUSIC, ICON_NOTES, ICON_GEAR,
-  ICON_CHECK, ICON_PLAY, ICON_PAUSE, ICON_NEXT, ICON_PREV, ICON_CHEV, ICON_GRID,
+  ICON_AI,
+  ICON_MUSIC,
+  ICON_CHECK, ICON_PLAY, ICON_PAUSE, ICON_NEXT, ICON_PREV, ICON_GRID,
   ICON_CREDIT, ICON_FOLDER, ICON_GLOBE, ICON_DOC, ICON_REFRESH, ICON_SPARK,
-  ICON_MUYU, ICON_MUYU_BIG, ICON_EXPAND, ICON_PLUS, ICON_KANBAN, ICON_BELL,
+  ICON_MUYU_BIG, ICON_EXPAND, ICON_PLUS, ICON_KANBAN, ICON_BELL,
 } from "./icons.js";
 
 // -------------------- 卡片配置 --------------------
@@ -126,6 +126,18 @@ function applyCardSize(card, span, row) {
   for (let i = 1; i <= ROW_MAX; i++) card.classList.toggle(`row-${i}`, i === r);
   card.dataset.span = String(s);
   card.dataset.row = String(r);
+  // ⛔ 同步内联 grid-column / grid-row 的 **span 部分**：applyGridPositions 写的内联样式
+  //    （grid-column: N / span X）优先级高于 span-N 类，会把卡片锁在初始 X。
+  //    resize 时若不同步这里，卡片根本不变大变小（内联 span 没跟着改）。
+  //    只改 span、保留锚点列/行（N 不变）→ 缩放在原位缩、留空；放大往右/往下撑，不重排其它卡。
+  if (card.style.gridColumn) {
+    const col = parseInt(card.style.gridColumn, 10) || 1;
+    card.style.gridColumn = `${col} / span ${s}`;
+  }
+  if (card.style.gridRow) {
+    const rw = parseInt(card.style.gridRow, 10) || 1;
+    card.style.gridRow = `${rw} / span ${r}`;
+  }
 }
 
 // 启动时按持久化值铺一遍
@@ -136,6 +148,43 @@ function applyCardSizes(grid) {
     const d = defs.get(id) || { span: 1, row: 1 };
     applyCardSize(card, spanOf(id, d.span), rowOf(id, d.row));
   });
+}
+
+// 给每张卡**固定网格坐标**（explicit grid-column / grid-row）。
+// ⛔ 为什么需要：卡片原本靠 CSS Grid「自动流」排布（按 DOM 顺序自动填格）。
+//    自动流的副作用：前面某张卡缩小后空出的格，后面/下面的卡会**自动往前/往上补**
+//    （用户实测：前面缩小，后面就往前移）。改成显式坐标后，每张卡的位置锁死，
+//    缩放只改变被操作那张的 span、在原位缩，空出的格就空着，后面的卡不移位。
+// 算法：按当前 DOM 顺序装箱 —— 每张卡从左上往右下找第一个不与已放卡重叠的位置。
+//    这与原自动流的初始铺法一致（同样紧凑），只是之后不再随缩放重排。
+function applyGridPositions(grid) {
+  const cards = Array.from(grid.querySelectorAll(".widget"));
+  const occupied = new Set(); // "col,row" 已被占用的格
+  for (const card of cards) {
+    const span = Number(card.dataset.span) || 1;
+    const rowSpan = Number(card.dataset.row) || 1;
+    let placeCol = 1, placeRow = 1, placed = false;
+    // 从 (1,1) 起逐格扫，找到第一个能容纳 span×rowSpan 且不重叠的左上角
+    while (!placed) {
+      let ok = true;
+      for (let dc = 0; dc < span && ok; dc++) {
+        for (let dr = 0; dr < rowSpan && ok; dr++) {
+          if (occupied.has(`${placeCol + dc},${placeRow + dr}`)) ok = false;
+        }
+      }
+      if (ok) { placed = true; break; }
+      // 当前起点放不下 → 右移一格；越过右边界就换下一行行首
+      placeCol++;
+      if (placeCol + span - 1 > SPAN_MAX) { placeCol = 1; placeRow++; }
+    }
+    // 占住这块区域的所有格
+    for (let dc = 0; dc < span; dc++) {
+      for (let dr = 0; dr < rowSpan; dr++) occupied.add(`${placeCol + dc},${placeRow + dr}`);
+    }
+    // 写死坐标（span 仍由 CSS 类控制跨几列/几行，这里只钉左上角）
+    card.style.gridColumn = `${placeCol} / span ${span}`;
+    card.style.gridRow = `${placeRow} / span ${rowSpan}`;
+  }
 }
 
 function persistCardSize(id, span, row) {
@@ -241,17 +290,19 @@ export function openModule(id) {
   document.body.classList.add("overlay-open");
 }
 
-export function closeModule() {
+function closeModule() {
   if (!overlayEl || overlayEl.hidden) return;
   overlayEl.hidden = true;
   document.body.classList.remove("overlay-open");
   if (overlayView) { overlayView.destroy(); overlayView = null; }
   overlayModuleId = null;
   // 关掉浮层就重新读一次积分文件：签到/AI 操作都在浮层里做，签完回来卡片该是新数字。
+  // ⛔ 定时任务卡的状态同步写在 loadCredits(true) 里（签到卡刷新按钮走同一条路径），
+  //    这里不重复拉，避免一次关闭打两轮 IPC。
   loadCredits(true);
 }
 
-export function isModuleOpen() {
+function isModuleOpen() {
   return !!overlayEl && !overlayEl.hidden;
 }
 
@@ -284,11 +335,13 @@ function cardShell(cfg) {
   const icon = cfg.icon || moduleIcon(mod);
   const cls = sizeClass(cfg.id, cfg.span, cfg.row);
   if (cfg.kind === "mini") {
+    // mini 卡外层是 <button>（整卡可聚焦），⛔ 不能再嵌 <button>（button 嵌 button 非法、会拆 DOM）。
+    // 右上角入口用 <span data-open>：grid 的 click 委托 closest("[data-open]") 对 span 同样生效。
     return `<button class="widget widget--1 ${cls}" data-card="${cfg.id}" data-module="${mod}" aria-label="打开${esc(cfg.title)}">
       <span class="w-icon">${icon}</span>
       <span class="w-label">${esc(cfg.title)}</span>
       <span class="w-badge" data-badge hidden></span>
-      <span class="w-expand">${ICON_CHEV}</span>
+      <span class="w-expand" data-open="${mod}" aria-label="打开${esc(cfg.title)}">${ICON_EXPAND}</span>
       ${resizeHandleHTML()}
     </button>`;
   }
@@ -758,7 +811,20 @@ function renderSchedCard() {
   // extra 先给个基础态（启用数），refreshSchedWarnings 拉到数据后覆盖成警告胶囊（无异常则回落到此）
   if (extra) extra.textContent = tasks.length ? `${tasks.length} 个启用` : "";
   if (!tasks.length) { body.innerHTML = emptyHTML("暂无定时任务"); return; }
-  const tk = todayKeyLocal();
+  const tk = ymd();
+  // 排序：只有异常任务（失败/漏跑/超时）置顶，其余（未跑/已跑成/已停）**一律按下次运行时刻最近在前**。
+  // 不能给「未跑」单独设优先级——否则周日才跑的未跑任务会压过今天就到期的已跑任务。
+  // 无 nextDue 的排最后。
+  const isAnomaly = (t) => ["bad", "missed", "warn"].includes(schedRunState(schedHeat?.[t.id]?.[tk]));
+  const dueOf = (t) => schedNextDue[t.id];
+  tasks.sort((a, b) => {
+    const xa = isAnomaly(a) ? 0 : 1, xb = isAnomaly(b) ? 0 : 1;
+    if (xa !== xb) return xa - xb;
+    const da = dueOf(a), db = dueOf(b);
+    const va = typeof da === "number" && da > 0 ? da : Infinity; // 无 nextDue → 视为最远
+    const vb = typeof db === "number" && db > 0 ? db : Infinity;
+    return va - vb;
+  });
   // 全部启用任务都列出（正文 overflow-y:auto，超出滚动），每行用「状态点」标出今天跑了没跑。
   // 状态取 heat 当天 last（最终结果）：success=已跑成 / failed=失败 / timeout=超时 / canceled=已停 /
   // missed=漏跑 / 无记录=今天还没跑。颜色见 .sch-st-* CSS。
@@ -799,7 +865,10 @@ const ST_TEXT = {
 //     若某启用任务的 nextDue 落在「今天且已过去」，但 heat 里该任务今天**零记录**，
 //     说明它到点了却还没跑（调度器没补跑/还没轮到）→ 也算异常「到点未跑」。
 // 轻量：两个 IPC 都不带 output，60s 刷一次开销可忽略。
-let schedWarnFetching = false;
+// 进行中的那次拉取。并发调用（心跳 / 签到回来 / 手动刷新）复用同一个 Promise，
+// 而不是「已有请求就直接返回」—— 后者会让调用方以为刷新完了，其实拿到的是旧 heat，
+// 重画出来状态点还是旧的（签到后不更新就是这个原因）。
+let schedWarnInflight = null;
 // 缓存 scheduler_status.nextDue（taskId → 下次到期 ms），供 renderSchedCard 显示「下次运行时刻」。
 // 列表重画时若还没拉到数据就先不显示时刻，refreshSchedWarnings 回填后下一轮心跳补上。
 let schedNextDue = {};
@@ -814,54 +883,60 @@ async function refreshSchedWarnings() {
   // 无任务/拉取前：标题栏回落显示「N 个启用」
   const base = () => { extraEl.textContent = tasks.length ? `${tasks.length} 个启用` : ""; };
   if (!tasks.length) { base(); return; }
-  if (schedWarnFetching) return;
-  schedWarnFetching = true;
-  let heat = {}, nextDue = {};
-  try {
-    const [h, st] = await Promise.all([
-      invoke("scheduler_heat").catch(() => ({})),
-      invoke("scheduler_status", {}).catch(() => ({})),
-    ]);
-    if (h && typeof h === "object" && !Array.isArray(h)) heat = h;
-    if (st && typeof st === "object") nextDue = st.nextDue || {};
-    schedNextDue = nextDue; // 供列表显示「下次运行时刻」
-    schedHeat = heat;       // 供列表画「跑了没跑」状态点
-  } catch (_) { base(); return; } // 后端没起/浏览器态：回落「N 个启用」
-  finally { schedWarnFetching = false; }
+  // 已有请求在飞 → 等它，别另起也别直接返回（直接返回 = 调用方拿到旧数据）
+  if (schedWarnInflight) return schedWarnInflight;
+  schedWarnInflight = (async () => {
+    let heat = {}, nextDue = {};
+    try {
+      const [h, st] = await Promise.all([
+        invoke("scheduler_heat").catch(() => ({})),
+        invoke("scheduler_status", {}).catch(() => ({})),
+      ]);
+      if (h && typeof h === "object" && !Array.isArray(h)) heat = h;
+      if (st && typeof st === "object") nextDue = st.nextDue || {};
+      schedNextDue = nextDue; // 供列表显示「下次运行时刻」
+      schedHeat = heat;       // 供列表画「跑了没跑」状态点
+    } catch (_) { base(); return; } // 后端没起/浏览器态：回落「N 个启用」
 
-  const tk = todayKeyLocal();
-  const now = Date.now();
-  const dayStart = new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate()).getTime();
-  const bad = [], missed = [], pending = [];
-  for (const t of tasks) {
-    const agg = heat?.[t.id]?.[tk];
-    const hasRunToday = agg && (agg.ok || agg.bad || agg.warn || agg.stop || agg.missed);
-    if (agg && (agg.bad > 0)) { bad.push(t); continue; }
-    if (agg && (agg.missed > 0)) { missed.push(t); continue; }
-    // 到点未跑：nextDue 在「今天 00:00 ~ 现在」之间，且今天完全没跑过
-    const nd = nextDue[t.id];
-    if (!hasRunToday && typeof nd === "number" && nd > 0 && nd >= dayStart && nd <= now) pending.push(t);
-  }
+    const tk = ymd();
+    const now = Date.now();
+    const dayStart = new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate()).getTime();
+    const bad = [], missed = [], pending = [];
+    for (const t of tasks) {
+      const agg = heat?.[t.id]?.[tk];
+      const hasRunToday = agg && (agg.ok || agg.bad || agg.warn || agg.stop || agg.missed);
+      // ⛔ 判据必须用 `last`（当天**最后一次**运行的结果），不能用 `bad`/`missed` 累计计数。
+      //    Rust 侧 DayAgg 的语义写得很明确（scheduler.rs）：`last` 才是「最终结果」，
+      //    「失败 → 重试成功 ⇒ 显示成功」。计数是全天累计，一旦失败过就永远 >0。
+      //    拿计数判异常 ⇒ 早上失败、中午补签成功，状态点已经变绿，标题栏却还挂着「失败」，
+      //    两边自相矛盾。用户报的「已经补签了 卡片上面还是显示失败」就是这个。
+      //    这里直接复用 schedRunState(agg)，与状态点、热力图同一套口径，不许再分叉。
+      const st = schedRunState(agg);
+      if (st === "bad") { bad.push(t); continue; }
+      if (st === "missed") { missed.push(t); continue; }
+      // 到点未跑：nextDue 在「今天 00:00 ~ 现在」之间，且今天完全没跑过
+      const nd = nextDue[t.id];
+      if (!hasRunToday && typeof nd === "number" && nd > 0 && nd >= dayStart && nd <= now) pending.push(t);
+    }
 
-  // 无异常 → 回落「N 个启用」
-  if (!bad.length && !missed.length && !pending.length) { base(); return; }
-  // 有异常 → 标题栏 [data-extra] 显示内联警告胶囊（含启用数做前缀，保留总量信息）
-  const name = (t) => esc(t.name || t.title || "未命名任务");
-  const tip = [...bad, ...missed, ...pending].map(name).join("、");
-  const cnt = (n, cls, label) => `<span class="sw-item ${cls}" title="${label}：${n.map(name).join("、")}">${label}${n.length}</span>`;
-  const parts = [];
-  if (bad.length) parts.push(cnt(bad, "sw-bad", "失败"));
-  if (missed.length) parts.push(cnt(missed, "sw-missed", "漏跑"));
-  if (pending.length) parts.push(cnt(pending, "sw-pending", "到点未跑"));
-  extraEl.innerHTML = `<span class="sw-extra" title="今日异常：${tip}"><span class="sw-icon">${ICON_BELL}</span>${parts.join("")}</span>`;
+    // 无异常 → 回落「N 个启用」
+    if (!bad.length && !missed.length && !pending.length) { base(); return; }
+    // 有异常 → 标题栏 [data-extra] 显示内联警告胶囊（含启用数做前缀，保留总量信息）
+    const name = (t) => esc(t.name || t.title || "未命名任务");
+    const tip = [...bad, ...missed, ...pending].map(name).join("、");
+    const cnt = (n, cls, label) => `<span class="sw-item ${cls}" title="${label}：${n.map(name).join("、")}">${label}${n.length}</span>`;
+    const parts = [];
+    if (bad.length) parts.push(cnt(bad, "sw-bad", "失败"));
+    if (missed.length) parts.push(cnt(missed, "sw-missed", "漏跑"));
+    if (pending.length) parts.push(cnt(pending, "sw-pending", "到点未跑"));
+    extraEl.innerHTML = `<span class="sw-extra" title="今日异常：${tip}"><span class="sw-icon">${ICON_BELL}</span>${parts.join("")}</span>`;
+  })();
+  // 调用方 await 这个 Promise 就一定能拿到「本次拉取完成后」的 schedHeat/schedNextDue，
+  // 不会出现「以为刷新完了、重画出来还是旧状态点」。
+  try { return await schedWarnInflight; }
+  finally { schedWarnInflight = null; }
 }
 
-// 本地日期 YYYY-MM-DD（不能用 toISOString，东八区凌晨会落到前一天）
-function todayKeyLocal() {
-  const x = new Date();
-  const p = (n) => String(n).padStart(2, "0");
-  return `${x.getFullYear()}-${p(x.getMonth() + 1)}-${p(x.getDate())}`;
-}
 
 // 快捷访问：state.quickAccess，点击直接 open_path。
 // 布局是两列网格（不是参差不齐的胶囊流）：每项一行「图标 + 名称 + 类型小字」。
@@ -1005,12 +1080,6 @@ function muyuRollDay(m) {
     m.date = today;
     m.today = 0;
   }
-}
-
-function muyuTotal() {
-  const m = ensureMuyu();
-  muyuRollDay(m);
-  return m.total;
 }
 
 function renderMuyuCard() {
@@ -1199,7 +1268,13 @@ function newer(a, b) {
 }
 
 async function loadCredits(force = false) {
-  if (creditsLoading) return;
+  // ⛔ 提前返回也不能吞掉「定时任务卡状态同步」：签到卡刷新按钮和关闭浮层都会带 force，
+  //    而积分卡可能正好在加载中（creditsLoading）。这时积分由在飞的那次负责，
+  //    但 sched 卡的状态必须照刷 —— 它是独立数据源，跟积分加载状态无关。
+  if (creditsLoading) {
+    if (force) refreshSchedWarnings().then(() => renderSchedCard()).catch(() => {});
+    return;
+  }
   if (!force && Date.now() - creditsCache.at < CREDITS_TTL) return;
   creditsLoading = true;
   // 先把按钮切到「读取中」，让用户知道点了有反应（实时查询要发网络请求，可能几百毫秒）
@@ -1246,6 +1321,11 @@ async function loadCredits(force = false) {
     creditsLoading = false;
   }
   renderCreditsCard();
+  // ⛔ 签到卡的「刷新」按钮只走 loadCredits(true)，不经过 closeModule ——
+  //    签到脚本本身就是一个定时任务，签到成功后它的今日状态（heat.last）也会变，
+  //    定时任务卡必须跟着更新，否则用户签完回来看到状态点还是旧的。
+  //    force=true 才拉：心跳里的 loadCredits() 是节流调用，不该每次都多打两个 IPC。
+  if (force) refreshSchedWarnings().then(() => renderSchedCard()).catch(() => {});
 }
 
 // 把实时查询返回的账号数组转成卡片用的结构（口径同 creditsFromState）
@@ -2143,7 +2223,6 @@ function bindTaskbarFund() {
 //    用户点了按钮以为「没效果」（实际 class、draggable、拖拽落盘全都正常）。
 //    现在靠三件事让状态一眼可见：① 卡片实线+光晕 ② 顶部常驻横幅 ③ 参考网格线。
 let editMode = false;
-export function isEditMode() { return editMode; }
 export function toggleEditMode() {
   editMode = !editMode;
   const grid = document.getElementById("widget-grid");
@@ -2152,8 +2231,8 @@ export function toggleEditMode() {
   document.body.classList.toggle("is-editing", editMode);
   document.getElementById("tb-edit")?.classList.toggle("active", editMode);
   document.getElementById("tb-edit")?.setAttribute("aria-pressed", editMode ? "true" : "false");
-  // 只有编辑态才允许拖：平时 draggable=false，避免误拖打乱布局
-  grid?.querySelectorAll(".widget").forEach((c) => c.setAttribute("draggable", editMode ? "true" : "false"));
+  // ⛔ 不再设 draggable：拖拽已改成 Pointer Events（initCardDrag 里靠 editMode 判断）。
+  //    若设 draggable=true 会触发原生 HTML5 拖拽、和 pointer 拖拽打架（拖一下两套都启动）。
   // 进入编辑态不再弹 toast —— 顶部横幅 + 卡片描边 + 参考线已经是三重反馈，
   // 再弹一条 1.2 秒的 toast 只会和横幅抢位置（横幅固定在右下角，toast 在底部正中）。
   // 退出时仍提示「布局已保存」，因为那是**唯一**能确认「改动生效了」的信号。
@@ -2163,71 +2242,168 @@ export function toggleEditMode() {
   }
 }
 
-// -------------------- 编辑模式：拖拽换位 --------------------
-// 用 HTML5 drag&drop：编辑态下整卡可拖，落到别的卡上就交换两者在网格中的位置。
-// 顺序写 state.settings.cardOrder，刷新后按存好的顺序铺（未记录的按默认顺序排在后面）。
+// -------------------- 网格占用 / 交换（拖拽 + 改大小共用） --------------------
+// 读取每张卡当前钉死的网格坐标（左上角 col/row + 占用 span/rowSpan）。
+function cardCells(grid) {
+  const map = new Map();
+  grid.querySelectorAll(".widget").forEach((c) => {
+    map.set(c, {
+      col: parseInt(c.style.gridColumn, 10) || 1,
+      row: parseInt(c.style.gridRow, 10) || 1,
+      span: Number(c.dataset.span) || 1,
+      rowSpan: Number(c.dataset.row) || 1,
+    });
+  });
+  return map;
+}
+
+// 目标区域 [col..col+span) × [row..row+rowSpan) 是否与「除 ignore 外」的某卡占用区重叠
+function regionFree(grid, col, row, span, rowSpan, ignore) {
+  for (const [c, r] of cardCells(grid)) {
+    if (c === ignore) continue;
+    const oCol = col < r.col + r.span && col + span > r.col;
+    const oRow = row < r.row + r.rowSpan && row + rowSpan > r.row;
+    if (oCol && oRow) return false;
+  }
+  return true;
+}
+
+// 从锚点 (col,row) 出发、不撞邻卡的前提下，≤ 期望尺寸的最大块。
+// ⛔ 必须把**本卡自己**排除（ignore）：否则本卡当前占用区会被当成「邻卡」挡住自己缩放。
+//   缩小永远放行（更小必不撞），放大只在真有空位时放行 → 不锁死缩放、也不压邻卡。
+function fitSize(grid, col, row, wantSpan, wantRow, ignore) {
+  let best = { span: 1, row: 1 };
+  for (let s = 1; s <= wantSpan; s++) {
+    for (let r = 1; r <= wantRow; r++) {
+      if (regionFree(grid, col, row, s, r, ignore)) best = { span: s, row: r };
+    }
+  }
+  return best;
+}
+
+// 互换两张卡的网格坐标（各拿对方位置，尺寸不变）。只在两卡**尺寸相同**时调用 → 绝不溢出/压邻卡。
+function swapGridPos(a, b) {
+  const ac = a.style.gridColumn, ar = a.style.gridRow;
+  a.style.gridColumn = b.style.gridColumn; a.style.gridRow = b.style.gridRow;
+  b.style.gridColumn = ac; b.style.gridRow = ar;
+}
+
+// -------------------- 编辑模式：拖拽换位（手机桌面式自由摆放） --------------------
+// ⛔ 不用 HTML5 drag&drop —— 它只能以「另一张卡」为落点，落不到空格，且 WebView2 里
+//    draggable + 拖拽把手容易打架。改用 Pointer Events 自己算落点：
+//    按住卡拖动 → 实时把鼠标位置换算成网格 (col,row) → 显示半透明落点预览 →
+//    松手落到那个格。落到空格 = 移过去（其它卡不动）；落到别的卡 = 和它交换坐标。
+//    这样前面空出来的格就能被填上（用户要的手机桌面体验）。
 function initCardDrag(grid) {
-  let dragId = null;
-  grid.addEventListener("dragstart", (e) => {
-    if (!editMode) return;
-    // ⛔ 从把手开始按下时绝不能进入「整卡拖拽换位」。
-    //    pointerdown 的 preventDefault 在 Chromium 里已经会抑制后续 mousedown，
-    //    但 WebView2 与 Chrome 的 pointer→mouse 兼容事件时序并不完全一致，
-    //    所以这里再挡一道 —— 双保险，代价只是一次 closest()。
-    if (e.target.closest("[data-resize]")) return;
+  let st = null;   // { card, id, grabDX, grabDY, span, rowSpan }
+  let ghost = null; // 跟随鼠标的半透明落点预览（grid 的直接子元素，用 grid-column/row 定位）
+
+  // 网格几何：列数 / 每列宽 / 每行高 / 相对 grid 的内容原点。全部实测，不写死。
+  const gridGeom = () => {
+    const cs = getComputedStyle(grid);
+    const track = (v) => String(v).split(" ").filter((s) => s && s !== "none").map((x) => parseFloat(x) || 0);
+    const widths = track(cs.gridTemplateColumns); // 每列真实像素宽（repeat/minmax 已解析）
+    const heights = track(cs.gridTemplateRows);   // 每行真实像素高（自适应行高实测）
+    const cols = widths.length || 6;
+    const gap = parseFloat(cs.columnGap) || 12;
+    const gapY = parseFloat(cs.rowGap) || 12;
+    const gr = grid.getBoundingClientRect();
+    return {
+      cols, widths, heights, gap, gapY,
+      originX: gr.left + (parseFloat(cs.paddingLeft) || 0),
+      originY: gr.top + (parseFloat(cs.paddingTop) || 0),
+    };
+  };
+
+  // 鼠标位置 → 目标落点 (col,row)（拖拽卡左上角要放的格）。夹到网格内、且不溢出右边界。
+  // ⛔ 行/列必须用 gridTemplateRows/Columns 的**真实像素尺寸累积**换算，不能用「第一张卡高度」
+  //    估算 —— 行高是 minmax(150px,1fr) 自适应，估算值偏小会把第四行算成第二行（踩过）。
+  const targetCell = (e, span, rowSpan) => {
+    const g = gridGeom();
+    // 列：累积列宽+列间距，找到鼠标 x 落在第几列
+    let col = 1;
+    for (let i = 0; i < g.widths.length; i++) {
+      const lineX = g.originX + g.widths.slice(0, i + 1).reduce((a, b) => a + b, 0) + g.gap * (i + 1);
+      if (e.clientX >= lineX) col = i + 2; else break;
+    }
+    col = Math.max(1, Math.min(col, g.widths.length || g.cols));
+    // 行：累积行高+行间距，找到鼠标 y 落在第几行
+    let row = 1;
+    for (let i = 0; i < g.heights.length; i++) {
+      const lineY = g.originY + g.heights.slice(0, i + 1).reduce((a, b) => a + b, 0) + g.gapY * (i + 1);
+      if (e.clientY >= lineY) row = i + 2; else break;
+    }
+    row = Math.max(1, row);
+    col = Math.max(1, Math.min(col, (g.widths.length || g.cols) - span + 1)); // 不溢出右边界
+    return { col, row, cols: g.cols };
+  };
+
+  const mkGhost = () => {
+    const el = document.createElement("div");
+    el.className = "drag-ghost";
+    grid.appendChild(el);
+    return el;
+  };
+  const placeGhost = (col, row, span, rowSpan) => {
+    if (!ghost) return;
+    ghost.style.gridColumn = `${col} / span ${span}`;
+    ghost.style.gridRow = `${row} / span ${rowSpan}`;
+  };
+
+  grid.addEventListener("pointerdown", (e) => {
+    if (!editMode || e.button !== 0) return;
+    if (e.target.closest("[data-resize]")) return; // 把手是改尺寸，不抢
     const card = e.target.closest(".widget");
     if (!card) return;
-    dragId = card.dataset.card;
-    card.classList.add("dragging");
-    try { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", dragId); } catch (_) {}
-  });
-  grid.addEventListener("dragend", () => {
-    dragId = null;
-    grid.querySelectorAll(".widget.dragging").forEach((c) => c.classList.remove("dragging"));
-    grid.querySelectorAll(".widget.drop-target").forEach((c) => c.classList.remove("drop-target"));
-  });
-  grid.addEventListener("dragover", (e) => {
-    if (!editMode || !dragId) return;
-    const over = e.target.closest(".widget");
-    if (!over || over.dataset.card === dragId) return;
-    e.preventDefault(); // 允许落下
-    over.classList.add("drop-target");
-  });
-  // ⛔ dragenter 也必须 preventDefault —— 这是「测试全绿但 Tauri 里拖不动」的最后一层。
-  //    规范：dragenter 未被取消 → 放置目标被判为「拒绝」，即使后面的 dragover
-  //    取消了默认行为，drop 也不会触发（只会收到 dragend）。
-  //    headless Chrome 对此宽容，Edge/WebView2 严格 —— 所以浏览器探针测不出来。
-  grid.addEventListener("dragenter", (e) => {
-    if (!editMode || !dragId) return;
-    const over = e.target.closest(".widget");
-    if (!over || over.dataset.card === dragId) return;
     e.preventDefault();
+    const span = Number(card.dataset.span) || 1;
+    const rowSpan = Number(card.dataset.row) || 1;
+    const cr = card.getBoundingClientRect();
+    st = {
+      card, id: card.dataset.card, span, rowSpan,
+      grabDX: e.clientX - cr.left,   // 鼠标在卡内的偏移，落点据此对齐
+      grabDY: e.clientY - cr.top,
+    };
+    try { grid.setPointerCapture(e.pointerId); } catch (_) {}
   });
-  grid.addEventListener("dragleave", (e) => {
-    const over = e.target.closest(".widget");
-    if (!over) return;
-    // ⛔ 必须判断「是否真的离开了这张卡」：在卡片内部的子元素之间移动也会触发
-    //    dragleave，无脑 remove 会让落点高亮一直闪。
-    if (over.contains(e.relatedTarget)) return;
-    over.classList.remove("drop-target");
+
+  grid.addEventListener("pointermove", (e) => {
+    if (!st) return;
+    if (!ghost) { ghost = mkGhost(); st.card.classList.add("dragging"); }
+    const t = targetCell(e, st.span, st.rowSpan);
+    placeGhost(t.col, t.row, st.span, st.rowSpan);
   });
-  grid.addEventListener("drop", (e) => {
-    if (!editMode || !dragId) return;
-    const over = e.target.closest(".widget");
-    if (!over || over.dataset.card === dragId) return;
-    e.preventDefault();
-    over.classList.remove("drop-target");
-    // 交换 DOM 位置：DOM 顺序即持久化顺序，不用重算 span
-    const a = grid.querySelector(`[data-card="${dragId}"]`);
-    if (!a) return;
-    const aNext = a.nextElementSibling;
-    if (aNext === over) over.after(a);
-    else over.before(a);
+
+  const finish = (e) => {
+    if (!st) return;
+    const { card, id, span, rowSpan } = st;
+    const t = targetCell(e, span, rowSpan);
+    if (ghost) { ghost.remove(); ghost = null; }
+    card.classList.remove("dragging");
+    st = null;
+    // 找落点区域的卡（被压的那张）。落到空格 → over 为空。
+    const over = Array.from(grid.querySelectorAll(".widget")).find((c) => {
+      if (c === card) return false;
+      const cc = parseInt(c.style.gridColumn, 10) || 1, cr = parseInt(c.style.gridRow, 10) || 1;
+      const cs = Number(c.dataset.span) || 1, crs = Number(c.dataset.row) || 1;
+      return t.col < cc + cs && t.col + span > cc && t.row < cr + crs && t.row + rowSpan > cr;
+    });
+    if (!over) {
+      // 落到空格 → 放那里，其它卡**一律不动**（不补位）。
+      card.style.gridColumn = `${t.col} / span ${span}`;
+      card.style.gridRow = `${t.row} / span ${rowSpan}`;
+    } else {
+      // 落到别的卡 → 只有**尺寸相同**才互换位置（绝不溢出/压邻卡）；
+      // 尺寸不同 → 不动（卡回原位），最简单也最不会出错。
+      const os = Number(over.dataset.span) || 1, ors = Number(over.dataset.row) || 1;
+      if (os === span && ors === rowSpan) swapGridPos(card, over);
+    }
     persistCardOrder(grid);
-  });
-  // 编辑态下整卡可拖
-  grid.querySelectorAll(".widget").forEach((c) => {
-    c.setAttribute("draggable", "false");
+  };
+  grid.addEventListener("pointerup", finish);
+  grid.addEventListener("pointercancel", () => {
+    if (ghost) { ghost.remove(); ghost = null; }
+    if (st) { st.card.classList.remove("dragging"); st = null; }
   });
 }
 
@@ -2301,16 +2477,22 @@ function initCardResize(grid) {
       if (Math.abs(dx) < 6 && Math.abs(dy) < 6) return;
       st.active = true;
       st.card.classList.add("is-resizing");
-      // 拖拽期间禁掉整卡 draggable，否则鼠标一抖还是会触发换位
-      st.card.setAttribute("draggable", "false");
+      // ⛔ 已改用 Pointer Events 拖拽（不再依赖 draggable），这里无需再动 draggable。
     }
     e.preventDefault();
     // ⛔ 用「按下时的尺寸 + 总位移 / 格宽」算目标，**不要**每步重新锚定 startX 再累加。
     //    踩过：第一版每步 `st.span = span; st.startX = e.clientX`，但「尺寸没变」时
     //    提前 return 跳过了重新锚定 → 位移一直累积，攒过半格突然跳 2~3 格
     //    （实测拖 2 格变成 +3）。总位移模型天然没有漂移，也不需要锚定。
-    const span = clampSize(st.span0 + Math.round(dx / st.cellW), 1, SPAN_MAX);
-    const row = clampSize(st.row0 + Math.round(dy / st.cellH), 1, ROW_MAX);
+    const wantSpan = clampSize(st.span0 + Math.round(dx / st.cellW), 1, SPAN_MAX);
+    const wantRow = clampSize(st.row0 + Math.round(dy / st.cellH), 1, ROW_MAX);
+    // ⛔ 用 fitSize（排除自身）把尺寸夹到「不撞邻卡」：缩小永远放行，放大只往真空位撑。
+    //    之前锁死是因为 fitSize 没排除自身 —— 本卡占用区被当成邻卡，连缩小都撞 → 卡回最小。
+    //    现在排除了自身 → 缩小照常、放大到有空位为止，绝不压邻卡（不重叠）。
+    const col = parseInt(st.card.style.gridColumn, 10) || 1;
+    const rw = parseInt(st.card.style.gridRow, 10) || 1;
+    const fit = fitSize(grid, col, rw, wantSpan, wantRow, st.card);
+    const span = fit.span, row = fit.row;
     if (span === Number(st.card.dataset.span) && row === Number(st.card.dataset.row)) return;
     applyCardSize(st.card, span, row);
   });
@@ -2320,10 +2502,15 @@ function initCardResize(grid) {
     const { card, id, active } = st;
     st = null;
     card.classList.remove("is-resizing");
-    card.setAttribute("draggable", editMode ? "true" : "false");
     if (!active) return; // 只是点了一下，什么都没改
-    const span = Number(card.dataset.span) || 1;
+    let span = Number(card.dataset.span) || 1;
     const row = Number(card.dataset.row) || 1;
+    // ⛔ resize 只改本卡大小，**绝不重排其它卡**（不调 applyGridPositions —— 它是紧凑装箱，
+    //    会自动补位 + 挤走用户摆的卡）。只把 span 夹到「从本卡当前列不溢出右边界」，
+    //    放大往右/往下撑开（临时压邻卡由用户再拖 adjustment，不自动动别人）；缩小在本位缩、留空。
+    const startCol = parseInt(card.style.gridColumn, 10) || 1;
+    span = Math.min(span, SPAN_MAX - startCol + 1);
+    applyCardSize(card, span, row);
     persistCardSize(id, span, row);
     // 尺寸变了 → 内容区高度变了。任务卡自己有 ResizeObserver，其余卡靠
     // 1s 心跳的签名对比**不会**因为尺寸变化而重画（签名不含尺寸）。
@@ -2350,17 +2537,6 @@ function repaintCard(id) {
   }
 }
 
-// 把所有卡片恢复成 CARDS 里的默认尺寸（退出编辑模式时不用，仅作「重置布局」用）
-function resetCardSizes(grid) {
-  if (state.settings) delete state.settings.cardSize;
-  const defs = cardDefaults();
-  grid.querySelectorAll(".widget").forEach((card) => {
-    const d = defs.get(card.dataset.card) || { span: 1, row: 1 };
-    applyCardSize(card, d.span, d.row);
-  });
-  saveState();
-}
-
 // 按已保存顺序重排（启动时调用；不在记录里的卡片保持默认位置排在末尾）
 function applyCardOrder(grid) {
   const order = state.settings?.cardOrder;
@@ -2385,28 +2561,28 @@ export function initWorkspace() {
   const grid = gridEl();
   if (grid) {
     grid.insertAdjacentHTML("beforeend", cardList().map(cardShell).join(""));
-    // 卡片点击：整卡可点开对应模块；卡片内的按钮/交互自己 stopPropagation
+    // 卡片点击：**只有右上角「展开」按钮（data-open）才打开浮层**，点卡片本体不弹。
+    // 卡片内的按钮/交互自己 stopPropagation。木鱼（敲）、签到（刷新）的整卡点击是功能行为，保留。
     grid.addEventListener("click", (e) => {
       if (editMode) return; // 编辑态下点击只用于拖拽，不打开模块
       const openBtn = e.target.closest("[data-open]");
       if (openBtn) { openModule(openBtn.dataset.open); return; }
       const card = e.target.closest(".widget");
       if (!card) return;
-      // 木鱼卡：整卡就是「敲一下」，不进浮层（它没有浮层）。
-      // 签到卡：没有模块可开，点击只触发一次实时刷新。
+      // 木鱼卡：整卡就是「敲一下」（它没有浮层）。签到卡：没有模块可开，点击只触发一次实时刷新。
       if (card.dataset.card === "muyu") { muyuHit(); return; }
       if (card.dataset.card === "credits") { loadCredits(true); return; }
-      openModule(card.dataset.module);
     });
     grid.addEventListener("keydown", (e) => {
       if (e.key !== "Enter" && e.key !== " ") return;
+      const openBtn = e.target.closest("[data-open]");
+      if (openBtn) { e.preventDefault(); openModule(openBtn.dataset.open); return; }
       const card = e.target.closest(".widget");
       if (!card) return;
       e.preventDefault();
-      // 键盘操作同样要区分：木鱼敲一下、签到刷新，其余才开浮层
+      // 键盘操作同样：木鱼敲一下、签到刷新，其余不开浮层（浮层只走右上角按钮）
       if (card.dataset.card === "muyu") { muyuHit(); return; }
       if (card.dataset.card === "credits") { loadCredits(true); return; }
-      openModule(card.dataset.module);
     });
     initCardDrag(grid);
     // ⛔ 顺序：先 applyCardSizes（写出 data-span/data-row），再 initCardResize ——
@@ -2414,6 +2590,9 @@ export function initWorkspace() {
     applyCardSizes(grid);
     initCardResize(grid);
     applyCardOrder(grid);
+    // 铺完尺寸和顺序后固定每张卡的网格坐标：后续缩放/拖拽不再触发自动流重排
+    // （否则前面卡缩小，后面卡会往前/往上补位）。resize 不重算，保持其它卡不动。
+    applyGridPositions(grid);
   }
 
   initOverlayRefs();
@@ -2453,7 +2632,7 @@ export function initWorkspace() {
     // 定时任务卡：签名 = 任务列表 + nextDue（下次时刻）+ 今天各任务运行状态（heat.last）。
     // ⛔ 必须含运行状态：任务跑完/到点后 heat.last 变了，签名不变就不会重画，状态点会卡旧的。
     watch("sched", () => (state.scheduler?.tasks || []).map((t) => {
-      const agg = schedHeat?.[t.id]?.[todayKeyLocal()];
+      const agg = schedHeat?.[t.id]?.[ymd()];
       return `${t.id}:${t.enabled}:${t.name}:${agg?.last || "-"}:${schedNextDue[t.id] || "-"}`;
     }).join("|"), renderSchedCard);
     // 快捷访问：签名必须含**分组**信息。

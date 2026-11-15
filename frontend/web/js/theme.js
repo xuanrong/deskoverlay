@@ -152,7 +152,9 @@ function computeThemeVars(cfg) {
     "--accent-contrast": a.accentContrast,
     "--panel-alpha": String(alpha),
     "--panel-alpha-2": String(clamp(alpha - 0.06, 0.35, 0.95)),
-    "--panel-alpha-elevated": String(clamp(alpha + 0.18, 0.5, 0.97)),
+    // 弹层（弹窗/下拉/时间面板）不透明度与桌面卡片（--panel-alpha）脱钩：无论桌面调多透，
+    // 弹层至少 0.86，否则太透、字体和下面的页面内容重叠（用户实测踩中）。
+    "--panel-alpha-elevated": String(clamp(alpha + 0.18, 0.86, 0.97)),
     // ⛔ 这里的基准值与 css/style.css :root 的 --blur-* 必须一致（CSS 只是 JS 未就绪时的兜底）
     "--blur-scrim": `${Math.round(6 * m)}px`,
     "--blur-panel": `${Math.round(20 * m)}px`,

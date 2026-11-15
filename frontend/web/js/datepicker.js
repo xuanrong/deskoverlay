@@ -111,7 +111,9 @@ export function createDatePicker({ el, value = "", onChange = null }) {
     const onDocDown = (e) => {
       if (!pop.contains(e.target) && !el.contains(e.target)) close();
     };
-    const onScroll = () => close();
+    // 滚动关闭：只关「外部滚动」。⚠ 若弹窗内部出现滚动区域，其 target 也落在 pop 里，
+    // 必须放行，否则内部滚动会被当成页面滚动而关闭（与 timepicker 同一处理，保持一致）。
+    const onScroll = (e) => { if (!pop.contains(e.target)) close(); };
 
     pop._cleanup = () => {
       document.removeEventListener("pointerdown", onDocDown, true);
