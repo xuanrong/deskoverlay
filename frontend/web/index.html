@@ -41,7 +41,13 @@
               就以为「点编辑模式没反应」。 -->
       <div class="edit-banner" aria-live="polite">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v18"/><path d="M3 12h18"/><path d="M8 7l4-4 4 4"/><path d="M8 17l4 4 4-4"/><path d="M7 8l-4 4 4 4"/><path d="M17 8l4 4-4 4"/></svg>
-        <span>拖动卡片换位 · 拖右下角改大小 · 再点一次「编辑模式」保存</span>
+        <span>拖动卡片换位 · 拖右下角改大小 · 点卡片左下角 ✕ 移除 · 再点一次「编辑」保存</span>
+        <button class="edit-banner__library" id="tb-card-library" aria-label="卡片库（添加卡片）" aria-expanded="false">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+          <span>卡片库</span>
+        </button>
+        <!-- 卡片库面板：编辑态点「卡片库」弹出，列出所有可添加的卡片（当前已摆上的标「已添加」）。 -->
+        <div class="card-library" id="card-library" hidden></div>
       </div>
 
       <!-- 底部任务栏：设置 / 指标 / 时间 / 基金行情 / 编辑模式 / 退出 -->
@@ -140,12 +146,19 @@
               </svg>
             </span>
           </button>
-          <button class="taskbar-btn" id="tb-edit" aria-label="编辑模式（拖动卡片调整布局）">
+          <button class="taskbar-btn" id="tb-edit-refresh" aria-label="刷新（重新加载桌面）">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M20 11a8 8 0 1 0-2.3 5.7"></path>
+              <path d="M20 5v6h-6"></path>
+            </svg>
+            <span>刷新</span>
+          </button>
+          <button class="taskbar-btn" id="tb-edit" aria-label="编辑（拖动卡片调整布局）">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M12 20h9"></path>
               <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"></path>
             </svg>
-            <span>编辑模式</span>
+            <span>编辑</span>
           </button>
           <button class="taskbar-btn taskbar-btn--exit" id="tb-quit" aria-label="退出应用">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">

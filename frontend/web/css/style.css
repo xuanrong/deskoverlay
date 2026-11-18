@@ -452,14 +452,14 @@ body::after {
    ⛔ 默认 pointer-events:none，只在 .edit-mode 里放开，否则平时会挡住卡片点击。 */
 .widget__resize {
   position: absolute;
-  right: 0;
-  bottom: 0;
+  right: 4px;
+  bottom: 4px;
   width: 18px;
   height: 18px;
   cursor: nwse-resize;
   opacity: 0;
   pointer-events: none;
-  z-index: 6;
+  z-index: 7;
   transition: opacity var(--t);
 }
 .widget__resize::before {
@@ -1024,16 +1024,16 @@ body::after {
 .cr-grid {
   position: relative;
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr 1fr 1fr;
   gap: 0;
   height: 100%;
   align-items: stretch;
 }
 /* 婵炴垶鎼╅崢鍓ф閹惰棄绀嗛柛鈩冾殔椤ュ繒绱掗幆褍鐨＄紒杈╁缁傛帗鎯斿┑鍫㈡啰闂佸憡甯￠。锔剧箔閸涱垱瀚绘い鏍ㄥ閺佸秹鏌℃担鍝ユ憼闁绘牬鍣ｉ弫宥夊醇閵夛絺鍋?2px / 闁?2px 闂佸憡鑹剧€氼噣寮抽埀顒€鈽夐幘顖氫壕闂佺粯鍔楀▍銏㈡濠靛洨鈻旂€广儱顦埀顒€锕畷姘跺级閸喖鑰块梺缁橆殔濞层倕銆掗崜褎鍠嗛柟铏瑰仧缁€?*/
-.cr-grid::before {
+.cr-grid::before,
+.cr-grid::after {
   content: "";
   position: absolute;
-  left: 50%;
   top: 2px;
   bottom: 2px;
   width: 1px;
@@ -1041,6 +1041,8 @@ body::after {
   transform: translateX(-50%);
   pointer-events: none;
 }
+.cr-grid::before { left: 33.333%; }
+.cr-grid::after { left: 66.666%; }
 .cr-col {
   display: flex;
   flex-direction: column;
@@ -1080,7 +1082,7 @@ body::after {
 
 /* 婵炶揪绲鹃悷鈺吢烽崒鐐存櫖婵﹩鍋勯惁婊堟偡濞嗘劕绔鹃柍褜鍓欓崐鎼佹偤瑜斿畷锝夋煥鐎ｎ偒娼犻梺鍝勫閸庡磭鏁崶銊︿氦闁搞儯鍔庨崹鐓幬?*/
 .cr-val {
-  font-size: 25px;
+  font-size: 20px;
   font-weight: var(--fw-bold);
   color: var(--text);
   font-variant-numeric: tabular-nums;
@@ -1353,15 +1355,7 @@ body::after {
   overflow: hidden;
 }
 .wm-lyric[hidden] { display: none; }
-/* 閻庡綊娼荤紓姘跺疾閼哥數鈻旈柍褜鍓熷鍫曟晬閸曨厾鐓勭紓浣规⒐閻楁粓宕垫惔銊ョ；婵ǜ鍎崑鎾朵沪閸撗勬啓闁荤姴娲ょ粔鏌ュ焵椤掆偓缁夎泛鈻撻幋鐘冲枂闁糕剝鍑瑰鏇㈡煛瀹ュ懏绌挎い鏂挎喘閺佸秶浠﹂崜褎啸缂備胶铏庨崹閬嶅几閸愵亖鍋撳☉娆樻畷婵炴彃娼″畷鎾圭疀閺冨倹鎲欓柣鐘叉搐缁夌兘銆?*/
-.wm-lyric::before {
-  content: "";
-  flex: 0 0 auto;
-  width: 2px; height: 12px;
-  border-radius: 1px;
-  background: var(--blue);
-  opacity: 0.7;
-}
+/* 歌词行前不放竖条指示器（用户要求去掉），歌词直接左对齐歌名。 */
 .wm-lyric-prev { display: none; }
 .wm-lyric-cur {
   display: block;
@@ -1662,13 +1656,19 @@ body.is-editing .edit-banner {
   display: flex;
   align-items: center;
   gap: 6px;
-  flex: 0 0 auto;
+  /* ⛔ 左右两区必须等宽（flex:1 1 0），中间「系统属性+指数」区才真正落在任务栏正中。
+     若按内容宽（flex:0 0 auto），左（只有设置，~66px）远窄于右（时间+一串按钮，~298px），
+     中间区盒子被挤偏 → 内容在自己盒子里居中、但整体偏左 ~116px（实测）。
+     两区等宽后中间区盒子对称，justify-content:center 即视觉正中。 */
+  flex: 1 1 0;
+  min-width: 0;
 }
+.taskbar__right { justify-content: flex-end; } /* 右侧按钮组仍靠右对齐 */
 .taskbar__center {
   display: flex;
   align-items: center;
   gap: 10px;
-  flex: 1 1 auto;
+  flex: 0 0 auto; /* 只占内容宽；对称性由左右等宽保证，不再自己撑开（撑开会挤偏） */
   justify-content: center;
   min-width: 0;
   overflow: hidden;
@@ -1705,12 +1705,6 @@ body.is-editing .edit-banner {
   background: rgba(var(--accent-rgb), 0.14);
   border-color: rgba(var(--accent-rgb), 0.35);
 }
-/* ---- 闁圭厧鐡ㄥú鐔煎磿閹绢喖鍐€闊洦娲熼崗鍥╃磽娴ｅ搫鏋戦悗鍨哺瀵?---- */
-/* 闂傚倸鍟鑸垫叏閸儱绀夐柕濞у嫮鏆犻梺鍝勭Ф椤牏缂撴ィ鍐╂櫖婵﹩鍘藉▓鍫曟倵濞戞瑯娈曟い鏂跨焸閹?ch 闂佸憡顨嗗ú鎴犵礊閸涙潙鐐婇柛婵嗗閺嗕即鎮楃涵鍛棄閻庤濞婃俊?
-   CPU/闂佸憡鍔曢幊搴ㄦ偤?缂佹儳褰為懗璺好鸿箛娑欏剭闁告洦鍓氬▓鍫曟煕婵犲嫬甯舵繝鈧?0~100 婵炴垶鏌ㄩ澶娢涚捄銊﹀磯闁告劖褰冭闂? 婵炶揪绲界粔鐢稿汲閻旂厧妞?3 婵炶揪绲界粔鐢稿汲閻旇　鍋撶涵鍛棄閻庣懓鍟块?12px 閻庡綊娼荤粻鎴ｃ亹閹间焦鏅?
-   闂備焦婢樼粔鎾箖?.taskbar__center 闂?justify-content:center闂佹寧绋戦張顒勫汲閿濆绾ч柍銉ㄥ皺缁愭鈧綊娼荤粻鎴ｃ亹閹间胶宓佺€规洖娉?闂佺偨鍎查弻锟犲焵?闂佹椿浜滈鍥ь焽閸愵喖鐤鹃柛鎰惰吂閸?
-   闂佸湱顣介崑鎾趁归悩顔煎姕濠殿垰鐖奸獮瀣箛椤忓棛鎲﹀┑鐐茬墢椤ｎ喚妲愭导鏉戠倞闁告繂瀚弳浼存煛瀹ュ懏宸濇い鎺斿厴閺佸秹宕烽弰濉?闂佸憡鍔曢幊搴ㄦ偤?缂佹儳褰為懗璺好鸿箛娑欐櫖? 闁诲氦顫夐懝楣冾敊閺冨牆鏋侀柡澶庢硶閹界喖鏌?ch闂? 闂佹悶鍎遍幖顐︽偩妤ｅ啯鍎岄柟顖嗗啰鈧鏌涘▎鎰粵闁?
-   tabular-nums 婵烇絽娲︾换鍡涙儊婢舵劕违?闂侀潧妫楃粔鎾箯娴兼潙违?闂侀潧妫楃粔鍫曟偤閹寸姭鍋撶憴鍕伄缂佽鲸绱瞙 闂佸綊娼х粔璺猴耿閿熺姵鍎嶉柛鏇ㄥ枛閸樻挳姊烘径鍛婎樂缂傚秴娲ㄩ埀顒傤攰濡嫮鈧濞婃俊?*/
 .taskbar-metric {
   display: inline-flex;
   align-items: center;
@@ -2096,7 +2090,7 @@ body.is-editing .edit-banner {
   height: 100%;
   display: flex;
   flex-direction: column;
-  background: rgba(var(--panel-tint), calc(var(--panel-alpha) + 0.12));
+  background: rgba(var(--panel-tint), calc(var(--panel-alpha) + 0.2));
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-lg);
@@ -3440,7 +3434,9 @@ html {
 .q-random-on { font-size: 11px; color: var(--blue); margin-left: 8px; }
 
 /* 闂傚倸锕ㄥ▍鏇犺姳椤斿墽涓嶉柨娑樺閸婄偟鈧鍠栧﹢閬嶆偘閵夆晜鏅慨姗嗗墮閽冪喖鏌涢弽褎鎯堢紒鏃堫棑娴狅箓鍩€椤掑嫭鏅柛顐ｇ箑缁狀垶鏌涢幒鎿冩畽闁?+ 闂佸憡鐟ㄥ▍鏇㈠锤婵犲洤绀夐柣妯肩帛濡椼劑鏌℃径濠傜殹缂?*/
-.source-modal { width: min(960px, 94vw); height: min(680px, 88vh); }
+/* ⛔ 特异性：base .task-modal 是 min(520px,94vw) 且在后面，同特异性会盖掉单类。
+   用 .task-modal.source-modal（0,2,0，同 remind-modal 手法）压过 base，弹窗才够宽放两栏。 */
+.task-modal.source-modal { width: min(960px, 94vw); height: min(680px, 88vh); }
 .sm-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 14px; flex: 0 0 auto; }
 .sm-head h3 { margin: 0; }
 .sm-count { font-size: 11.5px; color: var(--text-faint); }
@@ -3502,8 +3498,13 @@ html {
 }
 .src-del {
   background: transparent; border: 0; color: var(--text-faint);
-  cursor: pointer; font-size: 13px; padding: 2px 6px; flex: 0 0 auto;
-  border-radius: var(--radius-xs);
+  cursor: pointer; flex: 0 0 auto;
+  /* ⛔ 热区够大好按：30×30（原来 padding:2px 6px 太小难点中）。图标尺寸走共享规则
+     （.src-del svg 在 12px 那组里，带 fill/stroke），这里别再覆盖 svg 尺寸——覆盖会丢 fill/stroke
+     导致图标看不见（踩过：加了 width/height 却没 fill/stroke，描边型 ICON_CLOSE 直接消失）。 */
+  width: 30px; height: 30px;
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 0; border-radius: var(--radius-sm);
 }
 .src-del:hover { color: var(--danger); background: var(--bg-hover); }
 /* 闂傚倸锕ㄥ▍鏇犺姳椤曗偓楠炴帡骞掗幋鐘殿暡闂佹寧绋掔喊宥団偓姘儔楠炲繘鎳為妷銉庘晠鏌?+ 闁瑰吋娼欑换鎰亹?+ 闂佸綊鏀遍悧妤冣偓姘健楠炩偓濞撴艾锕︾粈鍕煙缁嬫寧鍠橀柟灏佸墲缁傚秶鈧絺鏅滈浠嬫煠婵傚绨婚柣銈呭閹磭鏁鍓ь槷闂?HTML5 drag闂?*/
@@ -3842,7 +3843,7 @@ html {
   flex-direction: column;
   /* 弹窗不透明度与桌面卡片（--panel-alpha）脱钩：桌面调多透，弹窗至少 0.88，
      否则弹窗太透、字体和下面的页面内容重叠（用户实测踩中）。max() 取「用户值」和「下限」的较大者。 */
-  background: rgba(var(--panel-tint), max(var(--panel-alpha-elevated), 0.88));
+  background: rgba(var(--panel-tint), max(var(--panel-alpha-elevated), 0.92));
   border: 1px solid var(--border-strong);
   border-radius: 18px;
   padding: 26px 28px;
@@ -6081,3 +6082,125 @@ grid-template-columns: minmax(200px, 2fr) 1fr auto;
 :root[data-scheme="light"] .slg-l.is-warn { background: rgba(var(--amber-rgb), .09); }
 .sch-set-modal .tm-field { margin-bottom: 12px; }
 .sch-set-modal { height: min(380px, 70vh); }
+
+/* ==================== 每日诗词（poem） ==================== */
+/* 卡片：span-2 首页卡，竖排一句诗 + 出处作者。诗句用衬线体（楷/宋），居中留白呼吸感。 */
+[data-card="poem"] .widget__body { display: flex; min-height: 0; }
+.poem-card {
+  flex: 1 1 auto; min-height: 0; width: 100%;
+  display: flex; flex-direction: column; justify-content: center; gap: 10px;
+  padding: 4px 2px;
+}
+.poem-line {
+  margin: 0; font-family: "Kaiti SC", "STKaiti", "KaiTi", "Songti SC", "SimSun", serif;
+  font-size: 17px; line-height: 1.7; color: var(--text); letter-spacing: 0.4px;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+}
+.poem-meta { margin: 0; display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.poem-origin { font-size: 12px; color: var(--text-dim); }
+.poem-author { font-size: 12px; color: var(--text-faint); }
+.poem-author::before { content: "·"; margin-right: 6px; color: var(--text-faint); }
+.poem-offline .poem-origin::after { content: "（离线）"; font-size: 11px; color: var(--text-faint); }
+
+
+/* ==================== 编辑态：卡片移除 + 卡片库 ==================== */
+/* 移除按钮：左下角，跟右下角缩放把手（折角）对称。内缩 4px 不贴死圆角，同样克制不花哨。 */
+.widget__remove {
+  position: absolute;
+  left: 4px;
+  bottom: 4px;
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 7;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.22);
+  transition: opacity var(--t), background var(--t-fast);
+}
+.widget__remove svg {
+  width: 10px;
+  height: 10px;
+  fill: none;
+  stroke: var(--tomato);
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  transition: stroke var(--t-fast);
+}
+/* hover：淡红底衬一下，叉更亮；不放大不动效 */
+.widget__remove:hover { background: rgba(var(--tomato-rgb), 0.18); }
+.widget__remove:hover svg { stroke: var(--tomato); filter: brightness(1.2); }
+.widget-grid.edit-mode .widget__remove { opacity: 0.6; pointer-events: auto; }
+.widget-grid.edit-mode .widget:hover .widget__remove { opacity: 1; }
+
+/* 卡片库面板：挂在右下角编辑横幅上方，往上弹。
+   ⛔ 用 position:fixed 自行定位，不能靠横幅 position:relative —— 横幅是 position:fixed，
+      我若加 relative 会覆盖它把横幅定位搞坏（同特异性、看书写顺序）。面板自己钉右下角。 */
+.card-library {
+  position: fixed;
+  right: 16px;
+  bottom: calc(52px + 12px + 32px + 10px); /* 任务栏 52 + 间隙 12 + 横幅高 32 + 间隙 10 */
+  width: 240px;
+  max-height: 320px;
+  overflow-y: auto;
+  background: var(--bg-panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.4);
+  padding: 8px;
+  z-index: 70; /* 高于横幅 60 */
+  pointer-events: auto;
+}
+.card-library__head {
+  font-size: 11.5px;
+  color: var(--text-faint);
+  padding: 2px 6px 8px;
+  letter-spacing: 0.3px;
+}
+.card-library__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 8px;
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
+  transition: background var(--t-fast);
+}
+.card-library__item:hover:not(:disabled) { background: var(--bg-hover); }
+.card-library__item.is-shown { opacity: 0.45; cursor: default; }
+.card-library__icon { flex: 0 0 auto; display: flex; color: var(--text-dim); }
+.card-library__icon svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.card-library__name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card-library__state { flex: 0 0 auto; font-size: 11px; color: var(--text-faint); }
+.card-library__item:not(.is-shown) .card-library__state { color: var(--accent); }
+
+/* 卡片库开关按钮（横幅内） */
+.edit-banner__library {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: 8px;
+  padding: 4px 10px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-dim);
+  font-size: 11.5px;
+  cursor: pointer;
+  transition: all var(--t-fast);
+  white-space: nowrap;
+  /* ⛔ 横幅是 pointer-events:none（不挡卡片点击），按钮会继承成点不了 —— 显式打开 */
+  pointer-events: auto;
+}
+.edit-banner__library:hover { color: var(--accent); border-color: rgba(var(--accent-rgb), 0.4); }
+.edit-banner__library svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }

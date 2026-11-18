@@ -197,9 +197,11 @@ try {
   // ═══════════ 主窗口：文件中心搜索 + 搜索结果右键菜单 ═══════════
   await cdp.send("Page.navigate", { url: `${BASE}/index.html` });
   await waitFor(`document.readyState === "complete"`, "index.html 加载完成");
-  // 一屏工作台：文件中心在「今日概览」模块里，得先点卡片打开全屏浮层
-  await waitFor(`!!document.querySelector('#widget-grid .widget[data-module="dashboard"]')`, "工作台卡片渲染完成");
-  await evaluate(`(() => { const c = document.querySelector('#widget-grid .widget[data-module="dashboard"]'); c && c.click(); return true; })()`);
+  // 一屏工作台：文件中心在「今日概览」模块里，点右上角展开按钮打开全屏浮层
+  // ⛔ 6e87087 起卡片本体点击不再开浮层（只有右上角 [data-open] 展开按钮），
+  //    这里必须点按钮而不是整卡，否则 waitFor 会超时。
+  await waitFor(`!!document.querySelector('#widget-grid .widget[data-module="dashboard"] [data-open]')`, "工作台卡片渲染完成");
+  await evaluate(`(() => { const b = document.querySelector('#widget-grid .widget[data-module="dashboard"] [data-open]'); b && b.click(); return true; })()`);
   await waitFor(`!!document.querySelector("#d-file-search")`, "文件中心渲染出搜索框");
   check(
     "主窗口启动无 JS 异常、无资源加载失败",
@@ -441,7 +443,7 @@ try {
   netNoise.length = 0;
   await cdp.send("Page.navigate", { url: `${BASE}/index.html` });
   await waitFor(`document.readyState === "complete" && !!document.querySelector("#widget-grid .widget")`, "主窗口加载完成");
-  await evaluate(`(() => { const n = document.querySelector('#widget-grid .widget[data-module="music"]'); n && n.click(); return true; })()`);
+  await evaluate(`(() => { const b = document.querySelector('#widget-grid .widget[data-module="music"] [data-open]'); b && b.click(); return true; })()`);
   await waitFor(`!!document.getElementById("mc-lyric")`, "音乐页渲染出桌面歌词按钮");
 
   await evaluate(`window.__smoke.reset(); document.getElementById("mc-lyric").click(); true;`);
@@ -496,7 +498,7 @@ try {
   eq("未开启歌词窗口时不推送（闸门关闭）", await evaluate(`window.__smoke.callsOf("lyric_sync").length`), 0);
 
   // 开启歌词窗口 → 应立即推送首屏，且带真实歌名（证明 initPlayback 路径上的数据是活的）
-  await evaluate(`(() => { const n = document.querySelector('#widget-grid .widget[data-module="music"]'); n && n.click(); return true; })()`);
+  await evaluate(`(() => { const b = document.querySelector('#widget-grid .widget[data-module="music"] [data-open]'); b && b.click(); return true; })()`);
   await waitFor(`!!document.getElementById("mc-lyric")`, "音乐页渲染");
   await evaluate(`window.__smoke.reset(); document.getElementById("mc-lyric").click(); true;`);
   await sleep(300);
@@ -886,7 +888,7 @@ try {
   // ── 回到主窗口：验证关闭闸门与按钮态复位 ──
   await cdp.send("Page.navigate", { url: `${BASE}/index.html` });
   await waitFor(`document.readyState === "complete" && !!document.querySelector("#widget-grid .widget")`, "回到主窗口");
-  await evaluate(`(() => { const n = document.querySelector('#widget-grid .widget[data-module="music"]'); n && n.click(); return true; })()`);
+  await evaluate(`(() => { const b = document.querySelector('#widget-grid .widget[data-module="music"] [data-open]'); b && b.click(); return true; })()`);
   await waitFor(`!!document.getElementById("mc-lyric")`, "音乐页重新渲染");
   // 重新开启再关闭，验证闸门开关
   await evaluate(`document.getElementById("mc-lyric").click(); true;`);

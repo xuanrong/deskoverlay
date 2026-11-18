@@ -3,11 +3,13 @@
 // 分工：本文件只管「工作台首页」的卡片渲染与浮层开关；模块内部仍由 views.js 的原渲染器负责，
 // 卡片只读 state / Tasks / Bus，绝不反向写入模块视图。
 import { MODULES, CHECKIN_RESULT_DIR } from "./config.js";
-import { state, saveState } from "./state.js";
+import { state, saveState, saveStateNow } from "./state.js";
 import { Bus, Heartbeat, invoke } from "./bus.js";
 import { VIEW_RENDERERS } from "./views.js";
 import { Tasks } from "./tasks.js";
 import { musicControl, musicLyricAt } from "./views/music.js";
+// 每日诗词卡：卡片只显示一句，浮层看全文；渲染逻辑集中在 views/poem.js
+import { renderPoemCard } from "./views/poem.js";
 // 指数行情取数（模块级导出）：任务栏无需打开基金模块即可显示大盘
 import { fetchIndexQuotes } from "./views/fund.js";
 // 签到实时查询：刷新按钮要能主动拉最新余额，不能只重读那个早上 10 点的旧文件
@@ -22,6 +24,7 @@ import {
   ICON_CHECK, ICON_PLAY, ICON_PAUSE, ICON_NEXT, ICON_PREV, ICON_GRID,
   ICON_CREDIT, ICON_FOLDER, ICON_GLOBE, ICON_DOC, ICON_REFRESH, ICON_SPARK,
   ICON_MUYU_BIG, ICON_EXPAND, ICON_PLUS, ICON_KANBAN, ICON_BELL,
+  ICON_LYRICS,
 } from "./icons.js";
 
 // -------------------- 卡片配置 --------------------
@@ -34,9 +37,9 @@ const CARDS = [
   { id: "notes",    module: "notes",       title: "最近笔记", kind: "notes",    span: 2, row: 1 },
   { id: "music",    module: "music",       title: "音乐播放", kind: "music",    span: 2, row: 1 },
   { id: "sched",    module: "scheduler",   title: "定时任务", kind: "sched",    span: 2, row: 1 },
-  // 快捷访问：占 2 格宽（span-4），横向铺 4 列 × 2 行 = 8 个快捷方式。
-  // 之前是 span-2（2 列 × 2 行 = 4 个），一半宽度都浪费在右侧留白上。
-  { id: "quick",    module: "quickaccess", title: "快捷访问", kind: "quick",    span: 4, row: 1 },
+  // 快捷访问：缩到 span-2（2 列 × 2 行 = 4 个快捷方式）。
+  // 原 span-4（4×2=8 个）。腾出 2 格给「每日诗词」卡，保持一屏 24 格不溢出。
+  { id: "quick",    module: "quickaccess", title: "快捷访问", kind: "quick",    span: 2, row: 1 },
   // 电子木鱼：1 格宽。点击整张卡就敲一下（次数 +1），没有浮层。
   // 原位置是「AI 资讯」卡（已随整个模块移除）。
   { id: "muyu",     module: "muyu",        title: "电子木鱼", kind: "muyu",     span: 1, row: 1 },
@@ -57,6 +60,10 @@ const CARDS = [
   // ⚠ 原「AI 资讯」模块已移除，签到卡不再有浮层可进 —— module 用独立的 "credits"
   //    （不在 MODULES 里），点击只触发一次实时刷新，不打开任何面板。
   { id: "credits",  module: "credits",     title: "签到积分", kind: "credits",  span: 2, row: 1, icon: ICON_CREDIT },
+  // 每日诗词：首页 span-2 卡显示每日一句，右上角 data-open 进浮层看全文。
+  // 数据源 jinrishici（今日诗词）免费接口，每次刷新重新请求（YG 指定不缓存）。
+  // 快捷访问从 span-4 缩到 span-2（8 快捷→2×2 四个）腾出这 2 格，保持一屏 24 格。
+  { id: "poem",     module: "poem",        title: "每日诗词", kind: "poem",     span: 2, row: 1, icon: ICON_LYRICS },
 ];
 
 // 不占卡片的模块：底部任务栏已经有入口，网格里再放一张就是重复。
@@ -75,8 +82,9 @@ const moduleIcon = (id) => MODULE_BY_ID.get(id)?.icon || ICON_GRID;
 // 「有卡片但没有模块」的例外：这些卡的 module 不在 MODULES 里，也不开浮层。
 //   credits → 签到积分。原「AI 资讯」模块删除后它失去了宿主模块，但卡片要留
 //             （点击只做一次实时刷新）。
+//   poem    → 每日诗词。无浮层（展开看全文已砍），卡片本体显示一句 + 右上角刷新换一句。
 // ⛔ 不加这个集合，cardList() 的 MODULE_BY_ID.has() 过滤会把它们当「模块已删」丢掉。
-const CARDLESS_MODULES = new Set(["credits"]);
+const CARDLESS_MODULES = new Set(["credits", "poem"]);
 
 // -------------------- 卡片尺寸（用户可调）--------------------
 // 需求：「每个卡片都能改变大小」。实现为编辑模式下拖右下角把手，吸附到网格。
@@ -143,9 +151,16 @@ function applyCardSize(card, span, row) {
 // 启动时按持久化值铺一遍
 function applyCardSizes(grid) {
   const defs = cardDefaults();
+  // ⛔ 必须优先读用户存的尺寸 state.settings.cardSize（缩放时 persistCardSize 写的），
+  //    否则启动时只用 cardDefaults() → 改大小存了也白存、重启必回默认（踩过）。
+  //    cardSize 里没有的卡（新增/从未缩放）才回落到默认。
+  const saved = (state.settings && typeof state.settings.cardSize === "object") ? state.settings.cardSize : {};
   grid.querySelectorAll(".widget").forEach((card) => {
     const id = card.dataset.card;
-    const d = defs.get(id) || { span: 1, row: 1 };
+    const s = saved[id];
+    const d = (s && Number.isFinite(Number(s.span)) && Number.isFinite(Number(s.row)))
+      ? { span: Number(s.span), row: Number(s.row) }
+      : (defs.get(id) || { span: 1, row: 1 });
     applyCardSize(card, spanOf(id, d.span), rowOf(id, d.row));
   });
 }
@@ -159,6 +174,29 @@ function applyCardSizes(grid) {
 //    这与原自动流的初始铺法一致（同样紧凑），只是之后不再随缩放重排。
 function applyGridPositions(grid) {
   const cards = Array.from(grid.querySelectorAll(".widget"));
+  // ⛔ 优先按用户拖动后存下的坐标（state.settings.cardPos）钉位置 —— 否则每次重启都按 DOM
+  //    顺序重新装箱，用户拖出来的布局全丢（踩过：换位重启复原）。
+  //    只有当「当前网格里每一张卡」都存过坐标时才走还原（新增/隐藏卡会让集合对不上，
+  //    那种情况回落到装箱，保证不出现坐标重叠/空洞）。cardPos 由 persistCardOrder 每次拖动落盘。
+  const savedPos = state.settings?.cardPos;
+  if (savedPos && typeof savedPos === "object") {
+    const allSaved = cards.every((c) => {
+      const p = savedPos[c.dataset.card];
+      return p && Number.isFinite(Number(p.col)) && Number.isFinite(Number(p.row));
+    });
+    if (allSaved) {
+      for (const card of cards) {
+        const p = savedPos[card.dataset.card];
+        const span = Number(card.dataset.span) || 1;
+        const rowSpan = Number(card.dataset.row) || 1;
+        const col = Math.max(1, Math.round(Number(p.col)));
+        const row = Math.max(1, Math.round(Number(p.row)));
+        card.style.gridColumn = `${col} / span ${span}`;
+        card.style.gridRow = `${row} / span ${rowSpan}`;
+      }
+      return;
+    }
+  }
   const occupied = new Set(); // "col,row" 已被占用的格
   for (const card of cards) {
     const span = Number(card.dataset.span) || 1;
@@ -193,17 +231,20 @@ function persistCardSize(id, span, row) {
     state.settings.cardSize = {};
   }
   state.settings.cardSize[id] = { span, row };
-  saveState();
+  saveStateNow(); // ⛔ 布局改动立即落盘：防抖 300ms 内关应用会丢
 }
 
 // 动态卡片清单：设计稿里的核心卡按固定 span 铺，其余模块自动补 1 格小卡。
+// ⛔ 会过滤掉 state.settings.cardHidden 里的卡（编辑态被移除的）—— 它们不从网格渲染，
+//    但仍可从编辑态「卡片库」加回（见 openCardLibrary / addCard）。
 function cardList() {
+  const hidden = new Set(state.settings?.cardHidden || []);
   const designed = CARDS.filter(
-    (c) => MODULE_BY_ID.has(c.module) || CARDLESS_MODULES.has(c.module),
+    (c) => (MODULE_BY_ID.has(c.module) || CARDLESS_MODULES.has(c.module)) && !hidden.has(c.id),
   );
   const covered = new Set(designed.map((c) => c.module));
   const extra = MODULES
-    .filter((m) => !covered.has(m.id) && !TASKBAR_ONLY.has(m.id))
+    .filter((m) => !covered.has(m.id) && !TASKBAR_ONLY.has(m.id) && !hidden.has(m.id))
     .map((m) => ({ id: m.id, module: m.id, title: m.title, kind: "mini", span: 1, row: 1 }));
   return designed.concat(extra);
 }
@@ -329,6 +370,15 @@ function resizeHandleHTML() {
   return `<span class="widget__resize" data-resize aria-label="拖动改大小"></span>`;
 }
 
+// 移除按钮：编辑态才显示（CSS .edit-mode 控制）。用 <span> 而非 <button> ——
+//   mini/muyu 卡外层已是 <button>，嵌套 button 非法会拆 DOM；span + click 委托同样可用。
+//   ⛔ 必须 stopPropagation：否则点移除会冒泡触发整卡点击（muyu 敲一下 / 别的卡开浮层）。
+function removeBtnHTML() {
+  return `<span class="widget__remove" data-card-remove aria-label="移除这张卡片" role="button" tabindex="-1">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+  </span>`;
+}
+
 function cardShell(cfg) {
   const mod = cfg.module;
   // cfg.icon 优先：允许卡片用专属图标而不借用模块图标（积分卡就复用了 ai 模块但换了图标）
@@ -342,6 +392,7 @@ function cardShell(cfg) {
       <span class="w-label">${esc(cfg.title)}</span>
       <span class="w-badge" data-badge hidden></span>
       <span class="w-expand" data-open="${mod}" aria-label="打开${esc(cfg.title)}">${ICON_EXPAND}</span>
+      ${removeBtnHTML()}
       ${resizeHandleHTML()}
     </button>`;
   }
@@ -354,6 +405,7 @@ function cardShell(cfg) {
   if (cfg.kind === "ideas") {
     return `<section class="widget widget--stars ${cls}" data-card="${cfg.id}" data-module="${mod}">
       <div class="widget__title">
+        ${removeBtnHTML()}
         <span class="widget__icon">${icon}</span>
         <span class="widget__name">${esc(cfg.title)}</span>
         <span class="widget__extra" data-extra></span>
@@ -373,6 +425,7 @@ function cardShell(cfg) {
         <span class="widget__extra" data-extra></span>
       </div>
       <div class="widget__body" data-body>${skeletonHTML()}</div>
+      ${removeBtnHTML()}
       ${resizeHandleHTML()}
     </button>`;
   }
@@ -380,6 +433,7 @@ function cardShell(cfg) {
   if (cfg.kind === "ems") {
     return `<section class="widget widget--ems ${cls}" data-card="${cfg.id}" data-module="${mod}">
       <div class="widget__title">
+        ${removeBtnHTML()}
         <span class="widget__icon">${icon}</span>
         <span class="widget__name">${esc(cfg.title)}</span>
         <span class="widget__extra" data-extra></span>
@@ -389,8 +443,23 @@ function cardShell(cfg) {
       ${resizeHandleHTML()}
     </section>`;
   }
+  // 每日诗词：无浮层卡（跟签到卡同类）—— 标题栏只放刷新按钮（extra），无展开键。
+  // 点刷新换一句诗；点卡片本体不弹任何面板（卡片本体就是内容，无更多可看）。
+  if (cfg.kind === "poem") {
+    return `<section class="widget widget--multi ${cls}" data-card="${cfg.id}" data-module="${mod}">
+      <div class="widget__title">
+        <span class="widget__icon">${icon}</span>
+        <span class="widget__name">${esc(cfg.title)}</span>
+        <span class="widget__extra" data-extra></span>
+      </div>
+      <div class="widget__body" data-body>${skeletonHTML()}</div>
+      ${removeBtnHTML()}
+      ${resizeHandleHTML()}
+    </section>`;
+  }
   return `<section class="widget widget--multi ${cls}" data-card="${cfg.id}" data-module="${mod}">
     <div class="widget__title">
+      ${removeBtnHTML()}
       <span class="widget__icon">${icon}</span>
       <span class="widget__name">${esc(cfg.title)}</span>
       <span class="widget__extra" data-extra></span>
@@ -1152,7 +1221,7 @@ function muyuHit() {
 // 文件缺失 / 没签到过 / 浏览器 dev 态（invoke 返回 undefined）一律降级成「—」，
 // 绝不抛异常 —— 这张卡不能因为读不到文件就把整个网格拖垮。
 const CREDITS_TTL = 60 * 1000;
-const creditsCache = { at: 0, wb: null, trae: null };
+const creditsCache = { at: 0, wb: null, trae: null, qoder: null };
 let creditsLoading = false;
 
 // 实时查询用的 checkin 实例（与签到卡各建一个，互不干扰）。
@@ -1179,10 +1248,36 @@ function fmtCredit(n) {
 }
 
 // 解析单个结果文件。kind 决定「哪个字段是余额」以及 Trae 只认 CN 账号。
+// ⛔ Qoder 结构跟另两家完全不同：单对象（无 results 数组）、时间用 date（仅日期）、
+//    成功判定用 verdict==="claimed"。余额字段 balance（累计 credits，签到脚本查
+//    /sash/api/v2/me/usage 写的）优先；旧文件没有 balance 时回落 amount（本次所得）。
 function parseCreditFile(text, kind) {
   if (typeof text !== "string" || !text.trim()) return null;
   let j;
   try { j = JSON.parse(text); } catch (e) { return null; }
+  // Qoder：单对象 {verdict, detail, date, amount[, balance, quota_total, quota_used]}
+  if (kind === "qoder") {
+    if (!j || typeof j !== "object") return null;
+    const bal = Number(j.balance);
+    const amt = Number(j.amount);
+    // 余额：新脚本写的 balance（累计 credits）优先，没有才用 amount（本次所得）兜底
+    const balance = Number.isFinite(bal) ? bal : (Number.isFinite(amt) ? amt : null);
+    // 本次所得：只有 amount>0 才算「新领到」，幂等已领（amount=0）不算 earned
+    const earned = Number.isFinite(amt) && amt > 0 ? amt : null;
+    // date 形如 "2026-11-18"，按当天 00:00 解析成时间戳做跨天判定。
+    // ⛔ verdict 有两种成功态：claimed（本轮新领）和 done（本窗口已领过/幂等），都算今日已签。
+    const t = j.date ? Date.parse(j.date) : NaN;
+    const time = Number.isFinite(t) ? t : 0;
+    const v = String(j.verdict);
+    const signedToday = (v === "claimed" || v === "done") && !!time && ymd(new Date(time)) === ymd();
+    return {
+      balance,
+      earned,
+      signedToday,
+      time,
+      detail: String(j.detail || ""),
+    };
+  }
   const all = Array.isArray(j?.results) ? j.results : [];
   const list = kind === "trae"
     // Trae 结果文件里可能混着国际版账号，只取 Trae CN（与 ai.js 的 isTraeCnAccount 同口径）
@@ -1281,15 +1376,19 @@ async function loadCredits(force = false) {
   renderCreditsCard();
   try {
     const dir = creditsDir();
-    const [wbRes, traeRes] = await Promise.allSettled([
+    const [wbRes, traeRes, qoderRes] = await Promise.allSettled([
       invoke("read_text_file", { path: dir + "\\last_result.json" }),
       invoke("read_text_file", { path: dir + "\\trae_last_result.json" }),
+      invoke("read_text_file", { path: dir + "\\qoder_last_result.json" }),
     ]);
     const wbFile = wbRes.status === "fulfilled" ? parseCreditFile(wbRes.value, "workbuddy") : null;
     const traeFile = traeRes.status === "fulfilled" ? parseCreditFile(traeRes.value, "trae") : null;
+    const qoderFile = qoderRes.status === "fulfilled" ? parseCreditFile(qoderRes.value, "qoder") : null;
     // 面板实时结果 vs 磁盘快照：谁新用谁。两边都没有就留 null（卡片走空状态）
     creditsCache.wb = newer(creditsFromState("workbuddy"), wbFile);
     creditsCache.trae = newer(creditsFromState("trae"), traeFile);
+    // Qoder 只有外部脚本写的快照（无实时接口），直接用文件结果
+    creditsCache.qoder = qoderFile;
 
     // 用户主动点刷新 → 再发一次实时查询（只读接口，不签到）。
     // ⛔ 这一步是关键：只重读文件的话，文件是外部脚本写的，不跑脚本就永远是旧快照。
@@ -1316,6 +1415,7 @@ async function loadCredits(force = false) {
   } catch (e) {
     creditsCache.wb = null;
     creditsCache.trae = null;
+    creditsCache.qoder = null;
   } finally {
     creditsCache.at = Date.now();
     creditsLoading = false;
@@ -1400,13 +1500,14 @@ function renderCreditsCard() {
       });
     }
   }
-  if (!c.wb && !c.trae) {
+  if (!c.wb && !c.trae && !c.qoder) {
     body.innerHTML = emptyHTML("还没有签到记录，点「展开」去签到");
     return;
   }
   body.innerHTML = `<div class="cr-grid">
     ${creditsCol("WorkBuddy", c.wb)}
     ${creditsCol("Trae", c.trae)}
+    ${creditsCol("Qoder", c.qoder)}
   </div>`;
 }
 
@@ -1571,6 +1672,7 @@ function renderAllCards() {
   renderCreditsCard();
   renderIdeasCard();
   renderEmsCard();
+  renderPoemCard(cardEl("poem"));
   renderBadges();
 }
 
@@ -2215,6 +2317,100 @@ function bindTaskbarFund() {
   return refresh;
 }
 
+// -------------------- 卡片增删（编辑态） --------------------
+// 设计：增删都收在编辑态里，跟拖动/缩放一致，非编辑态保持干净只读。
+//   移除：卡片左下角 ✕（removeBtnHTML）→ removeCard()，记进 state.settings.cardHidden，不删数据。
+//   添加：编辑态横幅「卡片库」→ 弹面板列出未摆上的卡 → addCard() 加回网格第一个空位。
+// 移除的卡随时可从卡片库加回，所以「移除」无损；全部移除后网格留白（不做空态引导，YG 指定）。
+
+// 所有可能的卡片（不管摆没摆上）：CARDS 设计卡 + 未被覆盖的 MODULES 补卡。
+// 卡片库面板用它列出可添加项；hidden 的标「已移除」，未 hidden 但因补卡逻辑不在网格的也能加。
+function allPossibleCards() {
+  const hidden = new Set(state.settings?.cardHidden || []);
+  const list = [];
+  const seen = new Set();
+  for (const c of CARDS) {
+    if (seen.has(c.id)) continue;
+    seen.add(c.id);
+    list.push({ id: c.id, module: c.module, title: c.title, icon: c.icon, hidden: hidden.has(c.id) });
+  }
+  const covered = new Set(CARDS.map((c) => c.module));
+  for (const m of MODULES) {
+    if (seen.has(m.id) || covered.has(m.id) || TASKBAR_ONLY.has(m.id)) continue;
+    seen.add(m.id);
+    list.push({ id: m.id, module: m.id, title: m.title, icon: m.icon, hidden: hidden.has(m.id) });
+  }
+  return list;
+}
+
+// 重建整个网格：清空 → 铺卡壳 → 应用尺寸/顺序/坐标 → 渲染各卡内容。
+// 增删卡后调用（增删会改变卡片集合，直接操作单个 DOM 容易漏尺寸/坐标/内容）。
+function rebuildGrid() {
+  const grid = gridEl();
+  if (!grid) return;
+  grid.innerHTML = "";
+  grid.insertAdjacentHTML("beforeend", cardList().map(cardShell).join(""));
+  applyCardSizes(grid);
+  applyCardOrder(grid);
+  applyGridPositions(grid);
+  renderAllCards();
+  renderBadges();
+}
+
+// 移除一张卡：记进 cardHidden → 落盘 → 重建网格（那张卡消失，其余补位）。
+function removeCard(id) {
+  if (!id) return;
+  if (!state.settings) state.settings = {};
+  if (!Array.isArray(state.settings.cardHidden)) state.settings.cardHidden = [];
+  if (!state.settings.cardHidden.includes(id)) state.settings.cardHidden.push(id);
+  saveStateNow(); // ⛔ 布局改动立即落盘：防抖 300ms 内关应用会丢
+  rebuildGrid();
+  refreshCardLibrary();
+  toastQuiet(`已移除「${moduleTitle(id)}」，可在卡片库加回`);
+}
+
+// 加回一张卡：从 cardHidden 移除 → 落盘 → 重建网格 → 卡片库刷新。
+export function addCard(id) {
+  if (!id) return;
+  const hidden = state.settings?.cardHidden;
+  if (Array.isArray(hidden)) {
+    const i = hidden.indexOf(id);
+    if (i >= 0) hidden.splice(i, 1);
+  }
+  saveStateNow(); // ⛔ 布局改动立即落盘：防抖 300ms 内关应用会丢
+  rebuildGrid();
+  refreshCardLibrary();
+  toastQuiet(`已添加「${moduleTitle(id)}」`);
+}
+
+// 卡片库面板：列出所有可能的卡，标注「已添加 / 已移除」，点一下切换。
+function refreshCardLibrary() {
+  const panel = document.getElementById("card-library");
+  if (!panel || panel.hidden) return;
+  const grid = gridEl();
+  const shown = new Set(grid ? Array.from(grid.querySelectorAll(".widget")).map((c) => c.dataset.card) : []);
+  const cards = allPossibleCards();
+  panel.innerHTML = `<div class="card-library__head">卡片库</div>` + cards.map((c) => {
+    const isShown = shown.has(c.id);
+    return `<button class="card-library__item${isShown ? " is-shown" : ""}" data-library-card="${c.id}" ${isShown ? "disabled" : ""}>
+      <span class="card-library__icon">${c.icon || moduleIcon(c.module)}</span>
+      <span class="card-library__name">${esc(c.title)}</span>
+      <span class="card-library__state">${isShown ? "已添加" : "＋ 添加"}</span>
+    </button>`;
+  }).join("");
+}
+
+// 开关卡片库面板
+export function toggleCardLibrary(force) {
+  const panel = document.getElementById("card-library");
+  const btn = document.getElementById("tb-card-library");
+  if (!panel || !btn) return;
+  const open = typeof force === "boolean" ? force : panel.hidden;
+  panel.hidden = !open;
+  btn.setAttribute("aria-expanded", open ? "true" : "false");
+  if (open) refreshCardLibrary();
+}
+
 // -------------------- 编辑模式 --------------------
 // 设计稿的「编辑模式」：卡片可拖动换位。这里落地为最稳的一档——
 // 进入编辑态时卡片可拖到别的位置交换顺序，顺序存 state.settings.cardOrder。
@@ -2239,6 +2435,8 @@ export function toggleEditMode() {
   if (!editMode) {
     saveState();
     toastQuiet("布局已保存");
+    // 退出编辑态顺手关掉卡片库面板（它只在编辑态有意义）
+    toggleCardLibrary(false);
   }
 }
 
@@ -2353,6 +2551,7 @@ function initCardDrag(grid) {
   grid.addEventListener("pointerdown", (e) => {
     if (!editMode || e.button !== 0) return;
     if (e.target.closest("[data-resize]")) return; // 把手是改尺寸，不抢
+    if (e.target.closest("[data-card-remove]")) return; // 移除按钮要发 click，别当拖拽起点（否则 preventDefault+capture 吞掉 click，卡删不掉）
     const card = e.target.closest(".widget");
     if (!card) return;
     e.preventDefault();
@@ -2409,8 +2608,20 @@ function initCardDrag(grid) {
 
 function persistCardOrder(grid) {
   if (!state.settings) state.settings = {};
-  state.settings.cardOrder = Array.from(grid.querySelectorAll(".widget")).map((c) => c.dataset.card);
-  saveState();
+  const cards = Array.from(grid.querySelectorAll(".widget"));
+  state.settings.cardOrder = cards.map((c) => c.dataset.card);
+  // ⛔ 拖动换位改的是卡的**绝对坐标**（gridColumn/gridRow），不是 DOM 顺序。
+  //    只存 cardOrder、不存坐标 → 重启 applyGridPositions 按 DOM 重新装箱 → 位置复原（踩过）。
+  //    这里把每张卡的锚点 col/row 一并存进 cardPos，重启 applyGridPositions 优先按它钉位置。
+  const pos = {};
+  for (const c of cards) {
+    pos[c.dataset.card] = {
+      col: parseInt(c.style.gridColumn, 10) || 1,
+      row: parseInt(c.style.gridRow, 10) || 1,
+    };
+  }
+  state.settings.cardPos = pos;
+  saveStateNow(); // ⛔ 布局改动立即落盘：防抖 300ms 内关应用会丢
 }
 
 // -------------------- 编辑模式：拖把手改尺寸 --------------------
@@ -2533,6 +2744,7 @@ function repaintCard(id) {
     case "credits": renderCreditsCard(); break;
     case "ideabox": renderIdeasCard(); break;
     case "ems": renderEmsCard(); break;
+    case "poem": renderPoemCard(cardEl("poem")); break;
     default: break;
   }
 }
@@ -2561,6 +2773,16 @@ export function initWorkspace() {
   const grid = gridEl();
   if (grid) {
     grid.insertAdjacentHTML("beforeend", cardList().map(cardShell).join(""));
+    // 编辑态：点卡片左下角 ✕（data-card-remove）移除这张卡。放最前，避免冒泡触发其它行为。
+    grid.addEventListener("click", (e) => {
+      if (!editMode) return;
+      const rm = e.target.closest("[data-card-remove]");
+      if (rm) {
+        e.stopPropagation();
+        const card = rm.closest(".widget");
+        if (card) removeCard(card.dataset.card);
+      }
+    });
     // 卡片点击：**只有右上角「展开」按钮（data-open）才打开浮层**，点卡片本体不弹。
     // 卡片内的按钮/交互自己 stopPropagation。木鱼（敲）、签到（刷新）的整卡点击是功能行为，保留。
     grid.addEventListener("click", (e) => {

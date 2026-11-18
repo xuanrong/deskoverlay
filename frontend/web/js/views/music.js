@@ -3,7 +3,7 @@
 import { Bus, invoke } from "../bus.js";
 import { state, saveState } from "../state.js";
 import { ICON_MUSIC, ICON_SHUFFLE, ICON_REPEAT, ICON_REPEAT_ONE, ICON_HEART, ICON_PREV, ICON_NEXT, ICON_PLAY, ICON_PAUSE, ICON_LIST, ICON_MORE, ICON_VOLUME, ICON_VOLUME_MUTE, ICON_LOCATE, ICON_CLOSE, ICON_BACK, ICON_ALBUM, ICON_LYRICS, ICON_DOWNLOAD, ICON_TRASH, ICON_CLOUD, ICON_UPLOAD, ICON_REFRESH } from "../icons.js";
-import { normalizeSongs } from "./common.js";
+import { normalizeSongs, normalizeArtist } from "./common.js";
 import { toast } from "../toast.js";
 import { createSelect } from "../selectbox.js";
 import { esc, uid } from "../utils.js";
@@ -367,6 +367,10 @@ function savePlayback() {
     volume: state.playback.volume ?? musicAudio.volume ?? 0.8,
     muted: !!state.playback.muted,
     preMuteVolume: state.playback.preMuteVolume ?? 0.8,
+    // 播放模式三态也落盘：重启后恢复「顺序/单曲循环/随机」而不是回到默认顺序。
+    // 用户在播放器里切了模式却因重启丢失，是「模式没记忆」类投诉；这两个布尔互斥
+    // （cyclePlayMode 保证不同时为真），一起存、恢复时按互斥读回。
+    playMode: singleLoop ? "single" : (randomMode ? "random" : "sequential"),
   };
   saveState();
 }
@@ -1659,6 +1663,8 @@ export function musicProbe() {
     readyState: musicAudio.readyState,
     title: currentSong?.title || "",
     headphoneBaseline: lastHadHeadphone,
+    // 播放模式只读暴露：自动化脚本验证「重启恢复模式」需要读到模块私有状态。
+    playMode: singleLoop ? "single" : (randomMode ? "random" : "sequential"),
   };
 }
 
@@ -1693,11 +1699,15 @@ export function musicControl(action) {
 
 // 工作台音乐卡要显示「当前唱到哪句」，读的是和音乐页同一份 currentLyric。
 // 返回 { idx, line, prev, next, total }：idx = -1 表示还没唱到第一句。
+// 歌词提前量（秒）：查找当前行时把时间往前拨一点，让歌词稍微早于唱到就显示。
+// 背景：后台播放切回前台时，音频时钟可能短暂滞后/停摆，歌词会慢半拍；提前量补上这个差。
+const LYRIC_LEAD_SEC = 0.35;
 export function musicLyricAt(t) {
   if (!currentLyric.length) return { idx: -1, line: "", prev: "", next: "", total: 0 };
+  const tt = t + LYRIC_LEAD_SEC; // 提前量：让歌词早一点点
   let idx = -1;
   for (let i = 0; i < currentLyric.length; i++) {
-    if (t >= currentLyric[i].time) idx = i;
+    if (tt >= currentLyric[i].time) idx = i;
     else break;
   }
   return {
@@ -1721,6 +1731,11 @@ export function initPlayback() {
     type: it.type || "在线",
   }));
   const idx = (typeof pb.index === "number" && pb.index >= 0 && pb.index < playQueue.length) ? pb.index : 0;
+  // 恢复播放模式：playMode 是 savePlayback 写盘的「顺序/单曲循环/随机」三态。
+  // 兼容旧数据（无 playMode 字段）→ 回退顺序播放，与历史行为一致。
+  // 两个布尔互斥：cyclePlayMode 保证不同时为真，这里按互斥读回，不会出现双开。
+  randomMode = pb.playMode === "random";
+  singleLoop = pb.playMode === "single";
   loadQueueItem(idx, true).then(() => {
     if (pb.currentTime) {
       const seek = () => { try { musicAudio.currentTime = pb.currentTime; } catch (e) {} };
@@ -2390,12 +2405,26 @@ function openOnlineMusic() {
     if (res && res.data && Array.isArray(res.data.list)) return res.data.list;
     return [];
   };
+
   const normalizeMusicList = (res) => {
-    if (Array.isArray(res)) return res;
-    if (res && Array.isArray(res.musicList)) return res.musicList;
-    if (res && Array.isArray(res.data)) return res.data;
-    if (res && res.data && Array.isArray(res.data.musicList)) return res.data.musicList;
-    return [];
+    let list;
+    if (Array.isArray(res)) list = res;
+    else if (res && Array.isArray(res.musicList)) list = res.musicList;
+    else if (res && Array.isArray(res.data)) list = res.data;
+    else if (res && res.data && Array.isArray(res.data.musicList)) list = res.data.musicList;
+    else list = [];
+    // ⛔ 各音源插件的歌手字段格式不统一：有的给扁平 artist 字符串（缺省渲染就靠它），
+    //    有的给 artists 数组（咪咕等：artists:[{name:...}]）、singer、artistName。
+    //    renderSongList 只读扁平 song.artist → 不归一化的源（咪咕）歌手名显示成「未知歌手」。
+    //    这里统一归一化出 artist 字符串，所有音源歌单/榜单/搜索明细都受益。song 对象原样保留
+    //    （取流/歌词/下载还靠它），只补/覆盖 artist 字段。
+    return list.map((s) => {
+      if (s && typeof s === "object" && !s.artist) {
+        const a = normalizeArtist(s);
+        if (a) return { ...s, artist: a };
+      }
+      return s;
+    });
   };
 
   // 上下文栏（标题 + 可选返回：back 为空时不渲染返回按钮，用于模式根列表）

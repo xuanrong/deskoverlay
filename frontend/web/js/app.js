@@ -15,7 +15,7 @@ import { initEyeCareCapsule } from "./eyeCareCapsule.js";
 import { Theme } from "./theme.js";
 import { toast } from "./toast.js";
 import { pillFor, lunarText, lunarShort, getDayEvents, holidayOf, workdayOf, setLegalOverride, fetchLegalYear } from "./festivals.js";
-import { initWorkspace, openModule, setQuietToast, toggleEditMode } from "./workspace.js";
+import { initWorkspace, openModule, setQuietToast, toggleEditMode, toggleCardLibrary, addCard } from "./workspace.js";
 import { esc, fmtMD } from "./utils.js";
 
 // -------------------- 启动 Provider --------------------
@@ -288,6 +288,23 @@ document.getElementById("help-close").addEventListener("click", () => {
 // 底部任务栏：设置 / 编辑模式 / 退出
 document.getElementById("tb-settings")?.addEventListener("click", () => openModule("settings"));
 document.getElementById("tb-edit")?.addEventListener("click", () => toggleEditMode());
+// 卡片库：编辑态横幅里的「卡片库」按钮开关面板；面板内点卡片加回网格（委托 workspace 处理）
+document.getElementById("tb-card-library")?.addEventListener("click", (e) => {
+  e.stopPropagation();
+  toggleCardLibrary();
+});
+// 编辑横幅左侧「刷新」：重新加载桌面（= 之前右键菜单的浏览器刷新）。整页 reload，
+// 启动时按持久化的 cardOrder/cardSize/cardPos 重铺，布局不丢。
+document.getElementById("tb-edit-refresh")?.addEventListener("click", (e) => {
+  e.stopPropagation();
+  location.reload();
+});
+document.getElementById("card-library")?.addEventListener("click", (e) => {
+  const item = e.target.closest("[data-library-card]");
+  if (!item || item.disabled) return;
+  e.stopPropagation();
+  addCard(item.dataset.libraryCard);
+});
 document.getElementById("tb-quit")?.addEventListener("click", () => {
   if (window.__TAURI__ || window.__TAURI_INTERNALS__) {
     invoke("quit_app").catch(() => { try { window.close(); } catch (_) {} });
@@ -297,6 +314,13 @@ document.getElementById("tb-quit")?.addEventListener("click", () => {
 });
 document.getElementById("tb-fund")?.addEventListener("click", () => openModule("fund"));
 // CPU / 内存 / 磁盘只是任务栏上的读数，不可点 —— 系统健康浮层已整体移除。
+
+// -------------------- 禁用右键菜单 --------------------
+// 桌面小部件不该弹浏览器右键（刷新/检查/另存为那一串）。全局拦掉。
+// ⛔ 用 capture 阶段拦，避免某个子元素 stopPropagation 把事件漏到浏览器默认菜单。
+document.addEventListener("contextmenu", (e) => {
+  e.preventDefault();
+}, true);
 
 // -------------------- 滚动条自动隐藏（滚动时显示，停止后隐藏） --------------------
 let scrollHideTimer = null;

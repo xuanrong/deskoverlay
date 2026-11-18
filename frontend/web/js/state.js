@@ -290,6 +290,10 @@ export async function loadState() {
     }
     state.settings.cardSize[id] = { span, row };
   }
+  // 隐藏（移除）的卡片：数组存 card id。编辑态移除卡片时写入，加回时删除。
+  // ⛔ 只存字符串、去重；非法项丢弃。这些卡不从网格渲染，但可从编辑态「卡片库」加回。
+  if (!Array.isArray(state.settings.cardHidden)) state.settings.cardHidden = [];
+  state.settings.cardHidden = [...new Set(state.settings.cardHidden.filter((id) => typeof id === "string" && id))];
   // 隐私锁定：结构校验
   if (!state.lock || typeof state.lock !== "object" || Array.isArray(state.lock)) state.lock = {};
   if (typeof state.lock.enabled !== "boolean") state.lock.enabled = false;
@@ -511,4 +515,11 @@ export function saveState() {
   saveTimer = setTimeout(() => {
     Store.save(state).catch((e) => console.warn("[state] 保存失败", e));
   }, 300);
+}
+
+/// 立即落盘，绕过防抖。用于低频但**不能丢**的关键操作（卡片换位/改大小/移除/加回）——
+///   这些若走 300ms 防抖，用户改完立刻关应用（<300ms）会丢改动（踩过：布局重启回默认）。
+export function saveStateNow() {
+  clearTimeout(saveTimer);
+  return Store.save(state).catch((e) => console.warn("[state] 保存失败", e));
 }

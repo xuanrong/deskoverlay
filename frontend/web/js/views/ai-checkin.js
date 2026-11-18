@@ -403,8 +403,14 @@ async function wbStatusOnly(ports) {
     const accounts = (await wbLoadAccounts(collected.files || [], crypto)).filter((a) => !a.error);
     const out = [];
     for (const a of accounts) {
+      // 国际版 AI 账号（*-ai）无签到功能，查询必 401 还拖慢面板刷新 —— 跳过
+      if (a.name.endsWith("-ai")) continue;
       try {
-        const status = await wbApi(WB_BASE + "/checkin-activity-status", a.session, httpPost, wait);
+        // 状态与余额是两个独立只读接口，**并行**取（串行等于白等一个往返）
+        const [status, bal] = await Promise.all([
+          wbApi(WB_BASE + "/checkin-activity-status", a.session, httpPost, wait),
+          wbBalance(a.session, httpPost, wait),
+        ]);
         const data = status.data || {};
         if (status.code !== 0 && status.code !== undefined && !("today_checked_in" in data)) {
           continue; // 接口没给出状态字段（异常响应）：当作查不到，别猜
@@ -412,7 +418,6 @@ async function wbStatusOnly(ports) {
         let signed = false, detail = "待签到";
         if (data.today_checked_in) { signed = true; detail = "今日已签到"; }
         else if (data.active === false) detail = "签到活动未开启";
-        const bal = await wbBalance(a.session, httpPost, wait);
         out.push({ name: a.name, signedToday: signed, credits: bal, detail, at: now() });
       } catch (e) { /* 单账号失败：跳过 —— 宁可保留旧数据，也不要谎报「未签」 */ }
     }
